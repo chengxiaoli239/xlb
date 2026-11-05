@@ -3,9 +3,10 @@
   "private": true,
   "packageManager": "pnpm@11.25.0",
   "scripts": {
-    "dev": "concurrently -k -n api,web -c green,cyan \"pnpm --filter @xlb/api dev\" \"pnpm --filter @xlb/web dev\"",
-    "build": "pnpm --filter @xlb/api build && pnpm --filter @xlb/web build",
-    "test": "pnpm --filter @xlb/api test"
+    "dev": "concurrently -k -n php,web -c green,cyan \"cd apps/php-api && php artisan serve --host=127.0.0.1 --port=4175\" \"pnpm --filter @xlb/web dev\"",
+    "build": "pnpm --filter @xlb/web build",
+    "test": "cd apps/php-api && php artisan test --compact",
+    "test:legacy": "pnpm --filter @xlb/api test"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

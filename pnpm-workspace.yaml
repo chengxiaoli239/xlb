@@ -1,5 +1,6 @@
 packages:
-  - apps/*
+  - apps/api
+  - apps/web
 allowBuilds:
   better-sqlite3: true
   esbuild: true

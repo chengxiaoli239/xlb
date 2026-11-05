@@ -5,8 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:4174',
-      '/subscribe': 'http://127.0.0.1:4174',
+      '/api': 'http://127.0.0.1:4175',
+      '/subscribe': 'http://127.0.0.1:4175',
     },
   },
 });

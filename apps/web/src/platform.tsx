@@ -9,6 +9,7 @@ import {
 
 type User = { id: string; email: string; name: string; role: 'admin' | 'member' };
 type Plan = { id: string; name: string; period_label: string; duration_days: number; price_cents: number; traffic_gb: number; max_devices: number };
+type ManagedPlan = Plan & { family_id: string; version: number; active: number };
 type Overview = {
   user: User;
   entitlement: null | { status: string; ends_at: string; data_used_gb: number; plan_name: string; traffic_gb: number; max_devices: number };
@@ -26,7 +27,12 @@ type TicketDetail = TicketSummary & { events: TicketEvent[]; resolved_at: string
 type PageMeta = { total: number; page: number; per_page: number; total_pages: number };
 
 const apiEnvelope = async <T,>(path: string, init?: RequestInit): Promise<{ data: T; meta?: PageMeta }> => {
-  const response = await fetch(path, { ...init, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...init?.headers } });
+  const unsafe = init?.method && !['GET', 'HEAD'].includes(init.method.toUpperCase());
+  const csrf = unsafe ? await fetch('/api/v1/auth/csrf', { credentials: 'same-origin' }).then(response => {
+    if (!response.ok) throw new Error('无法建立安全会话');
+    return response.json() as Promise<{ data: { token: string } }>;
+  }) : null;
+  const response = await fetch(path, { ...init, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-TOKEN': csrf.data.token } : {}), ...init?.headers } });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.error?.message ?? '请求失败');
@@ -47,6 +53,7 @@ const nav = [
   { id: 'support', label: '帮助工单', icon: LifeBuoy },
 ];
 const adminNav = [
+  { id: 'admin-plans', label: '套餐管理', icon: CreditCard },
   { id: 'users', label: '用户与会员', icon: Users },
   { id: 'nodes', label: '节点运维', icon: Server },
   { id: 'commissions', label: '代理结算', icon: ArrowUpRight },
@@ -115,6 +122,7 @@ export default function App() {
         {view === 'orders' && <OrdersPage refresh={nonce} notify={notify} />}
         {view === 'support' && <SupportPage role={user.role} refresh={nonce} notify={notify} />}
         {view === 'users' && user.role === 'admin' && <UsersPage refresh={nonce} notify={notify} />}
+        {view === 'admin-plans' && user.role === 'admin' && <AdminPlansPage notify={notify} />}
         {view === 'nodes' && user.role === 'admin' && <NodesPage refresh={nonce} notify={notify} />}
         {view === 'commissions' && user.role === 'admin' && <CommissionsPage refresh={nonce} notify={notify} />}
       </main>
@@ -300,6 +308,55 @@ function PlansPage({ refresh, notify }: { refresh: number; notify: (value: strin
   return <div className="page-stack"><PageHeading eyebrow="套餐中心" title="套餐权益" subtitle="Web、App 与第三方客户端将共享同一权益数据源。" /><div className="notice notice-neutral"><CreditCard size={16} /><span>本地样例套餐仅用于界面和 API 验证；此环境没有接入支付，不会产生真实订单。</span></div>
     <section className="panel"><SectionTitle title="会员方案" detail={plans ? plans.length + ' 种方案' : '载入中'} /><div className="plan-grid">{plans?.map(plan => <div className="plan-row" key={plan.id}><div className="plan-period"><span className="plan-icon"><BadgeCheck size={17} /></span><span><b>{plan.name}</b><small>{plan.period_label}有效</small></span></div><div><b>{money(plan.price_cents)}</b><small>样例标价</small></div><div><b>{plan.traffic_gb} GB</b><small>套餐流量</small></div><div><b>{plan.max_devices} 台</b><small>同时在线</small></div><StatusPill status="本地样例" tone="gray" /></div>)}</div></section>
     <section className="panel"><SectionTitle title="权益一致性" detail="唯一事实源设计" /><div className="service-strip"><ServiceItem label="官网展示" status="共用套餐 API" icon={Globe2} /><ServiceItem label="自有 App" status="共用账户权益" icon={Smartphone} /><ServiceItem label="Clash 订阅" status="服务端校验" icon={Link2} /><ServiceItem label="运营后台" status="审计可查" icon={ShieldCheck} /></div></section>
+  </div>;
+}
+
+function AdminPlansPage({ notify }: { notify: (value: string) => void }) {
+  const blank = { name: '', period_label: '', duration_days: '30', price_yuan: '29.80', traffic_gb: '100', max_devices: '2' };
+  const [rows, setRows] = useState<ManagedPlan[] | null>(null);
+  const [family, setFamily] = useState<string | null>(null);
+  const [form, setForm] = useState(blank);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => api<ManagedPlan[]>('/api/v1/admin/plans').then(setRows).catch(error => notify((error as Error).message)), [notify]);
+  useEffect(() => { void load(); }, [load]);
+  const edit = (row: ManagedPlan) => {
+    setFamily(row.family_id);
+    setForm({ name: row.name, period_label: row.period_label, duration_days: String(row.duration_days), price_yuan: (row.price_cents / 100).toFixed(2), traffic_gb: String(row.traffic_gb), max_devices: String(row.max_devices) });
+  };
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const payload = { name: form.name.trim(), period_label: form.period_label.trim(), duration_days: Number(form.duration_days), price_cents: Math.round(Number(form.price_yuan) * 100), traffic_gb: Number(form.traffic_gb), max_devices: Number(form.max_devices) };
+      await api('/api/v1/admin/plans' + (family ? '/' + encodeURIComponent(family) : ''), { method: family ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      notify(family ? '新版本已发布，历史权益保持原值' : '套餐已创建');
+      setFamily(null);
+      setForm(blank);
+      await load();
+    } catch (error) { notify((error as Error).message); } finally { setBusy(false); }
+  };
+  const changeStatus = async (row: ManagedPlan) => {
+    try {
+      await api('/api/v1/admin/plans/' + encodeURIComponent(row.family_id) + '/status', { method: 'PATCH', body: JSON.stringify({ active: !row.active }) });
+      notify(row.active ? '套餐已下架' : '套餐已上架');
+      await load();
+    } catch (error) { notify((error as Error).message); }
+  };
+  return <div className="page-stack"><PageHeading eyebrow="运营管理" title="套餐管理" subtitle="设置价格、期限、流量和设备数；修改套餐会创建新版本，已有订单和会员权益仍引用旧版本。" />
+    <section className="panel"><SectionTitle title={family ? '编辑套餐 · 发布新版本' : '创建套餐'} detail="仅影响本地演示目录" />
+      <form className="plan-editor" onSubmit={save}>
+        <label>套餐名称<input required maxLength={60} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
+        <label>周期说明<input required maxLength={30} value={form.period_label} onChange={event => setForm({ ...form, period_label: event.target.value })} /></label>
+        <label>有效天数<input required type="number" min="1" max="3650" step="1" value={form.duration_days} onChange={event => setForm({ ...form, duration_days: event.target.value })} /></label>
+        <label>价格（元）<input required type="number" min="0" max="999999" step="0.01" value={form.price_yuan} onChange={event => setForm({ ...form, price_yuan: event.target.value })} /></label>
+        <label>流量（GB）<input required type="number" min="1" max="100000" step="0.1" value={form.traffic_gb} onChange={event => setForm({ ...form, traffic_gb: event.target.value })} /></label>
+        <label>同时在线设备<input required type="number" min="1" max="100" step="1" value={form.max_devices} onChange={event => setForm({ ...form, max_devices: event.target.value })} /></label>
+        <div className="plan-editor-actions">{family && <button type="button" className="secondary-button" onClick={() => { setFamily(null); setForm(blank); }}>取消编辑</button>}<button className="primary-button" disabled={busy}>{family ? '发布新版本' : '创建套餐'}</button></div>
+      </form>
+    </section>
+    <section className="panel"><SectionTitle title="套餐列表" detail={rows ? rows.length + ' 种套餐' : '读取中'} />
+      <div className="table-wrap"><table><thead><tr><th>套餐</th><th>版本</th><th>价格</th><th>期限</th><th>流量</th><th>设备数</th><th>状态</th><th>操作</th></tr></thead><tbody>{rows?.map(row => <tr key={row.family_id}><td>{row.name}</td><td>v{row.version}</td><td>{money(row.price_cents)}</td><td>{row.duration_days} 天</td><td>{row.traffic_gb} GB</td><td>{row.max_devices} 台</td><td><StatusPill status={row.active ? '已上架' : '已下架'} tone={row.active ? 'green' : 'gray'} /></td><td><div className="row-actions"><button className="text-button" onClick={() => edit(row)}>编辑</button><button className="text-button" onClick={() => void changeStatus(row)}>{row.active ? '下架' : '上架'}</button></div></td></tr>)}</tbody></table></div>
+    </section>
   </div>;
 }
 
