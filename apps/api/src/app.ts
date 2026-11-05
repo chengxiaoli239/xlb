@@ -6,6 +6,8 @@ import { z } from 'zod';
 import type { LocalDatabase } from './database.js';
 import { hashPassword } from './database.js';
 import { buildDemoProfile, createSubscriptionToken, hashToken } from './subscriptions.js';
+import { recordAudit } from './audit.js';
+import { createSupportRouter } from './support.js';
 
 interface UserRow {
   id: string; email: string; name: string;
@@ -16,11 +18,6 @@ const cookieName = 'xlb_session';
 const day = 24 * 60 * 60 * 1000;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const publicUser = (user: UserRow) => ({ id: user.id, email: user.email, name: user.name, role: user.role });
-
-function audit(db: LocalDatabase, actor: UserRow, action: string, targetType: string, targetId: string) {
-  db.prepare('INSERT INTO audit_logs VALUES (?, ?, ?, ?, ?, ?)')
-    .run(randomUUID(), actor.id, action, targetType, targetId, new Date().toISOString());
-}
 
 export function createApp(db: LocalDatabase) {
   const app = express();
@@ -97,7 +94,7 @@ export function createApp(db: LocalDatabase) {
     const id = randomUUID(), secret = createSubscriptionToken(), created = new Date().toISOString();
     db.prepare('INSERT INTO subscriptions (id, user_id, name, token_hash, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(id, req.user!.id, 'Clash 订阅', hashToken(secret), 'active', created, entitlement.ends_at);
-    audit(db, req.user!, 'subscription.created', 'subscription', id);
+    recordAudit(db, req.user!.id, 'subscription.created', 'subscription', id);
     res.status(201).json({ data: { id, name: 'Clash 订阅', status: 'active', created_at: created, expires_at: entitlement.ends_at, url: '/subscribe/' + secret } });
   });
   app.post('/api/v1/me/subscriptions/:id/rotate', requireAuth, (req: AuthRequest, res) => {
@@ -109,7 +106,7 @@ export function createApp(db: LocalDatabase) {
       db.prepare('UPDATE subscriptions SET status = ? WHERE id = ?').run('revoked', current.id);
       db.prepare('INSERT INTO subscriptions (id, user_id, name, token_hash, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(nextId, req.user!.id, 'Clash 订阅', hashToken(secret), 'active', created, current.expires_at);
-      audit(db, req.user!, 'subscription.rotated', 'subscription', current.id);
+      recordAudit(db, req.user!.id, 'subscription.rotated', 'subscription', current.id);
     })();
     res.json({ data: { id: nextId, url: '/subscribe/' + secret, status: 'active', created_at: created, expires_at: current.expires_at } });
   });
@@ -118,7 +115,7 @@ export function createApp(db: LocalDatabase) {
     const result = db.prepare('UPDATE subscriptions SET status = ? WHERE id = ? AND user_id = ? AND status = ?')
       .run('revoked', subscriptionId, req.user!.id, 'active');
     if (!result.changes) return res.status(404).json({ error: { code: 'not_found', message: '订阅不存在或已撤销' } });
-    audit(db, req.user!, 'subscription.revoked', 'subscription', subscriptionId);
+    recordAudit(db, req.user!.id, 'subscription.revoked', 'subscription', subscriptionId);
     res.status(204).end();
   });
   app.get('/api/v1/me/orders', requireAuth, (req: AuthRequest, res) => {
@@ -148,13 +145,14 @@ export function createApp(db: LocalDatabase) {
     const result = db.prepare('UPDATE nodes SET status = ?, updated_at = ? WHERE id = ?')
       .run(parsed.data.status, new Date().toISOString(), nodeId);
     if (!result.changes) return res.status(404).json({ error: { code: 'not_found', message: '节点不存在' } });
-    audit(db, req.user!, 'node.status_changed', 'node', nodeId);
+    recordAudit(db, req.user!.id, 'node.status_changed', 'node', nodeId);
     res.json({ data: { id: nodeId, status: parsed.data.status } });
   });
   app.get('/api/v1/admin/commissions', requireAuth, requireAdmin, (_req, res) => {
     const rows = db.prepare('SELECT c.id, c.partner_name, c.amount_cents, c.status, c.created_at, o.id AS order_id FROM commission_entries c JOIN orders o ON o.id = c.order_id ORDER BY c.created_at DESC').all();
     res.json({ data: rows });
   });
+  app.use('/api/v1', createSupportRouter(db, requireAuth, requireAdmin));
 
   app.get('/subscribe/:token', (req, res) => {
     const record = db.prepare('SELECT id, user_id, status, expires_at FROM subscriptions WHERE token_hash = ?')

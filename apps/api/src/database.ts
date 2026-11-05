@@ -5,8 +5,7 @@ import { scryptSync } from 'node:crypto';
 
 export type LocalDatabase = InstanceType<typeof Database>;
 
-const schema = [
-  'PRAGMA foreign_keys = ON;',
+const baseSchema = [
   "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('admin','member')), status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended')), password_hash TEXT NOT NULL, created_at TEXT NOT NULL);",
   'CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, name TEXT NOT NULL, period_label TEXT NOT NULL, duration_days INTEGER NOT NULL, price_cents INTEGER NOT NULL, traffic_gb REAL NOT NULL, max_devices INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1);',
   "CREATE TABLE IF NOT EXISTS entitlements (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), plan_id TEXT NOT NULL REFERENCES plans(id), status TEXT NOT NULL CHECK (status IN ('active','expired','revoked')), starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, data_used_gb REAL NOT NULL DEFAULT 0);",
@@ -22,6 +21,28 @@ const schema = [
   'CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);',
 ].join('\n');
 
+// Version 2 adds a local support workflow without changing existing demo records.
+const supportSchema = [
+  "CREATE TABLE support_tickets (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), category TEXT NOT NULL CHECK (category IN ('connection','subscription','payment','account','other')), subject TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('open','in_progress','resolved')), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, resolved_at TEXT);",
+  "CREATE TABLE support_ticket_events (id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL REFERENCES support_tickets(id), actor_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('message','status_changed')), body TEXT, from_status TEXT, to_status TEXT, created_at TEXT NOT NULL);",
+  'CREATE INDEX idx_support_tickets_user_updated ON support_tickets(user_id, updated_at DESC);',
+  'CREATE INDEX idx_support_tickets_updated ON support_tickets(updated_at DESC);',
+  'CREATE INDEX idx_support_events_ticket_created ON support_ticket_events(ticket_id, created_at);',
+].join('\n');
+
+function migrateDatabase(db: LocalDatabase): void {
+  const version = db.pragma('user_version', { simple: true }) as number;
+  if (version > 2) throw new Error('Local database schema is newer than this application.');
+  if (version < 1) db.transaction(() => {
+    db.exec(baseSchema);
+    db.pragma('user_version = 1');
+  })();
+  if (version < 2) db.transaction(() => {
+    db.exec(supportSchema);
+    db.pragma('user_version = 2');
+  })();
+}
+
 export function hashPassword(password: string): string {
   return scryptSync(password, 'xlb-local-seed', 64).toString('hex');
 }
@@ -29,8 +50,9 @@ export function hashPassword(password: string): string {
 export function createDatabase(file = './data/xlb-local.sqlite', seed = true): LocalDatabase {
   if (file !== ':memory:') mkdirSync(dirname(resolve(file)), { recursive: true });
   const db = new Database(file);
+  db.pragma('foreign_keys = ON');
   db.pragma('journal_mode = WAL');
-  db.exec(schema);
+  migrateDatabase(db);
   if (seed) seedDatabase(db);
   return db;
 }

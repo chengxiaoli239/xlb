@@ -19,17 +19,22 @@ type Node = { id: string; name: string; region: string; protocol: string; endpoi
 type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
 type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string; last_used_at: string | null; url?: string };
 type Commission = { id: string; partner_name: string; amount_cents: number; status: string; order_id: string; created_at: string };
+type TicketStatus = 'open' | 'in_progress' | 'resolved';
+type TicketSummary = { id: string; category: string; subject: string; status: TicketStatus; created_at: string; updated_at: string; user_name: string };
+type TicketEvent = { id: string; kind: 'message' | 'status_changed'; body: string | null; from_status: TicketStatus | null; to_status: TicketStatus | null; created_at: string; actor_name: string; actor_role: User['role'] };
+type TicketDetail = TicketSummary & { events: TicketEvent[]; resolved_at: string | null };
+type PageMeta = { total: number; page: number; per_page: number; total_pages: number };
 
-const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+const apiEnvelope = async <T,>(path: string, init?: RequestInit): Promise<{ data: T; meta?: PageMeta }> => {
   const response = await fetch(path, { ...init, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...init?.headers } });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.error?.message ?? '请求失败');
   }
-  if (response.status === 204) return undefined as T;
-  const body = await response.json();
-  return body.data as T;
+  if (response.status === 204) return { data: undefined as T };
+  return response.json();
 };
+const api = async <T,>(path: string, init?: RequestInit): Promise<T> => (await apiEnvelope<T>(path, init)).data;
 const money = (cents: number) => '¥' + (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 const shortDate = (value?: string | null) => value ? new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(new Date(value)) : '尚未使用';
 const percent = (used: number, total: number) => total > 0 ? Math.min(100, Math.round(used / total * 100)) : 0;
@@ -39,6 +44,7 @@ const nav = [
   { id: 'subscriptions', label: '订阅与设备', icon: Link2 },
   { id: 'plans', label: '套餐权益', icon: CreditCard },
   { id: 'orders', label: '订单记录', icon: ArrowLeftRight },
+  { id: 'support', label: '帮助工单', icon: LifeBuoy },
 ];
 const adminNav = [
   { id: 'users', label: '用户与会员', icon: Users },
@@ -107,6 +113,7 @@ export default function App() {
         {view === 'subscriptions' && <SubscriptionsPage refresh={nonce} notify={notify} />}
         {view === 'plans' && <PlansPage refresh={nonce} notify={notify} />}
         {view === 'orders' && <OrdersPage refresh={nonce} notify={notify} />}
+        {view === 'support' && <SupportPage role={user.role} refresh={nonce} notify={notify} />}
         {view === 'users' && user.role === 'admin' && <UsersPage refresh={nonce} notify={notify} />}
         {view === 'nodes' && user.role === 'admin' && <NodesPage refresh={nonce} notify={notify} />}
         {view === 'commissions' && user.role === 'admin' && <CommissionsPage refresh={nonce} notify={notify} />}
@@ -300,6 +307,101 @@ function OrdersPage({ refresh, notify }: { refresh: number; notify: (value: stri
   const [rows, setRows] = useState<Overview['recentOrders'] | null>(null);
   useEffect(() => { api<Overview['recentOrders']>('/api/v1/me/orders').then(setRows).catch(error => notify((error as Error).message)); }, [refresh, notify]);
   return <div className="page-stack"><PageHeading eyebrow="账户记录" title="订单记录" subtitle="查看当前账户的本地演示订单；此环境不会发起支付。" /><section className="panel"><SectionTitle title="全部订单" detail={rows ? rows.length + ' 条记录' : '读取中'} />{!rows ? <LoadingBlock /> : !rows.length ? <Empty title="没有订单记录" detail="演示账户暂时没有订单。" /> : <div className="table-wrap"><table><thead><tr><th>订单号</th><th>方案</th><th>金额</th><th>状态</th><th>创建时间</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><code>{row.id}</code></td><td>{row.plan_name}</td><td>{money(row.total_cents)}</td><td><StatusPill status={row.status === 'paid_test' ? '本地演示' : row.status} tone="green" /></td><td>{new Date(row.created_at).toLocaleString('zh-CN')}</td></tr>)}</tbody></table></div>}</section></div>;
+}
+
+const ticketStatusText: Record<TicketStatus, string> = { open: '待处理', in_progress: '处理中', resolved: '已解决' };
+const ticketCategoryText: Record<string, string> = { connection: '连接问题', subscription: '订阅配置', payment: '订单与付款', account: '账户安全', other: '其他问题' };
+
+function SupportPage({ role, refresh, notify }: { role: User['role']; refresh: number; notify: (value: string) => void }) {
+  const base = '/api/v1/' + (role === 'admin' ? 'admin' : 'me') + '/tickets';
+  const [rows, setRows] = useState<TicketSummary[] | null>(null);
+  const [detail, setDetail] = useState<TicketDetail | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [meta, setMeta] = useState<PageMeta | null>(null);
+  const [page, setPage] = useState(1);
+  const [category, setCategory] = useState('connection');
+  const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const [reply, setReply] = useState('');
+  const [busy, setBusy] = useState(false);
+  const loadList = useCallback(async () => {
+    try {
+      const result = await apiEnvelope<TicketSummary[]>(base + '?page=' + page + '&per_page=20');
+      setRows(result.data);
+      setMeta(result.meta ?? null);
+      setSelectedId(current => current && result.data.some(row => row.id === current) ? current : (result.data[0]?.id ?? null));
+    } catch (error) { notify((error as Error).message); }
+  }, [base, page, notify]);
+  const loadDetail = useCallback(async (id: string) => {
+    try { setDetail(await api<TicketDetail>(base + '/' + id)); }
+    catch (error) { notify((error as Error).message); }
+  }, [base, notify]);
+  useEffect(() => { void loadList(); }, [loadList, refresh]);
+  useEffect(() => { if (selectedId) void loadDetail(selectedId); else setDetail(null); }, [selectedId, loadDetail, refresh]);
+  const create = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const created = await api<{ id: string }>('/api/v1/me/tickets', { method: 'POST', body: JSON.stringify({ category, subject, description }) });
+      setSubject(''); setDescription(''); setPage(1); setSelectedId(created.id);
+      await loadDetail(created.id);
+      if (page === 1) await loadList();
+      notify('工单已创建');
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  const sendReply = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!detail) return;
+    setBusy(true);
+    try {
+      await api(base + '/' + detail.id + '/replies', { method: 'POST', body: JSON.stringify({ body: reply }) });
+      setReply('');
+      await Promise.all([loadList(), loadDetail(detail.id)]);
+      notify('回复已发送');
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  const changeStatus = async (status: TicketStatus) => {
+    if (!detail) return;
+    setBusy(true);
+    try {
+      await api(base + '/' + detail.id, { method: 'PATCH', body: JSON.stringify({ status }) });
+      await Promise.all([loadList(), loadDetail(detail.id)]);
+      notify('工单状态已更新');
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  return <div className="page-stack">
+    <PageHeading eyebrow="服务支持" title="帮助工单" subtitle={role === 'admin' ? '查看本地会员问题并跟进处理；所有状态变更均留有审计。' : '遇到订阅、连接、订单或账户问题，可在这里提交并跟踪处理进度。'} />
+    <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>信息保护</b> 请勿在工单中填写密码、完整订阅地址或支付凭证。当前仅接收本地演示数据。</span></div>
+    <div className="support-layout">
+      <section className="panel support-list"><SectionTitle title={role === 'admin' ? '会员工单' : '我的工单'} detail={meta ? '共 ' + meta.total + ' 条' : '载入中'} />
+        {role === 'member' && <form className="support-form" onSubmit={create}>
+          <label>问题类别<select value={category} onChange={event => setCategory(event.target.value)}>{Object.entries(ticketCategoryText).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label>
+          <label>标题<input value={subject} onChange={event => setSubject(event.target.value)} maxLength={100} minLength={3} placeholder="简要描述遇到的问题" required /></label>
+          <label>问题描述<textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={2000} minLength={10} rows={4} placeholder="请写明发生时间、系统和客户端版本、脱敏错误码" required /></label>
+          <button className="primary-button" disabled={busy}>提交工单 <ArrowUpRight size={14} /></button>
+        </form>}
+        {!rows ? <LoadingBlock /> : rows.length === 0 ? <Empty title="暂无工单" detail="新工单会显示在这里。" /> : <div className="support-tickets">{rows.map(row => <button key={row.id} className={'support-ticket' + (selectedId === row.id ? ' selected' : '')} onClick={() => setSelectedId(row.id)}>
+          <span><b>{row.subject}</b><small>{role === 'admin' ? row.user_name + ' · ' : ''}{ticketCategoryText[row.category]} · {shortDate(row.updated_at)}</small></span>
+          <StatusPill status={ticketStatusText[row.status]} tone={row.status === 'resolved' ? 'green' : row.status === 'in_progress' ? 'amber' : 'gray'} />
+        </button>)}</div>}
+        {meta && meta.total_pages > 1 && <div className="support-pagination"><button className="text-button" disabled={page === 1} onClick={() => setPage(page - 1)}>上一页</button><span>{page} / {meta.total_pages}</span><button className="text-button" disabled={page >= meta.total_pages} onClick={() => setPage(page + 1)}>下一页</button></div>}
+      </section>
+      <section className="panel support-detail">{!detail ? <Empty title="选择一张工单" detail="点击左侧记录查看处理过程。" /> : <>
+        <div className="support-detail-head"><span className="eyebrow">{ticketCategoryText[detail.category]} · {detail.id.slice(0, 8)}</span><h2>{detail.subject}</h2><div><StatusPill status={ticketStatusText[detail.status]} tone={detail.status === 'resolved' ? 'green' : detail.status === 'in_progress' ? 'amber' : 'gray'} /><small>创建于 {new Date(detail.created_at).toLocaleString('zh-CN')}</small></div></div>
+        {role === 'admin' && <div className="support-actions">
+          {detail.status === 'open' && <button className="secondary-button" disabled={busy} onClick={() => void changeStatus('in_progress')}>开始处理</button>}
+          {detail.status === 'in_progress' && <button className="secondary-button" disabled={busy} onClick={() => void changeStatus('open')}>退回待处理</button>}
+          {detail.status === 'resolved' && <button className="secondary-button" disabled={busy} onClick={() => void changeStatus('in_progress')}>重新处理</button>}
+          {detail.status !== 'resolved' && <button className="primary-button" disabled={busy} onClick={() => void changeStatus('resolved')}>标记已解决</button>}
+        </div>}
+        <div className="support-events">{detail.events.map(item => item.kind === 'status_changed' ? <div key={item.id} className="support-event system">{item.actor_name} 将状态从 {ticketStatusText[item.from_status!]} 改为 {ticketStatusText[item.to_status!]} · {new Date(item.created_at).toLocaleString('zh-CN')}</div> : <div key={item.id} className={'support-event' + (item.actor_role === 'admin' ? ' staff' : '')}><div><b>{item.actor_name}</b><small>{new Date(item.created_at).toLocaleString('zh-CN')}</small></div><p>{item.body}</p></div>)}</div>
+        <form className="support-reply" onSubmit={sendReply}><label htmlFor="support-reply">{role === 'admin' ? '回复会员' : '补充说明'}</label><textarea id="support-reply" value={reply} onChange={event => setReply(event.target.value)} maxLength={2000} minLength={2} rows={3} placeholder="请勿填写密码或完整订阅地址" required /><button className="primary-button" disabled={busy}>发送回复 <ArrowUpRight size={14} /></button></form>
+      </>}</section>
+    </div>
+  </div>;
 }
 
 function UsersPage({ refresh, notify }: { refresh: number; notify: (value: string) => void }) {
