@@ -26,6 +26,11 @@ type TicketStatus = 'open' | 'in_progress' | 'resolved';
 type TicketSummary = { id: string; category: string; subject: string; status: TicketStatus; created_at: string; updated_at: string; user_name: string };
 type TicketEvent = { id: string; kind: 'message' | 'status_changed'; body: string | null; from_status: TicketStatus | null; to_status: TicketStatus | null; created_at: string; actor_name: string; actor_role: User['role'] };
 type TicketDetail = TicketSummary & { events: TicketEvent[]; resolved_at: string | null };
+type OrderSummary = { id: string; plan_name: string; total_cents: number; status: string; created_at: string; expires_at: string | null; user_name: string };
+type OrderDetail = OrderSummary & { plan_snapshot: Plan & { version: number }; user_email: string; is_test: boolean; events: Array<{ id: string; from_status: string | null; to_status: string; created_at: string; actor_name: string | null }> };
+const orderStatusText: Record<string, string> = { pending_test: '待支付 · 测试', cancelled_test: '已取消 · 测试', expired_test: '已超时 · 测试', paid_test: '已支付 · 样例' };
+const orderTone = (status: string): 'green' | 'amber' | 'gray' => status === 'paid_test' ? 'green' : status === 'pending_test' ? 'amber' : 'gray';
+const dateTime = (value: string | null) => value ? new Date(value).toLocaleString('zh-CN') : '—';
 type PageMeta = { total: number; page: number; per_page: number; total_pages: number };
 
 const apiEnvelope = async <T,>(path: string, init?: RequestInit): Promise<{ data: T; meta?: PageMeta }> => {
@@ -117,7 +122,7 @@ export default function App() {
     <div className="workspace">
       <header className="topbar">
         <button className="icon-button menu-toggle" onClick={() => setMobileMenu(true)} aria-label="打开导航"><Menu size={19} /></button>
-        <div className="crumb"><span>控制台</span><span className="crumb-slash">/</span><strong>{labelFor(view)}</strong></div>
+        <div className="crumb"><span>控制台</span><span className="crumb-slash">/</span><strong>{labelFor(view, user.role)}</strong></div>
         <div className="top-actions">
           <span className="environment"><i /> 本地开发环境</span>
           <button type="button" className="icon-button theme-toggle" aria-label={theme === 'dark' ? '切换浅色主题' : '切换深色主题'} title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>
@@ -132,8 +137,8 @@ export default function App() {
       <main className="main-content">
         {view === 'overview' && <OverviewPage user={user} refresh={nonce} setView={setView} notify={notify} />}
         {view === 'subscriptions' && <SubscriptionsPage refresh={nonce} notify={notify} />}
-        {view === 'plans' && <PlansPage refresh={nonce} notify={notify} />}
-        {view === 'orders' && <OrdersPage refresh={nonce} notify={notify} />}
+        {view === 'plans' && <PlansPage role={user.role} refresh={nonce} notify={notify} />}
+        {view === 'orders' && <OrdersPage role={user.role} refresh={nonce} notify={notify} />}
         {view === 'support' && <SupportPage role={user.role} refresh={nonce} notify={notify} />}
         {view === 'users' && user.role === 'admin' && <UsersPage refresh={nonce} notify={notify} />}
         {view === 'admin-plans' && user.role === 'admin' && <AdminPlansPage notify={notify} />}
@@ -146,7 +151,8 @@ export default function App() {
   </div>;
 }
 
-function labelFor(view: string) {
+function labelFor(view: string, role?: User['role']) {
+  if (view === 'orders' && role === 'admin') return '订单管理';
   return [...nav, ...adminNav].find(item => item.id === view)?.label ?? '总览';
 }
 
@@ -164,7 +170,7 @@ function Sidebar({ view, setView, role, mobile, close, logout, user }: {
     <div className="workspace-switch"><span className="workspace-icon"><Command size={15} /></span><span><b>迅连宝工作区</b><small>{role === 'admin' ? '运营控制台' : '个人账户'}</small></span><ChevronDown size={14} /></div>
     <nav className="side-nav">
       <p className="nav-caption">工作区</p>
-      {nav.map(item => <NavItem key={item.id} {...item} active={view === item.id} onClick={() => change(item.id)} />)}
+      {nav.map(item => <NavItem key={item.id} {...item} label={item.id === 'orders' && role === 'admin' ? '订单管理' : item.label} active={view === item.id} onClick={() => change(item.id)} />)}
       {role === 'admin' && <>
         <p className="nav-caption nav-caption-admin">运营管理</p>
         {adminNav.map(item => <NavItem key={item.id} {...item} active={view === item.id} onClick={() => change(item.id)} />)}
@@ -280,12 +286,12 @@ function AuditList({ rows }: { rows?: AdminSummary['recentAudit'] }) {
   return <div className="activity-list">{rows.map(row => <div className="activity-row" key={row.id}><span className="activity-icon"><Settings2 size={15} /></span><span className="activity-copy"><b>{auditLabel(row.action)}</b><small>{row.actor} · {row.target_type} · {row.target_id.slice(0, 12)}</small></span><time>{shortDate(row.created_at)}</time></div>)}</div>;
 }
 function auditLabel(action: string) {
-  return ({ 'node.status_changed': '更新测试节点状态', 'node.created': '创建演示节点', 'node.lifecycle_changed': '切换节点生命周期', 'subscription.created': '创建 Clash 订阅', 'subscription.rotated': '轮换订阅凭证', 'subscription.revoked': '撤销订阅凭证' } as Record<string, string>)[action] ?? action;
+  return ({ 'order.created': '创建测试订单', 'order.cancelled': '取消测试订单', 'node.status_changed': '更新测试节点状态', 'node.created': '创建演示节点', 'node.lifecycle_changed': '切换节点生命周期', 'subscription.created': '创建 Clash 订阅', 'subscription.rotated': '轮换订阅凭证', 'subscription.revoked': '撤销订阅凭证' } as Record<string, string>)[action] ?? action;
 }
 function OrderRows({ rows }: { rows?: Overview['recentOrders'] }) {
   if (!rows) return <LoadingBlock />;
   if (!rows.length) return <Empty title="还没有订单记录" detail="订单状态会显示在这里。" />;
-  return <div className="activity-list">{rows.map(row => <div className="activity-row" key={row.id}><span className="activity-icon"><CreditCard size={15} /></span><span className="activity-copy"><b>{row.plan_name}</b><small>{row.id} · 本地演示记录</small></span><b className="order-amount">{money(row.total_cents)}</b><StatusPill status={row.status === 'paid_test' ? '演示已支付' : row.status} tone="green" /></div>)}</div>;
+  return <div className="activity-list">{rows.map(row => <div className="activity-row" key={row.id}><span className="activity-icon"><CreditCard size={15} /></span><span className="activity-copy"><b>{row.plan_name}</b><small>{row.id} · 本地演示记录</small></span><b className="order-amount">{money(row.total_cents)}</b><StatusPill status={orderStatusText[row.status] ?? row.status} tone={orderTone(row.status)} /></div>)}</div>;
 }
 function PlatformStatus({ summary, setView }: { summary: AdminSummary | null; setView: (view: string) => void }) {
   return <div className="quick-actions"><QuickAction icon={Server} label="测试节点" detail={summary ? summary.availableNodes + ' 条标记可用 · 健康未接入' : '载入中'} onClick={() => setView('nodes')} /><QuickAction icon={Link2} label="订阅凭证" detail={summary ? summary.activeSubscriptions + ' 个有效链接' : '载入中'} onClick={() => setView('subscriptions')} /><QuickAction icon={ArrowUpRight} label="代理结算" detail={summary ? money(summary.pendingCommissionCents) + ' 待结算演示金额' : '载入中'} onClick={() => setView('commissions')} /></div>;
@@ -339,12 +345,32 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
   </div>;
 }
 
-function PlansPage({ refresh, notify }: { refresh: number; notify: (value: string) => void }) {
+function PlansPage({ role, refresh, notify }: { role: User['role']; refresh: number; notify: (value: string) => void }) {
   const [plans, setPlans] = useState<Plan[] | null>(null);
+  const [selection, setSelection] = useState<{ plan: Plan; key: string } | null>(null);
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   useEffect(() => { api<Plan[]>('/api/v1/catalog/plans').then(setPlans).catch(error => notify((error as Error).message)); }, [refresh, notify]);
-  return <div className="page-stack"><PageHeading eyebrow="套餐中心" title="套餐权益" subtitle="Web、App 与第三方客户端将共享同一权益数据源。" /><div className="notice notice-neutral"><CreditCard size={16} /><span>本地样例套餐仅用于界面和 API 验证；此环境没有接入支付，不会产生真实订单。</span></div>
-    <section className="panel"><SectionTitle title="会员方案" detail={plans ? plans.length + ' 种方案' : '载入中'} /><div className="plan-grid">{plans?.map(plan => <div className="plan-row" key={plan.id}><div className="plan-period"><span className="plan-icon"><BadgeCheck size={17} /></span><span><b>{plan.name}</b><small>{plan.period_label}有效</small></span></div><div><b>{money(plan.price_cents)}</b><small>样例标价</small></div><div><b>{plan.traffic_gb} GB</b><small>套餐流量</small></div><div><b>{plan.max_devices} 台</b><small>同时在线</small></div><StatusPill status="本地样例" tone="gray" /></div>)}</div></section>
+  const create = async () => {
+    if (!selection || busy) return;
+    setBusy(true); setError('');
+    try {
+      const order = await api<OrderDetail>('/api/v1/me/orders', { method: 'POST', headers: { 'Idempotency-Key': selection.key }, body: JSON.stringify({ plan_id: selection.plan.id }) });
+      setSelection(null); setOrderId(order.id); notify('测试订单已创建');
+    } catch (error) { setError((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  return <div className="page-stack"><PageHeading eyebrow="套餐中心" title="套餐权益" subtitle="Web、App 与第三方客户端将共享同一权益数据源。" /><div className="notice notice-neutral"><CreditCard size={16} /><span>当前可创建本地测试订单，30 分钟后超时。支付尚未接入，不会扣款或发放会员权益。</span></div>
+    <section className="panel"><SectionTitle title="会员方案" detail={plans ? plans.length + ' 种方案' : '载入中'} />{!plans ? <LoadingBlock /> : !plans.length ? <Empty title="暂无上架套餐" detail="套餐上架后会显示在这里。" /> : <div className="plan-grid">{plans.map(plan => <div className="plan-row" key={plan.id}><div className="plan-period"><span className="plan-icon"><BadgeCheck size={17} /></span><span><b>{plan.name}</b><small>{plan.period_label}有效</small></span></div><div><b>{money(plan.price_cents)}</b><small>测试标价</small></div><div><b>{plan.traffic_gb} GB</b><small>套餐流量</small></div><div><b>{plan.max_devices} 台</b><small>同时在线</small></div>{role === 'member' ? <button className="secondary-button" onClick={() => { setError(''); setSelection({ plan, key: crypto.randomUUID() }); }}>创建测试订单</button> : <StatusPill status="会员端可测试下单" tone="gray" />}</div>)}</div>}</section>
     <section className="panel"><SectionTitle title="权益一致性" detail="唯一事实源设计" /><div className="service-strip"><ServiceItem label="官网展示" status="共用套餐 API" icon={Globe2} /><ServiceItem label="自有 App" status="共用账户权益" icon={Smartphone} /><ServiceItem label="Clash 订阅" status="服务端校验" icon={Link2} /><ServiceItem label="运营后台" status="审计可查" icon={ShieldCheck} /></div></section>
+    {selection && <Modal title="创建测试订单" detail="确认套餐，价格以服务端最新校验为准" onClose={() => { if (!busy) setSelection(null); }}>
+      <dl className="detail-grid"><div><dt>套餐</dt><dd>{selection.plan.name}</dd></div><div><dt>金额</dt><dd>{money(selection.plan.price_cents)}</dd></div><div><dt>有效期</dt><dd>{selection.plan.duration_days} 天</dd></div><div><dt>套餐流量</dt><dd>{selection.plan.traffic_gb} GB</dd></div></dl>
+      <div className="notice notice-neutral"><CreditCard size={16} /><span>此步骤仅生成测试订单，不会扣款。支付及权益发放尚未开放。</span></div>
+      {error && <p className="order-error" role="alert">{error}</p>}
+      <div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setSelection(null)}>返回</button><button className="primary-button" disabled={busy} onClick={() => void create()}>{busy ? '提交中…' : '确认创建'}</button></div>
+    </Modal>}
+    {orderId && <OrderDialog id={orderId} role={role} onClose={() => setOrderId(null)} onChange={() => {}} notify={notify} />}
   </div>;
 }
 
@@ -406,10 +432,79 @@ function AdminPlansPage({ notify }: { notify: (value: string) => void }) {
   </div>;
 }
 
-function OrdersPage({ refresh, notify }: { refresh: number; notify: (value: string) => void }) {
-  const [rows, setRows] = useState<Overview['recentOrders'] | null>(null);
-  useEffect(() => { api<Overview['recentOrders']>('/api/v1/me/orders').then(setRows).catch(error => notify((error as Error).message)); }, [refresh, notify]);
-  return <div className="page-stack"><PageHeading eyebrow="账户记录" title="订单记录" subtitle="查看当前账户的本地演示订单；此环境不会发起支付。" /><section className="panel"><SectionTitle title="全部订单" detail={rows ? rows.length + ' 条记录' : '读取中'} />{!rows ? <LoadingBlock /> : !rows.length ? <Empty title="没有订单记录" detail="演示账户暂时没有订单。" /> : <div className="table-wrap"><table><thead><tr><th>订单号</th><th>方案</th><th>金额</th><th>状态</th><th>创建时间</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><code>{row.id}</code></td><td>{row.plan_name}</td><td>{money(row.total_cents)}</td><td><StatusPill status={row.status === 'paid_test' ? '本地演示' : row.status} tone="green" /></td><td>{new Date(row.created_at).toLocaleString('zh-CN')}</td></tr>)}</tbody></table></div>}</section></div>;
+function OrdersPage({ role, refresh, notify }: { role: User['role']; refresh: number; notify: (value: string) => void }) {
+  const [rows, setRows] = useState<OrderSummary[] | null>(null);
+  const [meta, setMeta] = useState<PageMeta | null>(null);
+  const [page, setPage] = useState(1);
+  const [status, setStatus] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const sequence = useRef(0);
+  const base = '/api/v1/' + (role === 'admin' ? 'admin' : 'me') + '/orders';
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const current = ++sequence.current;
+    try {
+      const result = await apiEnvelope<OrderSummary[]>(base + '?page=' + page + '&per_page=20' + (status ? '&status=' + status : ''), { signal });
+      if (signal?.aborted || current !== sequence.current) return;
+      setRows(result.data); setMeta(result.meta ?? null); setError('');
+    } catch (error) { if (!signal?.aborted && current === sequence.current) setError((error as Error).message); }
+  }, [base, page, status]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    const timer = window.setInterval(() => void load(controller.signal), 60000);
+    return () => { controller.abort(); ++sequence.current; window.clearInterval(timer); };
+  }, [load, refresh]);
+  return <div className="page-stack"><PageHeading eyebrow="订单中心" title={role === 'admin' ? '订单管理' : '订单记录'} subtitle={role === 'admin' ? '查看用户订单、套餐快照与状态记录。' : '查看自己的订单与处理记录。'} />
+    <div className="notice notice-neutral"><CreditCard size={16} /><span>测试订单不参与真实支付、会员发放或佣金计算；已支付样例用于展示历史记录。</span></div>
+    <section className="panel"><SectionTitle title="订单列表" detail={meta ? meta.total + ' 条记录' : '读取中'} action={<div className="order-toolbar"><label>订单状态<select aria-label="订单状态" value={status} onChange={e => { setStatus(e.target.value); setPage(1); setRows(null); }}><option value="">全部状态</option>{Object.entries(orderStatusText).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新</button></div>} />
+      {error && <p className="order-error" role="alert">{error}</p>}
+      {!rows ? (error ? <Empty title="订单读取失败" detail="请点击刷新重试。" /> : <LoadingBlock />) : !rows.length ? <Empty title="没有符合条件的订单" detail="可调整状态筛选；会员可前往套餐权益创建测试订单。" /> : <div className="table-wrap"><table><thead><tr><th>订单号</th>{role === 'admin' && <th>用户</th>}<th>套餐</th><th>金额</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><code title={row.id}>{row.id.slice(0, 18)}</code></td>{role === 'admin' && <td>{row.user_name}</td>}<td>{row.plan_name}</td><td>{money(row.total_cents)}</td><td><StatusPill status={orderStatusText[row.status] ?? row.status} tone={orderTone(row.status)} /></td><td>{dateTime(row.created_at)}</td><td><button className="text-button" onClick={() => setSelectedId(row.id)}>详情</button></td></tr>)}</tbody></table></div>}
+      {meta && meta.total_pages > 1 && <div className="support-pagination"><button className="text-button" disabled={page === 1} onClick={() => setPage(page - 1)}>上一页</button><span>{page} / {meta.total_pages}</span><button className="text-button" disabled={page >= meta.total_pages} onClick={() => setPage(page + 1)}>下一页</button></div>}
+    </section>
+    {selectedId && <OrderDialog id={selectedId} role={role} onClose={() => setSelectedId(null)} onChange={() => void load()} notify={notify} />}
+  </div>;
+}
+
+function OrderDialog({ id, role, onClose, onChange, notify }: { id: string; role: User['role']; onClose: () => void; onChange: () => void; notify: (value: string) => void }) {
+  const [detail, setDetail] = useState<OrderDetail | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const sequence = useRef(0);
+  const base = '/api/v1/' + (role === 'admin' ? 'admin' : 'me') + '/orders/';
+  useEffect(() => {
+    if (busy) return;
+    const controller = new AbortController();
+    const load = async () => {
+      const current = ++sequence.current;
+      try {
+        const result = await api<OrderDetail>(base + id, { signal: controller.signal });
+        if (current === sequence.current && !controller.signal.aborted) { setDetail(result); setError(''); }
+      } catch (error) { if (!controller.signal.aborted && current === sequence.current) setError((error as Error).message); }
+    };
+    void load();
+    const timer = window.setInterval(() => { if (!busy) void load(); }, 30000);
+    return () => { controller.abort(); ++sequence.current; window.clearInterval(timer); };
+  }, [base, id, busy]);
+  const cancel = async () => {
+    if (busy) return;
+    setBusy(true); setError(''); ++sequence.current;
+    try {
+      const updated = await api<OrderDetail>('/api/v1/me/orders/' + id + '/cancel', { method: 'POST' });
+      setDetail(updated); setConfirmCancel(false); onChange(); notify('测试订单已取消');
+    } catch (error) { setError((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  return <Modal title="订单详情" detail="套餐快照与状态记录" onClose={() => { if (!busy) onClose(); }} wide>
+    {error && <p className="order-error" role="alert">{error}</p>}
+    {!detail ? (error ? <Empty title="无法读取订单" detail="请关闭弹框后重试。" /> : <LoadingBlock />) : <>
+      <dl className="detail-grid"><div className="order-full"><dt>订单号</dt><dd><code>{detail.id}</code></dd></div><div><dt>订单状态</dt><dd><StatusPill status={orderStatusText[detail.status] ?? detail.status} tone={orderTone(detail.status)} /></dd></div><div><dt>订单金额</dt><dd>{money(detail.total_cents)}</dd></div><div><dt>套餐版本</dt><dd>{detail.plan_name} · v{detail.plan_snapshot.version}</dd></div><div><dt>权益快照</dt><dd>{detail.plan_snapshot.duration_days} 天 / {detail.plan_snapshot.traffic_gb} GB / {detail.plan_snapshot.max_devices} 台</dd></div><div><dt>创建时间</dt><dd>{dateTime(detail.created_at)}</dd></div><div><dt>支付期限</dt><dd>{dateTime(detail.expires_at)}</dd></div>{role === 'admin' && <div className="order-full"><dt>下单用户</dt><dd>{detail.user_name} · {detail.user_email}</dd></div>}</dl>
+      <div className="notice notice-neutral"><CreditCard size={16} /><span>{detail.status === 'paid_test' ? '这是预置的已支付样例，并未通过支付渠道扣款。' : '支付尚未接入；测试订单不会扣款、开通会员或生成佣金。'}</span></div>
+      <section className="order-history"><h3>状态记录</h3>{detail.events.length ? <ol>{detail.events.map(event => <li key={event.id}><span><b>{event.from_status ? (orderStatusText[event.from_status] ?? event.from_status) + ' → ' : ''}{orderStatusText[event.to_status] ?? event.to_status}</b><small>{event.actor_name ?? '系统'} · {dateTime(event.created_at)}</small></span></li>)}</ol> : <p>历史样例暂无事件记录。</p>}{detail.status === 'expired_test' && detail.events.at(-1)?.to_status === 'pending_test' && <p>支付期限已到，超时事件将在到期任务运行后记录。</p>}</section>
+      {role === 'member' && detail.is_test && detail.status === 'pending_test' && (confirmCancel ? <div className="order-cancel-confirm"><p>确认取消此测试订单？取消后可重新选择套餐下单。</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setConfirmCancel(false)}>保留订单</button><button className="primary-button" disabled={busy} onClick={() => void cancel()}>{busy ? '处理中…' : '确认取消订单'}</button></div></div> : <div className="modal-actions"><button className="secondary-button" onClick={() => setConfirmCancel(true)}>取消测试订单</button></div>)}
+    </>}
+  </Modal>;
 }
 
 const ticketStatusText: Record<TicketStatus, string> = { open: '待处理', in_progress: '处理中', resolved: '已解决' };

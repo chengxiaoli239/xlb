@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PlatformController;
 use App\Http\Controllers\TicketController;
 use Illuminate\Support\Facades\Route;
@@ -14,7 +15,10 @@ Route::get('/subscribe/{token}', [PlatformController::class, 'subscriptionProfil
 
 Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
     Route::get('/overview', [PlatformController::class, 'overview']);
-    Route::get('/orders', [PlatformController::class, 'orders']);
+    Route::get('/orders', [OrderController::class, 'listMember']);
+    Route::get('/orders/{id}', [OrderController::class, 'detail']);
+    Route::post('/orders', [OrderController::class, 'create'])->middleware('throttle:20,1');
+    Route::post('/orders/{id}/cancel', [OrderController::class, 'cancel']);
     Route::get('/subscriptions', [PlatformController::class, 'subscriptions']);
     Route::post('/subscriptions', [PlatformController::class, 'createSubscription']);
     Route::post('/subscriptions/{id}/rotate', [PlatformController::class, 'rotateSubscription']);
@@ -26,6 +30,8 @@ Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
 });
 
 Route::prefix('api/v1/admin')->middleware(['auth', 'admin'])->group(function (): void {
+    Route::get('/orders', [OrderController::class, 'listAdmin']);
+    Route::get('/orders/{id}', [OrderController::class, 'detail']);
     Route::get('/summary', [PlatformController::class, 'summary']);
     Route::get('/users', [PlatformController::class, 'users']);
     Route::get('/nodes', [PlatformController::class, 'nodes']);

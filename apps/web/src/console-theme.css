@@ -349,3 +349,18 @@
   .app-shell .node-transition label { min-width: 0; }
   .app-shell .modal-head h2 { font-size: 20px; }
 }
+
+/* Local order lifecycle uses the same console palette in both themes. */
+.app-shell .order-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.app-shell .order-toolbar label { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+.app-shell .order-toolbar select { padding: 8px 10px; background: var(--field-bg); color: var(--ink); border: 1px solid var(--field-border); border-radius: 6px; font: inherit; }
+.app-shell .order-error { margin: 16px; color: #db5b66; overflow-wrap: anywhere; }
+.app-shell .order-full { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.app-shell .order-history { margin-top: 24px; }
+.app-shell .order-history h3 { font-size: 15px; }
+.app-shell .order-history ol { list-style: none; padding: 0; }
+.app-shell .order-history li { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.app-shell .order-history b { display: block; font-size: 14px; font-weight: 500; }
+.app-shell .order-history small, .app-shell .order-history p { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; }
+.app-shell .order-cancel-confirm { margin-top: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle-bg); }
+@media (max-width: 680px) { .app-shell .order-toolbar { gap: 8px; } .app-shell .order-toolbar label { flex-wrap: wrap; } }

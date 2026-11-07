@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\TestOrderLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -159,16 +160,12 @@ class PlatformController extends Controller
             ->where('e.user_id', $userId)->where('e.status', 'active')->where('e.ends_at', '>', now()->toIso8601String())
             ->orderByDesc('e.ends_at')->first(['e.id', 'e.status', 'e.starts_at', 'e.ends_at', 'e.data_used_gb', 'p.id as plan_id', 'p.name as plan_name', 'p.period_label', 'p.price_cents', 'p.traffic_gb', 'p.max_devices']);
         $subscriptions = DB::table('subscriptions')->where('user_id', $userId)->where('status', 'active')->where('expires_at', '>', now()->toIso8601String())->count();
-        $orders = DB::table('orders as o')->join('plans as p', 'p.id', '=', 'o.plan_id')->where('o.user_id', $userId)->orderByDesc('o.created_at')->limit(5)->get(['o.id', 'o.total_cents', 'o.status', 'o.created_at', 'p.name as plan_name']);
+        $orders = DB::table('orders as o')->join('plans as p', 'p.id', '=', 'o.plan_id')->where('o.user_id', $userId)->orderByDesc('o.created_at')->limit(5)->get(['o.id', 'o.total_cents', 'o.status', 'o.expires_at', 'o.created_at', 'p.name as plan_name']);
+        foreach ($orders as $order) {
+            $order->status = TestOrderLifecycle::effectiveStatus($order);
+        }
 
         return response()->json(['data' => ['user' => $this->publicUser($request), 'entitlement' => $entitlement, 'activeSubscriptions' => $subscriptions, 'recentOrders' => $orders]]);
-    }
-
-    public function orders(Request $request): JsonResponse
-    {
-        $orders = DB::table('orders as o')->join('plans as p', 'p.id', '=', 'o.plan_id')->where('o.user_id', $request->user()->id)->orderByDesc('o.created_at')->get(['o.id', 'p.name as plan_name', 'o.total_cents', 'o.status', 'o.created_at']);
-
-        return response()->json(['data' => $orders]);
     }
 
     public function summary(): JsonResponse
