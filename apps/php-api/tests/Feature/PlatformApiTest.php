@@ -69,6 +69,63 @@ class PlatformApiTest extends TestCase
         $this->get($rotated['url'])->assertNotFound();
     }
 
+    public function test_node_catalog_only_creates_local_test_records(): void
+    {
+        $this->actingAs(User::findOrFail('user-member'));
+        $this->postJson('/api/v1/admin/nodes', ['name' => '演示节点 02', 'region' => '测试区域'])->assertForbidden();
+
+        $this->actingAs(User::findOrFail('user-admin'));
+        $this->postJson('/api/v1/admin/nodes', ['name' => '演示节点 02', 'region' => '测试区域', 'endpoint_host' => 'example.com'])->assertStatus(400);
+        $this->postJson('/api/v1/admin/nodes', ['name' => '   ', 'region' => '测试区域'])->assertStatus(400);
+        $this->postJson('/api/v1/admin/nodes', ['name' => ' a ', 'region' => '测试区域'])->assertStatus(400);
+        $created = $this->postJson('/api/v1/admin/nodes', ['name' => '演示节点 02', 'region' => '测试区域'])
+            ->assertCreated()->assertJsonPath('data.status', 'candidate')->assertJsonPath('data.health_status', 'not_connected')
+            ->assertJsonPath('data.config_version', 1)->assertJsonPath('data.is_test', true)->json('data');
+
+        $this->assertStringEndsWith('.invalid', $created['endpoint_host']);
+        $this->assertNull($created['last_health_check_at']);
+        $this->getJson('/api/v1/admin/nodes')->assertOk()->assertJsonCount(2, 'data');
+        $this->getJson('/api/v1/admin/summary')->assertJsonPath('data.nodeCount', 2)->assertJsonPath('data.availableNodes', 1);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'node.created', 'target_id' => $created['id']]);
+        $this->patchJson('/api/v1/admin/nodes/'.$created['id'], ['status' => 'retired'])->assertOk();
+        $this->patchJson('/api/v1/admin/nodes/'.$created['id'], ['status' => 'available'])->assertStatus(409);
+    }
+
+    public function test_node_lifecycle_rejects_invalid_transitions_and_real_nodes(): void
+    {
+        $this->actingAs(User::findOrFail('user-admin'));
+        $this->patchJson('/api/v1/admin/nodes/node-test-1', ['status' => 'retired'])->assertStatus(409);
+        $this->patchJson('/api/v1/admin/nodes/node-test-1', ['status' => 'draining'])
+            ->assertOk()->assertJsonPath('data.previous_status', 'available')->assertJsonPath('data.status', 'draining');
+        $this->getJson('/api/v1/admin/nodes/node-test-1')->assertOk()
+            ->assertJsonPath('data.changes.0.from_status', 'available')->assertJsonPath('data.changes.0.to_status', 'draining');
+        $this->patchJson('/api/v1/admin/nodes/node-test-1', ['status' => 'available'])->assertOk();
+        $this->getJson('/api/v1/admin/nodes/node-test-1')->assertJsonPath('data.changes.0.from_status', 'draining');
+        $this->assertSame(2, DB::table('audit_logs')->where('target_id', 'node-test-1')->count());
+        $this->assertSame(2, DB::table('node_state_changes')->where('node_id', 'node-test-1')->count());
+        $this->patchJson('/api/v1/admin/nodes/node-test-1', ['status' => 'available'])->assertOk();
+        $this->assertSame(2, DB::table('audit_logs')->where('target_id', 'node-test-1')->count());
+
+        DB::table('nodes')->where('id', 'node-test-1')->update(['is_test' => false]);
+        $this->patchJson('/api/v1/admin/nodes/node-test-1', ['status' => 'maintenance'])->assertStatus(409);
+        DB::table('nodes')->where('id', 'node-test-1')->update(['is_test' => true, 'status' => 'disabled']);
+        $this->getJson('/api/v1/admin/nodes/node-test-1')->assertJsonPath('data.allowed_transitions.0', 'maintenance');
+        $this->patchJson('/api/v1/admin/nodes/node-test-1', ['status' => 'maintenance'])->assertOk();
+    }
+
+    public function test_draining_test_node_removes_it_from_subscription_profile_until_restored(): void
+    {
+        $this->actingAs(User::findOrFail('user-member'));
+        $url = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data.url');
+        $this->get($url)->assertOk();
+
+        $this->actingAs(User::findOrFail('user-admin'));
+        $this->patchJson('/api/v1/admin/nodes/node-test-1', ['status' => 'draining'])->assertOk();
+        $this->get($url)->assertNotFound();
+        $this->patchJson('/api/v1/admin/nodes/node-test-1', ['status' => 'available'])->assertOk();
+        $this->get($url)->assertOk();
+    }
+
     public function test_member_and_admin_can_manage_a_private_ticket(): void
     {
         $this->actingAs(User::findOrFail('user-member'));

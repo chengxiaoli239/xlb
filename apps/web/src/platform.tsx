@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, ArrowDownToLine, ArrowLeftRight, ArrowUpRight, BadgeCheck,
   Bell, ChevronDown, CircleHelp, CircleUserRound, Clipboard, Command,
   CreditCard, Gauge, Globe2, KeyRound, LayoutDashboard, LifeBuoy, Link2,
-  LogOut, Menu, Monitor, MoreHorizontal, Network, RefreshCw, Search,
-  Server, Settings2, ShieldCheck, Smartphone, Users, X,
+  LogOut, Menu, Monitor, Moon, MoreHorizontal, Network, RefreshCw, Search,
+  Server, Settings2, ShieldCheck, Smartphone, Sun, Users, X,
 } from 'lucide-react';
 
 type User = { id: string; email: string; name: string; role: 'admin' | 'member' };
@@ -16,8 +16,10 @@ type Overview = {
   activeSubscriptions: number;
   recentOrders: Array<{ id: string; plan_name: string; total_cents: number; status: string; created_at: string }>;
 };
-type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: 'available' | 'maintenance' | 'disabled'; is_test: number; max_sessions: number; active_sessions: number; latency_ms: number | null; updated_at: string };
-type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
+type NodeStatus = 'candidate' | 'available' | 'draining' | 'maintenance' | 'isolated' | 'retired' | 'disabled';
+type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: NodeStatus; is_test: boolean; max_sessions: number; active_sessions: number; latency_ms: number | null; health_status: string; last_health_check_at: string | null; config_version: number; allowed_transitions: NodeStatus[]; updated_at: string };
+type NodeDetail = Node & { changes: Array<{ id: string; from_status: NodeStatus; to_status: NodeStatus; created_at: string; actor_name: string }> };
+type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
 type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string; last_used_at: string | null; url?: string };
 type Commission = { id: string; partner_name: string; amount_cents: number; status: string; order_id: string; created_at: string };
 type TicketStatus = 'open' | 'in_progress' | 'resolved';
@@ -60,6 +62,10 @@ const adminNav = [
 ];
 
 export default function App() {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try { return window.localStorage.getItem('xlb-console-theme') === 'light' ? 'light' : 'dark'; }
+    catch { return 'dark'; }
+  });
   const [user, setUser] = useState<User | null>(null);
   const [view, setView] = useState('overview');
   const [mobileMenu, setMobileMenu] = useState(false);
@@ -73,6 +79,11 @@ export default function App() {
     setToast(message);
     window.setTimeout(() => setToast(''), 2600);
   }, []);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('xlb-console-theme', theme); }
+    catch { /* Theme switching still works when browser storage is unavailable. */ }
+  }, [theme]);
 
   useEffect(() => {
     api<User | null>('/api/v1/auth/session').then(setUser).catch(() => setUser(null)).finally(() => setLoading(false));
@@ -100,7 +111,7 @@ export default function App() {
   if (loading) return <main className="boot"><span className="brand-mark">X</span><span>迅连宝控制台</span></main>;
   if (!user) return <Login email={loginEmail} setEmail={setLoginEmail} password={password} setPassword={setPassword} onSubmit={login} />;
 
-  return <div className="app-shell">
+  return <div className="app-shell" data-theme={theme}>
     <Sidebar view={view} setView={setView} role={user.role} mobile={mobileMenu} close={() => setMobileMenu(false)} logout={logout} user={user} />
     {mobileMenu && <button className="scrim" aria-label="关闭菜单" onClick={() => setMobileMenu(false)} />}
     <div className="workspace">
@@ -109,6 +120,9 @@ export default function App() {
         <div className="crumb"><span>控制台</span><span className="crumb-slash">/</span><strong>{labelFor(view)}</strong></div>
         <div className="top-actions">
           <span className="environment"><i /> 本地开发环境</span>
+          <button type="button" className="icon-button theme-toggle" aria-label={theme === 'dark' ? '切换浅色主题' : '切换深色主题'} title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>
+            {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+          </button>
           <button className="icon-button notification" aria-label="通知"><Bell size={17} /><span /></button>
           <button className="profile-trigger" onClick={() => setView(user.role === 'admin' ? 'users' : 'overview')}>
             <span className="profile-avatar">{user.name.slice(0, 1)}</span><span className="profile-name">{user.name}</span><ChevronDown size={14} />
@@ -199,6 +213,23 @@ function PageHeading({ eyebrow, title, subtitle, action }: { eyebrow: string; ti
 function SectionTitle({ title, detail, action }: { title: string; detail?: string; action?: React.ReactNode }) {
   return <div className="section-title"><div><h2>{title}</h2>{detail && <span>{detail}</span>}</div>{action}</div>;
 }
+function Modal({ title, detail, onClose, children, wide = false }: { title: string; detail?: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    return () => { if (element?.open) element.close(); };
+  }, []);
+  return <dialog ref={dialog} className={'app-modal' + (wide ? ' app-modal-wide' : '')} aria-label={title} onCancel={event => { event.preventDefault(); onClose(); }} onClick={event => {
+    const element = dialog.current;
+    if (!element || event.target !== element) return;
+    const bounds = element.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
+  }}>
+    <div className="modal-head"><div><h2>{title}</h2>{detail && <p>{detail}</p>}</div><button type="button" className="icon-button" aria-label="关闭弹框" onClick={onClose}><X size={18} /></button></div>
+    <div className="modal-body">{children}</div>
+  </dialog>;
+}
 function LoadingBlock() { return <div className="loading-block"><span className="spinner" /> 正在读取本地数据</div>; }
 function Empty({ title, detail }: { title: string; detail: string }) { return <div className="empty-state"><Network size={21} /><b>{title}</b><span>{detail}</span></div>; }
 
@@ -215,7 +246,7 @@ function OverviewPage({ user, refresh, setView, notify }: { user: User; refresh:
   const metrics = isAdmin && summary ? [
     { label: '注册会员', value: summary.memberCount, note: '本地演示账户', icon: Users, tone: 'teal' },
     { label: '有效权益', value: summary.activeEntitlements, note: '当前有效', icon: BadgeCheck, tone: 'green' },
-    { label: '在线节点', value: summary.availableNodes + ' / 1', note: '测试节点', icon: Server, tone: 'amber' },
+    { label: '目录标记可用', value: summary.availableNodes + ' / ' + summary.nodeCount, note: '不代表真实在线', icon: Server, tone: 'amber' },
     { label: '待结算佣金', value: money(summary.pendingCommissionCents), note: '演示账本', icon: ArrowUpRight, tone: 'blue' },
   ] : null;
   return <div className="page-stack">
@@ -249,7 +280,7 @@ function AuditList({ rows }: { rows?: AdminSummary['recentAudit'] }) {
   return <div className="activity-list">{rows.map(row => <div className="activity-row" key={row.id}><span className="activity-icon"><Settings2 size={15} /></span><span className="activity-copy"><b>{auditLabel(row.action)}</b><small>{row.actor} · {row.target_type} · {row.target_id.slice(0, 12)}</small></span><time>{shortDate(row.created_at)}</time></div>)}</div>;
 }
 function auditLabel(action: string) {
-  return ({ 'node.status_changed': '更新测试节点状态', 'subscription.created': '创建 Clash 订阅', 'subscription.rotated': '轮换订阅凭证', 'subscription.revoked': '撤销订阅凭证' } as Record<string, string>)[action] ?? action;
+  return ({ 'node.status_changed': '更新测试节点状态', 'node.created': '创建演示节点', 'node.lifecycle_changed': '切换节点生命周期', 'subscription.created': '创建 Clash 订阅', 'subscription.rotated': '轮换订阅凭证', 'subscription.revoked': '撤销订阅凭证' } as Record<string, string>)[action] ?? action;
 }
 function OrderRows({ rows }: { rows?: Overview['recentOrders'] }) {
   if (!rows) return <LoadingBlock />;
@@ -257,7 +288,7 @@ function OrderRows({ rows }: { rows?: Overview['recentOrders'] }) {
   return <div className="activity-list">{rows.map(row => <div className="activity-row" key={row.id}><span className="activity-icon"><CreditCard size={15} /></span><span className="activity-copy"><b>{row.plan_name}</b><small>{row.id} · 本地演示记录</small></span><b className="order-amount">{money(row.total_cents)}</b><StatusPill status={row.status === 'paid_test' ? '演示已支付' : row.status} tone="green" /></div>)}</div>;
 }
 function PlatformStatus({ summary, setView }: { summary: AdminSummary | null; setView: (view: string) => void }) {
-  return <div className="quick-actions"><QuickAction icon={Server} label="测试节点" detail={summary ? summary.availableNodes + ' 个节点可用 · 0 个真实节点' : '载入中'} onClick={() => setView('nodes')} /><QuickAction icon={Link2} label="订阅凭证" detail={summary ? summary.activeSubscriptions + ' 个有效链接' : '载入中'} onClick={() => setView('subscriptions')} /><QuickAction icon={ArrowUpRight} label="代理结算" detail={summary ? money(summary.pendingCommissionCents) + ' 待结算演示金额' : '载入中'} onClick={() => setView('commissions')} /></div>;
+  return <div className="quick-actions"><QuickAction icon={Server} label="测试节点" detail={summary ? summary.availableNodes + ' 条标记可用 · 健康未接入' : '载入中'} onClick={() => setView('nodes')} /><QuickAction icon={Link2} label="订阅凭证" detail={summary ? summary.activeSubscriptions + ' 个有效链接' : '载入中'} onClick={() => setView('subscriptions')} /><QuickAction icon={ArrowUpRight} label="代理结算" detail={summary ? money(summary.pendingCommissionCents) + ' 待结算演示金额' : '载入中'} onClick={() => setView('commissions')} /></div>;
 }
 function QuickAction({ icon: Icon, label, detail, onClick }: { icon: typeof Users; label: string; detail: string; onClick: () => void }) {
   return <button className="quick-action" onClick={onClick}><span className="quick-icon"><Icon size={16} /></span><span><b>{label}</b><small>{detail}</small></span><ArrowUpRight size={14} /></button>;
@@ -269,12 +300,14 @@ function ServiceItem({ label, status, icon: Icon }: { label: string; status: str
 function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (value: string) => void }) {
   const [rows, setRows] = useState<Subscription[] | null>(null);
   const [createdUrl, setCreatedUrl] = useState('');
+  const [showSubscription, setShowSubscription] = useState(false);
+  const [rotateTarget, setRotateTarget] = useState<Subscription | null>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => api<Subscription[]>('/api/v1/me/subscriptions').then(setRows).catch(error => notify((error as Error).message)), [notify]);
   useEffect(() => { void load(); }, [load, refresh]);
   const create = async () => {
     setBusy(true);
-    try { const item = await api<Subscription>('/api/v1/me/subscriptions', { method: 'POST' }); setCreatedUrl(item.url ?? ''); notify('订阅链接已生成，请立即复制保存'); await load(); }
+    try { const item = await api<Subscription>('/api/v1/me/subscriptions', { method: 'POST' }); setCreatedUrl(item.url ?? ''); setShowSubscription(true); notify('订阅链接已生成，请立即复制保存'); await load(); }
     catch (error) { notify((error as Error).message); }
     finally { setBusy(false); }
   };
@@ -283,8 +316,10 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
     catch (error) { notify((error as Error).message); }
   };
   const rotate = async (row: Subscription) => {
-    try { const next = await api<Subscription>('/api/v1/me/subscriptions/' + row.id + '/rotate', { method: 'POST' }); setCreatedUrl(next.url ?? ''); notify('旧链接已撤销，新链接仅显示一次'); await load(); }
+    setBusy(true);
+    try { const next = await api<Subscription>('/api/v1/me/subscriptions/' + row.id + '/rotate', { method: 'POST' }); setCreatedUrl(next.url ?? ''); setRotateTarget(null); notify('旧链接已撤销，新链接仅显示一次'); await load(); }
     catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
   };
   const copy = async (value: string) => {
     const absolute = new URL(value, window.location.origin).toString();
@@ -292,11 +327,13 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
     catch { setCreatedUrl(absolute); notify('无法访问剪贴板，请手动复制'); }
   };
   return <div className="page-stack">
-    <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="生成、轮换或撤销 Clash 兼容订阅。订阅链接等同账户凭证，请妥善保管。" action={<button className="primary-button" disabled={busy} onClick={create}><Link2 size={15} /> 新建订阅</button>} />
+    <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="生成、轮换或撤销 Clash 兼容订阅。订阅链接等同账户凭证，请妥善保管。" action={<button className="primary-button" disabled={busy} onClick={() => { setCreatedUrl(''); setRotateTarget(null); setShowSubscription(true); }}><Link2 size={15} /> 新建订阅</button>} />
     <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>本地开发订阅</b> 仅用于查看 Mihomo 配置格式，不含真实可连接节点。不要导入生产客户端或分享真实凭证。</span></div>
-    {createdUrl && <div className="secret-result"><div><span className="eyebrow">新凭证 · 仅显示本次</span><code>{new URL(createdUrl, window.location.origin).toString()}</code></div><button className="secondary-button" onClick={() => void copy(createdUrl)}><Clipboard size={15} /> 复制链接</button><button className="icon-button" aria-label="关闭" onClick={() => setCreatedUrl('')}><X size={16} /></button></div>}
+    {showSubscription && <Modal title={createdUrl ? '订阅链接已生成' : rotateTarget ? '轮换订阅链接' : '新建订阅'} detail={createdUrl ? '链接仅显示本次，请及时复制保存' : rotateTarget ? '旧链接将立即失效' : '订阅链接是账户凭证，请勿公开分享'} onClose={() => { if (busy) return; setShowSubscription(false); setCreatedUrl(''); setRotateTarget(null); }}>
+      {createdUrl ? <div className="secret-result"><div><span className="eyebrow">新凭证 · 仅显示本次</span><code>{new URL(createdUrl, window.location.origin).toString()}</code></div><button className="secondary-button" onClick={() => void copy(createdUrl)}><Clipboard size={15} /> 复制链接</button></div> : <><p className="modal-copy">{rotateTarget ? '确认轮换后，当前订阅链接立即失效。请复制新链接并更新已连接的客户端。' : '生成后可在兼容客户端导入本地测试配置；当前没有真实可连接节点。'}</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowSubscription(false); setRotateTarget(null); }}>取消</button><button className="primary-button" disabled={busy} onClick={() => void (rotateTarget ? rotate(rotateTarget) : create())}>{rotateTarget ? '确认轮换' : '生成订阅'}</button></div></>}
+    </Modal>}
     <section className="panel"><SectionTitle title="订阅凭证" detail={rows ? rows.length + ' 条记录' : '读取中'} action={<button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新</button>} />
-      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="尚未创建订阅" detail="创建订阅后，可在本机查看测试配置格式。" /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>状态</th><th>创建时间</th><th>到期时间</th><th>最近访问</th><th /></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><span className="table-main"><Link2 size={15} />{row.name}</span><small className="table-sub">{row.id.slice(0, 14)}</small></td><td><StatusPill status={row.status === 'active' ? '有效' : '已撤销'} tone={row.status === 'active' ? 'green' : 'gray'} /></td><td>{shortDate(row.created_at)}</td><td>{shortDate(row.expires_at)}</td><td>{shortDate(row.last_used_at)}</td><td><div className="row-actions">{row.status === 'active' && <><button className="text-button" onClick={() => void rotate(row)}>轮换</button><button className="text-button danger-text" onClick={() => void revoke(row)}>撤销</button></>}</div></td></tr>)}</tbody></table></div>}
+      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="尚未创建订阅" detail="创建订阅后，可在本机查看测试配置格式。" /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>状态</th><th>创建时间</th><th>到期时间</th><th>最近访问</th><th /></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><span className="table-main"><Link2 size={15} />{row.name}</span><small className="table-sub">{row.id.slice(0, 14)}</small></td><td><StatusPill status={row.status === 'active' ? '有效' : '已撤销'} tone={row.status === 'active' ? 'green' : 'gray'} /></td><td>{shortDate(row.created_at)}</td><td>{shortDate(row.expires_at)}</td><td>{shortDate(row.last_used_at)}</td><td><div className="row-actions">{row.status === 'active' && <><button className="text-button" onClick={() => { setCreatedUrl(''); setRotateTarget(row); setShowSubscription(true); }}>轮换</button><button className="text-button danger-text" onClick={() => void revoke(row)}>撤销</button></>}</div></td></tr>)}</tbody></table></div>}
     </section>
     <div className="two-column"><section className="panel"><SectionTitle title="连接客户端" detail="外部客户端兼容性仍需逐版本验证" /><div className="client-list"><div><span className="client-icon"><Monitor size={17} /></span><span><b>Clash Verge Rev</b><small>Mihomo 内核 · 计划首批验证</small></span><StatusPill status="待验证" tone="amber" /></div><div><span className="client-icon"><Smartphone size={17} /></span><span><b>Clash Mi</b><small>应用名称与平台待确认</small></span><StatusPill status="待确认" tone="gray" /></div></div></section><section className="panel"><SectionTitle title="使用状态" detail="权限与接入边界" /><div className="policy-list"><p><ShieldCheck size={15} /> 订阅地址作为密钥存储，只保留摘要。</p><p><RefreshCw size={15} /> 轮换会立即废止旧链接。</p><p><Activity size={15} /> 用量由服务端策略执行，不依赖配置文案。</p><p><Globe2 size={15} /> 本地测试节点使用保留地址，不提供连接服务。</p></div></section></div>
   </div>;
@@ -314,23 +351,26 @@ function PlansPage({ refresh, notify }: { refresh: number; notify: (value: strin
 function AdminPlansPage({ notify }: { notify: (value: string) => void }) {
   const blank = { name: '', period_label: '', duration_days: '30', price_yuan: '29.80', traffic_gb: '100', max_devices: '2' };
   const [rows, setRows] = useState<ManagedPlan[] | null>(null);
-  const [family, setFamily] = useState<string | null>(null);
+  const [planModal, setPlanModal] = useState<{ mode: 'create' } | { mode: 'edit' | 'detail'; row: ManagedPlan } | null>(null);
   const [form, setForm] = useState(blank);
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => api<ManagedPlan[]>('/api/v1/admin/plans').then(setRows).catch(error => notify((error as Error).message)), [notify]);
   useEffect(() => { void load(); }, [load]);
   const edit = (row: ManagedPlan) => {
-    setFamily(row.family_id);
     setForm({ name: row.name, period_label: row.period_label, duration_days: String(row.duration_days), price_yuan: (row.price_cents / 100).toFixed(2), traffic_gb: String(row.traffic_gb), max_devices: String(row.max_devices) });
+    setPlanModal({ mode: 'edit', row });
   };
+  const createPlan = () => { setForm(blank); setPlanModal({ mode: 'create' }); };
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!planModal || planModal.mode === 'detail') return;
     setBusy(true);
     try {
       const payload = { name: form.name.trim(), period_label: form.period_label.trim(), duration_days: Number(form.duration_days), price_cents: Math.round(Number(form.price_yuan) * 100), traffic_gb: Number(form.traffic_gb), max_devices: Number(form.max_devices) };
-      await api('/api/v1/admin/plans' + (family ? '/' + encodeURIComponent(family) : ''), { method: family ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-      notify(family ? '新版本已发布，历史权益保持原值' : '套餐已创建');
-      setFamily(null);
+      const familyId = planModal.mode === 'edit' ? planModal.row.family_id : null;
+      await api('/api/v1/admin/plans' + (familyId ? '/' + encodeURIComponent(familyId) : ''), { method: familyId ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      notify(familyId ? '新版本已发布，历史权益保持原值' : '套餐已创建');
+      setPlanModal(null);
       setForm(blank);
       await load();
     } catch (error) { notify((error as Error).message); } finally { setBusy(false); }
@@ -342,8 +382,17 @@ function AdminPlansPage({ notify }: { notify: (value: string) => void }) {
       await load();
     } catch (error) { notify((error as Error).message); }
   };
-  return <div className="page-stack"><PageHeading eyebrow="运营管理" title="套餐管理" subtitle="设置价格、期限、流量和设备数；修改套餐会创建新版本，已有订单和会员权益仍引用旧版本。" />
-    <section className="panel"><SectionTitle title={family ? '编辑套餐 · 发布新版本' : '创建套餐'} detail="仅影响本地演示目录" />
+  return <div className="page-stack"><PageHeading eyebrow="运营管理" title="套餐管理" subtitle="设置价格、期限、流量和设备数；修改套餐会创建新版本，已有订单和会员权益仍引用旧版本。" action={<button className="primary-button" onClick={createPlan}><CreditCard size={15} /> 创建套餐</button>} />
+    <section className="panel"><SectionTitle title="套餐列表" detail={rows ? rows.length + ' 种套餐' : '读取中'} />
+      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="暂无套餐" detail="点击右上角创建第一个套餐。" /> : <div className="table-wrap"><table><thead><tr><th>套餐</th><th>版本</th><th>价格</th><th>期限</th><th>流量</th><th>设备数</th><th>状态</th><th>操作</th></tr></thead><tbody>{rows.map(row => <tr key={row.family_id}><td>{row.name}</td><td>v{row.version}</td><td>{money(row.price_cents)}</td><td>{row.duration_days} 天</td><td>{row.traffic_gb} GB</td><td>{row.max_devices} 台</td><td><StatusPill status={row.active ? '已上架' : '已下架'} tone={row.active ? 'green' : 'gray'} /></td><td><div className="row-actions"><button className="text-button" onClick={() => setPlanModal({ mode: 'detail', row })}>详情</button><button className="text-button" onClick={() => edit(row)}>编辑</button><button className="text-button" onClick={() => void changeStatus(row)}>{row.active ? '下架' : '上架'}</button></div></td></tr>)}</tbody></table></div>}
+    </section>
+    {planModal && <Modal title={planModal.mode === 'create' ? '创建套餐' : planModal.mode === 'edit' ? '编辑套餐 · 发布新版本' : '套餐详情'} detail={planModal.mode === 'detail' ? '当前版本与权益配置' : '仅影响本地演示目录'} onClose={() => setPlanModal(null)} wide={planModal.mode !== 'detail'}>
+      {planModal.mode === 'detail' ? <><dl className="detail-grid">
+        <div><dt>套餐名称</dt><dd>{planModal.row.name}</dd></div><div><dt>周期说明</dt><dd>{planModal.row.period_label}</dd></div>
+        <div><dt>当前版本</dt><dd>v{planModal.row.version}</dd></div><div><dt>上架状态</dt><dd>{planModal.row.active ? '已上架' : '已下架'}</dd></div>
+        <div><dt>有效期限</dt><dd>{planModal.row.duration_days} 天</dd></div><div><dt>价格</dt><dd>{money(planModal.row.price_cents)}</dd></div>
+        <div><dt>套餐流量</dt><dd>{planModal.row.traffic_gb} GB</dd></div><div><dt>同时在线设备</dt><dd>{planModal.row.max_devices} 台</dd></div>
+      </dl><div className="modal-actions"><button className="secondary-button" onClick={() => setPlanModal(null)}>关闭</button><button className="primary-button" onClick={() => edit(planModal.row)}>编辑套餐</button></div></> :
       <form className="plan-editor" onSubmit={save}>
         <label>套餐名称<input required maxLength={60} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
         <label>周期说明<input required maxLength={30} value={form.period_label} onChange={event => setForm({ ...form, period_label: event.target.value })} /></label>
@@ -351,12 +400,9 @@ function AdminPlansPage({ notify }: { notify: (value: string) => void }) {
         <label>价格（元）<input required type="number" min="0" max="999999" step="0.01" value={form.price_yuan} onChange={event => setForm({ ...form, price_yuan: event.target.value })} /></label>
         <label>流量（GB）<input required type="number" min="1" max="100000" step="0.1" value={form.traffic_gb} onChange={event => setForm({ ...form, traffic_gb: event.target.value })} /></label>
         <label>同时在线设备<input required type="number" min="1" max="100" step="1" value={form.max_devices} onChange={event => setForm({ ...form, max_devices: event.target.value })} /></label>
-        <div className="plan-editor-actions">{family && <button type="button" className="secondary-button" onClick={() => { setFamily(null); setForm(blank); }}>取消编辑</button>}<button className="primary-button" disabled={busy}>{family ? '发布新版本' : '创建套餐'}</button></div>
-      </form>
-    </section>
-    <section className="panel"><SectionTitle title="套餐列表" detail={rows ? rows.length + ' 种套餐' : '读取中'} />
-      <div className="table-wrap"><table><thead><tr><th>套餐</th><th>版本</th><th>价格</th><th>期限</th><th>流量</th><th>设备数</th><th>状态</th><th>操作</th></tr></thead><tbody>{rows?.map(row => <tr key={row.family_id}><td>{row.name}</td><td>v{row.version}</td><td>{money(row.price_cents)}</td><td>{row.duration_days} 天</td><td>{row.traffic_gb} GB</td><td>{row.max_devices} 台</td><td><StatusPill status={row.active ? '已上架' : '已下架'} tone={row.active ? 'green' : 'gray'} /></td><td><div className="row-actions"><button className="text-button" onClick={() => edit(row)}>编辑</button><button className="text-button" onClick={() => void changeStatus(row)}>{row.active ? '下架' : '上架'}</button></div></td></tr>)}</tbody></table></div>
-    </section>
+        <div className="plan-editor-actions"><button type="button" className="secondary-button" onClick={() => setPlanModal(null)}>取消</button><button className="primary-button" disabled={busy}>{planModal.mode === 'edit' ? '发布新版本' : '创建套餐'}</button></div>
+      </form>}
+    </Modal>}
   </div>;
 }
 
@@ -374,6 +420,7 @@ function SupportPage({ role, refresh, notify }: { role: User['role']; refresh: n
   const [rows, setRows] = useState<TicketSummary[] | null>(null);
   const [detail, setDetail] = useState<TicketDetail | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
   const [category, setCategory] = useState('connection');
@@ -386,12 +433,11 @@ function SupportPage({ role, refresh, notify }: { role: User['role']; refresh: n
       const result = await apiEnvelope<TicketSummary[]>(base + '?page=' + page + '&per_page=20');
       setRows(result.data);
       setMeta(result.meta ?? null);
-      setSelectedId(current => current && result.data.some(row => row.id === current) ? current : (result.data[0]?.id ?? null));
     } catch (error) { notify((error as Error).message); }
   }, [base, page, notify]);
   const loadDetail = useCallback(async (id: string) => {
     try { setDetail(await api<TicketDetail>(base + '/' + id)); }
-    catch (error) { notify((error as Error).message); }
+    catch (error) { setSelectedId(current => current === id ? null : current); notify((error as Error).message); }
   }, [base, notify]);
   useEffect(() => { void loadList(); }, [loadList, refresh]);
   useEffect(() => { if (selectedId) void loadDetail(selectedId); else setDetail(null); }, [selectedId, loadDetail, refresh]);
@@ -400,8 +446,7 @@ function SupportPage({ role, refresh, notify }: { role: User['role']; refresh: n
     setBusy(true);
     try {
       const created = await api<{ id: string }>('/api/v1/me/tickets', { method: 'POST', body: JSON.stringify({ category, subject, description }) });
-      setSubject(''); setDescription(''); setPage(1); setSelectedId(created.id);
-      await loadDetail(created.id);
+      setSubject(''); setDescription(''); setPage(1); setDetail(null); setSelectedId(created.id); setShowCreate(false);
       if (page === 1) await loadList();
       notify('工单已创建');
     } catch (error) { notify((error as Error).message); }
@@ -430,23 +475,25 @@ function SupportPage({ role, refresh, notify }: { role: User['role']; refresh: n
     finally { setBusy(false); }
   };
   return <div className="page-stack">
-    <PageHeading eyebrow="服务支持" title="帮助工单" subtitle={role === 'admin' ? '查看本地会员问题并跟进处理；所有状态变更均留有审计。' : '遇到订阅、连接、订单或账户问题，可在这里提交并跟踪处理进度。'} />
+    <PageHeading eyebrow="服务支持" title="帮助工单" subtitle={role === 'admin' ? '查看本地会员问题并跟进处理；所有状态变更均留有审计。' : '遇到订阅、连接、订单或账户问题，可在这里提交并跟踪处理进度。'} action={role === 'member' && <button className="primary-button" onClick={() => setShowCreate(true)}>新建工单 <ArrowUpRight size={14} /></button>} />
     <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>信息保护</b> 请勿在工单中填写密码、完整订阅地址或支付凭证。当前仅接收本地演示数据。</span></div>
-    <div className="support-layout">
-      <section className="panel support-list"><SectionTitle title={role === 'admin' ? '会员工单' : '我的工单'} detail={meta ? '共 ' + meta.total + ' 条' : '载入中'} />
-        {role === 'member' && <form className="support-form" onSubmit={create}>
-          <label>问题类别<select value={category} onChange={event => setCategory(event.target.value)}>{Object.entries(ticketCategoryText).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label>
-          <label>标题<input value={subject} onChange={event => setSubject(event.target.value)} maxLength={100} minLength={3} placeholder="简要描述遇到的问题" required /></label>
-          <label>问题描述<textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={2000} minLength={10} rows={4} placeholder="请写明发生时间、系统和客户端版本、脱敏错误码" required /></label>
-          <button className="primary-button" disabled={busy}>提交工单 <ArrowUpRight size={14} /></button>
-        </form>}
-        {!rows ? <LoadingBlock /> : rows.length === 0 ? <Empty title="暂无工单" detail="新工单会显示在这里。" /> : <div className="support-tickets">{rows.map(row => <button key={row.id} className={'support-ticket' + (selectedId === row.id ? ' selected' : '')} onClick={() => setSelectedId(row.id)}>
+    <section className="panel support-list"><SectionTitle title={role === 'admin' ? '会员工单' : '我的工单'} detail={meta ? '共 ' + meta.total + ' 条' : '载入中'} />
+        {!rows ? <LoadingBlock /> : rows.length === 0 ? <Empty title="暂无工单" detail="新工单会显示在这里。" /> : <div className="support-tickets">{rows.map(row => <button key={row.id} className="support-ticket" onClick={() => { setDetail(null); setSelectedId(row.id); }}>
           <span><b>{row.subject}</b><small>{role === 'admin' ? row.user_name + ' · ' : ''}{ticketCategoryText[row.category]} · {shortDate(row.updated_at)}</small></span>
           <StatusPill status={ticketStatusText[row.status]} tone={row.status === 'resolved' ? 'green' : row.status === 'in_progress' ? 'amber' : 'gray'} />
         </button>)}</div>}
         {meta && meta.total_pages > 1 && <div className="support-pagination"><button className="text-button" disabled={page === 1} onClick={() => setPage(page - 1)}>上一页</button><span>{page} / {meta.total_pages}</span><button className="text-button" disabled={page >= meta.total_pages} onClick={() => setPage(page + 1)}>下一页</button></div>}
-      </section>
-      <section className="panel support-detail">{!detail ? <Empty title="选择一张工单" detail="点击左侧记录查看处理过程。" /> : <>
+    </section>
+    {showCreate && <Modal title="新建工单" detail="描述遇到的问题，方便客服跟进" onClose={() => setShowCreate(false)}>
+      <form className="support-form" onSubmit={create}>
+          <label>问题类别<select value={category} onChange={event => setCategory(event.target.value)}>{Object.entries(ticketCategoryText).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label>
+          <label>标题<input value={subject} onChange={event => setSubject(event.target.value)} maxLength={100} minLength={3} placeholder="简要描述遇到的问题" required /></label>
+          <label>问题描述<textarea value={description} onChange={event => setDescription(event.target.value)} maxLength={2000} minLength={10} rows={4} placeholder="请写明发生时间、系统和客户端版本、脱敏错误码" required /></label>
+          <button className="primary-button" disabled={busy}>提交工单 <ArrowUpRight size={14} /></button>
+      </form>
+    </Modal>}
+    {selectedId && <Modal title="工单详情" detail="处理记录与回复" onClose={() => { setSelectedId(null); setDetail(null); setReply(''); }} wide>
+      {!detail || detail.id !== selectedId ? <LoadingBlock /> : <>
         <div className="support-detail-head"><span className="eyebrow">{ticketCategoryText[detail.category]} · {detail.id.slice(0, 8)}</span><h2>{detail.subject}</h2><div><StatusPill status={ticketStatusText[detail.status]} tone={detail.status === 'resolved' ? 'green' : detail.status === 'in_progress' ? 'amber' : 'gray'} /><small>创建于 {new Date(detail.created_at).toLocaleString('zh-CN')}</small></div></div>
         {role === 'admin' && <div className="support-actions">
           {detail.status === 'open' && <button className="secondary-button" disabled={busy} onClick={() => void changeStatus('in_progress')}>开始处理</button>}
@@ -456,8 +503,8 @@ function SupportPage({ role, refresh, notify }: { role: User['role']; refresh: n
         </div>}
         <div className="support-events">{detail.events.map(item => item.kind === 'status_changed' ? <div key={item.id} className="support-event system">{item.actor_name} 将状态从 {ticketStatusText[item.from_status!]} 改为 {ticketStatusText[item.to_status!]} · {new Date(item.created_at).toLocaleString('zh-CN')}</div> : <div key={item.id} className={'support-event' + (item.actor_role === 'admin' ? ' staff' : '')}><div><b>{item.actor_name}</b><small>{new Date(item.created_at).toLocaleString('zh-CN')}</small></div><p>{item.body}</p></div>)}</div>
         <form className="support-reply" onSubmit={sendReply}><label htmlFor="support-reply">{role === 'admin' ? '回复会员' : '补充说明'}</label><textarea id="support-reply" value={reply} onChange={event => setReply(event.target.value)} maxLength={2000} minLength={2} rows={3} placeholder="请勿填写密码或完整订阅地址" required /><button className="primary-button" disabled={busy}>发送回复 <ArrowUpRight size={14} /></button></form>
-      </>}</section>
-    </div>
+      </>}
+    </Modal>}
   </div>;
 }
 
@@ -469,15 +516,78 @@ function UsersPage({ refresh, notify }: { refresh: number; notify: (value: strin
 
 function NodesPage({ refresh, notify }: { refresh: number; notify: (value: string) => void }) {
   const [rows, setRows] = useState<Node[] | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<NodeDetail | null>(null);
+  const [nextStatus, setNextStatus] = useState<NodeStatus | ''>('');
+  const [name, setName] = useState('');
+  const [region, setRegion] = useState('');
+  const [busy, setBusy] = useState(false);
   const load = useCallback(() => api<Node[]>('/api/v1/admin/nodes').then(setRows).catch(error => notify((error as Error).message)), [notify]);
   useEffect(() => { void load(); }, [load, refresh]);
-  const change = async (node: Node, status: Node['status']) => {
-    try { await api('/api/v1/admin/nodes/' + node.id, { method: 'PATCH', body: JSON.stringify({ status }) }); notify('测试节点状态已更新'); await load(); }
-    catch (error) { notify((error as Error).message); }
+  const openDetail = async (id: string) => {
+    setSelectedId(id);
+    setDetail(null);
+    try {
+      const node = await api<NodeDetail>('/api/v1/admin/nodes/' + id);
+      setDetail(node);
+      setNextStatus('');
+    } catch (error) { setSelectedId(null); notify((error as Error).message); }
   };
-  return <div className="page-stack"><PageHeading eyebrow="运营管理" title="节点运维" subtitle="本地节点目录与状态控制。本页不会登录或操作任何真实服务器。" action={<button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新探测</button>} /><div className="notice notice-warning"><ShieldCheck size={16} /><span><b>安全边界</b> 当前仅有保留测试地址的演示记录。部署、SSH、密钥管理和真实节点控制尚未接入。</span></div><section className="panel"><SectionTitle title="节点目录" detail={rows ? rows.length + ' 个测试记录' : '载入中'} /><div className="table-wrap"><table><thead><tr><th>节点</th><th>协议 / 地址</th><th>在线会话</th><th>延迟</th><th>状态</th><th>变更</th></tr></thead><tbody>{rows?.map(node => <tr key={node.id}><td><span className="node-cell"><span className="node-indicator" /><span><b>{node.name}</b><small>{node.region} · {node.is_test ? '测试记录' : '节点'}</small></span></span></td><td><code>{node.protocol}</code><small className="table-sub">{node.endpoint_host}:{node.endpoint_port}</small></td><td>{node.active_sessions} / {node.max_sessions}</td><td>{node.latency_ms ?? '—'} ms</td><td><StatusPill status={nodeStatus(node.status)} tone={node.status === 'available' ? 'green' : 'amber'} /></td><td><select aria-label={node.name + ' 状态'} value={node.status} onChange={event => void change(node, event.target.value as Node['status'])}><option value="available">可用</option><option value="maintenance">维护</option><option value="disabled">停用</option></select></td></tr>)}</tbody></table></div></section><div className="metric-grid compact-metrics"><Metric label="在线节点" value={rows?.filter(item => item.status === 'available').length ?? '—'} note="仅计算演示数据" icon={Server} tone="green" /><Metric label="分配会话" value={rows?.reduce((sum, item) => sum + item.active_sessions, 0) ?? '—'} note="样例计数" icon={Users} tone="teal" /><Metric label="监控探针" value="未接入" note="阶段 3 交付" icon={Activity} tone="amber" /><Metric label="变更审计" value="已启用" note="本地数据库" icon={ShieldCheck} tone="blue" /></div></div>;
+  const create = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const node = await api<Node>('/api/v1/admin/nodes', { method: 'POST', body: JSON.stringify({ name: name.trim(), region: region.trim() }) });
+      setShowCreate(false); setName(''); setRegion('');
+      notify('演示节点已加入候选目录');
+      await load();
+      await openDetail(node.id);
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  const change = async () => {
+    if (!detail || !nextStatus) return;
+    setBusy(true);
+    try {
+      await api('/api/v1/admin/nodes/' + detail.id, { method: 'PATCH', body: JSON.stringify({ status: nextStatus }) });
+      notify('演示目录状态已更新');
+      await load();
+      await openDetail(detail.id);
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  return <div className="page-stack">
+    <PageHeading eyebrow="运营管理" title="节点运维" subtitle="维护本地演示节点目录与生命周期；目录状态不代表真实连接或探测结果。" action={<div className="heading-actions"><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新列表</button><button className="primary-button" onClick={() => setShowCreate(true)}><Server size={14} /> 新建测试记录</button></div>} />
+    <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>演示边界</b> 新记录只使用 .invalid 保留域名；健康探测、部署、SSH、密钥管理和真实节点控制均未接入。</span></div>
+    <section className="panel"><SectionTitle title="节点目录" detail={rows ? rows.length + ' 个记录' : '载入中'} />
+      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="暂无节点记录" detail="点击右上角新建本地测试记录。" /> : <div className="table-wrap"><table><thead><tr><th>节点</th><th>协议 / 测试地址</th><th>样例容量</th><th>目录状态</th><th>健康探测</th><th>配置版本</th><th>操作</th></tr></thead><tbody>{rows.map(node => <tr key={node.id}>
+        <td><span className="node-cell"><span className={'node-indicator' + (node.status === 'available' ? '' : ' inactive')} /><span><b>{node.name}</b><small>{node.region} · {node.is_test ? '演示记录' : '只读记录'}</small></span></span></td>
+        <td><code>{node.protocol}</code><small className="table-sub">{node.endpoint_host}:{node.endpoint_port}</small></td>
+        <td>{node.active_sessions} / {node.max_sessions}</td><td><StatusPill status={nodeStatus(node.status)} tone={nodeTone(node.status)} /></td>
+        <td><StatusPill status={node.health_status === 'not_connected' ? '未接入' : node.health_status} tone="gray" /></td><td>v{node.config_version}</td>
+        <td><button className="text-button" onClick={() => void openDetail(node.id)}>详情</button></td>
+      </tr>)}</tbody></table></div>}
+    </section>
+    <div className="metric-grid compact-metrics"><Metric label="目录记录" value={rows?.length ?? '—'} note="仅本地演示" icon={Server} tone="green" /><Metric label="标记可用" value={rows?.filter(item => item.status === 'available').length ?? '—'} note="不代表真实在线" icon={Users} tone="teal" /><Metric label="健康探测" value="未接入" note="无实时监控数据" icon={Activity} tone="amber" /><Metric label="变更历史" value="已记录" note="状态切换可追溯" icon={ShieldCheck} tone="blue" /></div>
+    {showCreate && <Modal title="新建测试节点" detail="仅创建本地目录记录，不部署服务器" onClose={() => { if (!busy) setShowCreate(false); }}>
+      <form className="node-create-form" onSubmit={create}><label>节点名称<input required minLength={2} maxLength={60} value={name} onChange={event => setName(event.target.value)} placeholder="例如：演示节点 02" /></label><label>测试区域<input required minLength={2} maxLength={40} value={region} onChange={event => setRegion(event.target.value)} placeholder="例如：测试区域 B" /></label>
+        <p className="modal-copy">系统自动分配 .invalid 测试地址，初始为候选状态，健康探测显示未接入。</p><div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setShowCreate(false)}>取消</button><button className="primary-button" disabled={busy}>创建记录</button></div>
+      </form>
+    </Modal>}
+    {selectedId && <Modal title="节点详情" detail="本地演示目录与状态变更历史" onClose={() => { if (!busy) { setSelectedId(null); setDetail(null); } }} wide>
+      {!detail || detail.id !== selectedId ? <LoadingBlock /> : <><dl className="detail-grid">
+        <div><dt>节点名称</dt><dd>{detail.name}</dd></div><div><dt>测试区域</dt><dd>{detail.region}</dd></div>
+        <div><dt>协议 / 测试地址</dt><dd>{detail.protocol} · {detail.endpoint_host}:{detail.endpoint_port}</dd></div><div><dt>目录状态</dt><dd>{nodeStatus(detail.status)}</dd></div>
+        <div><dt>健康探测</dt><dd>{detail.health_status === 'not_connected' ? '未接入' : detail.health_status}</dd></div><div><dt>最近探测</dt><dd>{detail.last_health_check_at ? new Date(detail.last_health_check_at).toLocaleString('zh-CN') : '尚无探测数据'}</dd></div>
+        <div><dt>配置版本</dt><dd>v{detail.config_version}</dd></div><div><dt>样例会话 / 容量</dt><dd>{detail.active_sessions} / {detail.max_sessions}</dd></div>
+      </dl><div className="node-transition"><label>切换目录状态<select value={nextStatus} onChange={event => setNextStatus(event.target.value as NodeStatus)} disabled={!detail.allowed_transitions.length || busy}><option value="">选择目标状态</option>{detail.allowed_transitions.map(status => <option value={status} key={status}>{nodeStatus(status)}</option>)}</select></label><button className="primary-button" disabled={!nextStatus || busy} onClick={() => void change()}>确认变更</button></div>
+      <div className="node-history"><h3>状态变更记录</h3>{detail.changes.length ? detail.changes.map(item => <div key={item.id}><b>{nodeStatus(item.from_status)} → {nodeStatus(item.to_status)}</b><span>{item.actor_name} · {new Date(item.created_at).toLocaleString('zh-CN')}</span></div>) : <p>暂无状态变更。</p>}</div></>}
+    </Modal>}
+  </div>;
 }
-function nodeStatus(status: Node['status']) { return ({ available: '可用', maintenance: '维护中', disabled: '已停用' } as const)[status]; }
+function nodeStatus(status: NodeStatus) { return ({ candidate: '候选', available: '标记可用', draining: '排空中', maintenance: '维护中', isolated: '已隔离', retired: '已退役', disabled: '已停用（旧）' } as const)[status]; }
+function nodeTone(status: NodeStatus) { return status === 'available' ? 'green' : status === 'draining' || status === 'maintenance' ? 'amber' : status === 'isolated' ? 'red' : 'gray'; }
 
 function CommissionsPage({ refresh, notify }: { refresh: number; notify: (value: string) => void }) {
   const [rows, setRows] = useState<Commission[] | null>(null);

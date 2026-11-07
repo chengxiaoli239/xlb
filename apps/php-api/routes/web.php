@@ -29,6 +29,8 @@ Route::prefix('api/v1/admin')->middleware(['auth', 'admin'])->group(function ():
     Route::get('/summary', [PlatformController::class, 'summary']);
     Route::get('/users', [PlatformController::class, 'users']);
     Route::get('/nodes', [PlatformController::class, 'nodes']);
+    Route::post('/nodes', [PlatformController::class, 'createNode']);
+    Route::get('/nodes/{id}', [PlatformController::class, 'nodeDetail']);
     Route::patch('/nodes/{id}', [PlatformController::class, 'updateNode']);
     Route::get('/commissions', [PlatformController::class, 'commissions']);
     Route::get('/plans', [PlatformController::class, 'adminPlans']);

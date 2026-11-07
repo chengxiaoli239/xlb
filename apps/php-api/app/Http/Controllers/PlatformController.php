@@ -9,9 +9,20 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 class PlatformController extends Controller
 {
+    private const NODE_TRANSITIONS = [
+        'candidate' => ['available', 'maintenance', 'isolated', 'retired'],
+        'available' => ['draining', 'maintenance', 'isolated'],
+        'draining' => ['available', 'maintenance', 'isolated', 'retired'],
+        'maintenance' => ['candidate', 'isolated', 'retired'],
+        'isolated' => ['maintenance', 'retired'],
+        'retired' => [],
+        'disabled' => ['maintenance', 'retired'],
+    ];
+
     public function health(): JsonResponse
     {
         return response()->json(['status' => 'ok', 'mode' => 'local-development']);
@@ -168,7 +179,8 @@ class PlatformController extends Controller
             'memberCount' => DB::table('users')->where('role', 'member')->count(),
             'activeEntitlements' => DB::table('entitlements')->where('status', 'active')->where('ends_at', '>', now()->toIso8601String())->count(),
             'activeSubscriptions' => DB::table('subscriptions')->where('status', 'active')->where('expires_at', '>', now()->toIso8601String())->count(),
-            'availableNodes' => DB::table('nodes')->where('status', 'available')->count(),
+            'availableNodes' => DB::table('nodes')->where('is_test', true)->where('status', 'available')->count(),
+            'nodeCount' => DB::table('nodes')->where('is_test', true)->count(),
             'pendingCommissionCents' => (int) DB::table('commission_entries')->where('status', 'pending')->sum('amount_cents'),
             'recentAudit' => $recentAudit,
         ]]);
@@ -186,23 +198,114 @@ class PlatformController extends Controller
 
     public function nodes(): JsonResponse
     {
-        return response()->json(['data' => DB::table('nodes')->orderBy('name')->get(['id', 'name', 'region', 'protocol', 'endpoint_host', 'endpoint_port', 'status', 'is_test', 'max_sessions', 'active_sessions', 'latency_ms', 'updated_at'])]);
+        $nodes = DB::table('nodes')->orderBy('name')->get()->map(fn (object $node): array => $this->nodePayload($node));
+
+        return response()->json(['data' => $nodes]);
+    }
+
+    public function nodeDetail(string $id): JsonResponse
+    {
+        $node = DB::table('nodes')->where('id', $id)->first();
+        if (! $node) {
+            return $this->error('not_found', '节点不存在', 404);
+        }
+
+        $changes = DB::table('node_state_changes as c')->join('users as u', 'u.id', '=', 'c.actor_user_id')
+            ->where('c.node_id', $id)->orderByDesc('c.created_at')->limit(20)
+            ->get(['c.id', 'c.from_status', 'c.to_status', 'c.created_at', 'u.name as actor_name']);
+
+        return response()->json(['data' => [...$this->nodePayload($node), 'changes' => $changes]]);
+    }
+
+    public function createNode(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => ['required', 'string', 'min:2', 'max:60', 'regex:/\S/u'],
+            'region' => ['required', 'string', 'min:2', 'max:40', 'regex:/\S/u'],
+            'endpoint_host' => ['prohibited'],
+            'endpoint_port' => ['prohibited'],
+            'protocol' => ['prohibited'],
+            'status' => ['prohibited'],
+            'is_test' => ['prohibited'],
+            'max_sessions' => ['prohibited'],
+            'active_sessions' => ['prohibited'],
+            'latency_ms' => ['prohibited'],
+            'health_status' => ['prohibited'],
+            'config_version' => ['prohibited'],
+        ]);
+        if ($validator->fails()) {
+            return $this->error('validation_error', '请检查节点名称和测试区域', 400);
+        }
+
+        $name = trim($validator->validated()['name']);
+        $region = trim($validator->validated()['region']);
+        if (Str::length($name) < 2 || Str::length($region) < 2) {
+            return $this->error('validation_error', '请检查节点名称和测试区域', 400);
+        }
+
+        $id = (string) Str::uuid();
+        $now = now()->toIso8601String();
+        DB::transaction(function () use ($request, $id, $now, $name, $region): void {
+            DB::table('nodes')->insert([
+                'id' => $id,
+                'name' => $name,
+                'region' => $region,
+                'protocol' => 'SOCKS5',
+                'endpoint_host' => 'node-'.substr(str_replace('-', '', $id), 0, 12).'.invalid',
+                'endpoint_port' => 1080,
+                'status' => 'candidate',
+                'is_test' => true,
+                'max_sessions' => 0,
+                'active_sessions' => 0,
+                'latency_ms' => null,
+                'health_status' => 'not_connected',
+                'last_health_check_at' => null,
+                'config_version' => 1,
+                'updated_at' => $now,
+            ]);
+            $this->audit($request, 'node.created', 'node', $id);
+        });
+
+        return response()->json(['data' => $this->nodePayload(DB::table('nodes')->where('id', $id)->first())], 201);
     }
 
     public function updateNode(Request $request, string $id): JsonResponse
     {
-        $validator = Validator::make($request->all(), ['status' => ['required', 'in:available,maintenance,disabled']]);
+        $validator = Validator::make($request->all(), ['status' => ['required', Rule::in(array_keys(self::NODE_TRANSITIONS))]]);
         if ($validator->fails()) {
             return $this->error('validation_error', '节点状态无效', 400);
         }
 
-        if (! DB::table('nodes')->where('id', $id)->update(['status' => $request->input('status'), 'updated_at' => now()->toIso8601String()])) {
-            return $this->error('not_found', '节点不存在', 404);
-        }
+        $nextStatus = $validator->validated()['status'];
+        $result = DB::transaction(function () use ($request, $id, $nextStatus): array {
+            $node = DB::table('nodes')->where('id', $id)->lockForUpdate()->first();
+            if (! $node) {
+                return ['error' => ['code' => 'not_found', 'message' => '节点不存在', 'status' => 404]];
+            }
+            if (! $node->is_test) {
+                return ['error' => ['code' => 'live_node_unsupported', 'message' => '本地控制台不能操作真实节点', 'status' => 409]];
+            }
+            if ($node->status === $nextStatus) {
+                return ['data' => ['id' => $id, 'previous_status' => $node->status, 'status' => $nextStatus]];
+            }
+            if (! in_array($nextStatus, self::NODE_TRANSITIONS[$node->status] ?? [], true)) {
+                return ['error' => ['code' => 'invalid_state_transition', 'message' => '不能直接切换到该生命周期状态', 'status' => 409]];
+            }
 
-        $this->audit($request, 'node.status_changed', 'node', $id);
+            $now = now()->toISOString();
+            DB::table('nodes')->where('id', $id)->update(['status' => $nextStatus, 'updated_at' => $now]);
+            DB::table('node_state_changes')->insert([
+                'id' => (string) Str::uuid(), 'node_id' => $id, 'actor_user_id' => $request->user()->id,
+                'from_status' => $node->status, 'to_status' => $nextStatus, 'created_at' => $now,
+            ]);
+            $this->audit($request, 'node.lifecycle_changed', 'node', $id);
 
-        return response()->json(['data' => ['id' => $id, 'status' => $request->input('status')]]);
+            return ['data' => ['id' => $id, 'previous_status' => $node->status, 'status' => $nextStatus]];
+        });
+
+        return isset($result['error'])
+            ? $this->error($result['error']['code'], $result['error']['message'], $result['error']['status'])
+            : response()->json(['data' => $result['data']]);
     }
 
     public function commissions(): JsonResponse
@@ -313,6 +416,29 @@ class PlatformController extends Controller
         ]);
 
         return response($yaml, 200)->header('Content-Type', 'text/yaml; charset=utf-8')->header('Cache-Control', 'no-store');
+    }
+
+    /** @return array<string, bool|int|string|array<string>|null> */
+    private function nodePayload(object $node): array
+    {
+        return [
+            'id' => $node->id,
+            'name' => $node->name,
+            'region' => $node->region,
+            'protocol' => $node->protocol,
+            'endpoint_host' => $node->endpoint_host,
+            'endpoint_port' => (int) $node->endpoint_port,
+            'status' => $node->status,
+            'is_test' => (bool) $node->is_test,
+            'max_sessions' => (int) $node->max_sessions,
+            'active_sessions' => (int) $node->active_sessions,
+            'latency_ms' => $node->latency_ms === null ? null : (int) $node->latency_ms,
+            'health_status' => $node->health_status,
+            'last_health_check_at' => $node->last_health_check_at,
+            'config_version' => (int) $node->config_version,
+            'updated_at' => $node->updated_at,
+            'allowed_transitions' => $node->is_test ? (self::NODE_TRANSITIONS[$node->status] ?? []) : [],
+        ];
     }
 
     private function newSubscriptionToken(): string
