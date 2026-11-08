@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>迅连宝</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="popup-header">
+      <div class="brand"><span class="brand-mark">X</span><span><b>迅连宝</b><small>连接助手</small></span></div>
+      <span class="preview-tag">本地预览</span>
+    </header>
+    <nav class="popup-tabs" aria-label="连接与线路">
+      <button type="button" data-tab="connection" aria-selected="true">连接</button>
+      <button type="button" data-tab="locations" aria-selected="false">线路</button>
+    </nav>
+    <main id="connection" class="popup-panel">
+      <div class="connection-state"><span class="state-indicator"></span><b>未连接</b><span>本地版本尚未接入真实线路</span></div>
+      <button class="connect-button" type="button" disabled title="真实节点尚未接入">连接</button>
+      <p class="panel-note">接入隔离测试节点并完成连接验证后，才会开放连接控制。</p>
+    </main>
+    <main id="locations" class="popup-panel" hidden>
+      <div class="empty-lines"><b>暂无可连接线路</b><span>线路目录和节点健康检查尚未接入。</span></div>
+    </main>
+    <section class="account-actions" aria-label="账户与订阅">
+      <button class="action-row" type="button" data-page="plans"><span class="action-icon vip-icon">VIP</span><span class="action-copy"><b>会员与续费</b><small>查看当前账号、套餐和到期时间</small></span><span class="chevron" aria-hidden="true">›</span></button>
+      <button class="action-row" type="button" data-page="subscriptions"><span class="action-icon">订</span><span class="action-copy"><b>客户端与订阅码</b><small>管理固定链接并展示扫码导入</small></span><span class="chevron" aria-hidden="true">›</span></button>
+      <div class="mode-row"><span>加速模式</span><b>智能模式</b><small>线路验证后开放</small></div>
+    </section>
+    <footer>本地界面预览 · 连接和支付尚未接入</footer>
+    <script src="popup.js"></script>
+  </body>
+</html>

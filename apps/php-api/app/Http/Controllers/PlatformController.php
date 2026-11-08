@@ -7,6 +7,7 @@ use App\Services\TestOrderLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -161,6 +162,10 @@ class PlatformController extends Controller
         $entitlement = DB::table('entitlements as e')->join('plans as p', 'p.id', '=', 'e.plan_id')
             ->where('e.user_id', $userId)->where('e.status', 'active')->where('e.starts_at', '<=', $now)->where('e.ends_at', '>', $now)
             ->orderByDesc('e.ends_at')->first(['e.id', 'e.status', 'e.starts_at', 'e.ends_at', 'e.data_used_gb', 'p.id as plan_id', 'p.name as plan_name', 'p.period_label', 'p.price_cents', 'p.traffic_gb', 'p.max_devices']);
+        $latestEntitlementEnd = DB::table('entitlements')->where('user_id', $userId)->where('status', 'active')->where('ends_at', '>', $now)->orderByDesc('ends_at')->value('ends_at');
+        if ($entitlement && $latestEntitlementEnd && Carbon::parse($latestEntitlementEnd)->greaterThan(Carbon::parse($entitlement->ends_at))) {
+            $entitlement->ends_at = $latestEntitlementEnd;
+        }
         $subscriptions = DB::table('subscriptions')->where('user_id', $userId)->where('status', 'active')->count();
         $orders = DB::table('orders as o')->join('plans as p', 'p.id', '=', 'o.plan_id')->where('o.user_id', $userId)->orderByDesc('o.created_at')->limit(5)->get(['o.id', 'o.total_cents', 'o.status', 'o.expires_at', 'o.created_at', 'p.name as plan_name']);
         foreach ($orders as $order) {

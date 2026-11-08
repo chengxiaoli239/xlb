@@ -4,8 +4,9 @@ import {
   Bell, ChevronDown, CircleHelp, CircleUserRound, Clipboard, Command,
   CreditCard, Gauge, Globe2, KeyRound, LayoutDashboard, LifeBuoy, Link2,
   LogOut, Menu, Monitor, Moon, MoreHorizontal, Network, Puzzle, RefreshCw, Search,
-  Server, Settings2, ShieldCheck, Smartphone, Sun, Users, X,
+  QrCode, Server, Settings2, ShieldCheck, Smartphone, Sun, Users, X,
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 type User = { id: string; email: string; name: string; role: 'admin' | 'member' };
 type Plan = { id: string; name: string; period_label: string; duration_days: number; price_cents: number; traffic_gb: number; max_devices: number };
@@ -83,12 +84,15 @@ const adminNav = [
 
 export default function App() {
   const portalRole = window.location.pathname.startsWith('/account') || new URLSearchParams(window.location.search).get('portal') === 'member' ? 'member' : 'admin';
+  const requestedView = new URLSearchParams(window.location.search).get('view');
+  const memberViews = ['overview', 'subscriptions', 'plans', 'orders', 'support', 'clients'];
+  const initialView = portalRole === 'member' && requestedView && memberViews.includes(requestedView) ? requestedView : 'overview';
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try { return window.localStorage.getItem('xlb-console-theme') === 'light' ? 'light' : 'dark'; }
     catch { return 'dark'; }
   });
   const [user, setUser] = useState<User | null>(null);
-  const [view, setView] = useState('overview');
+  const [view, setView] = useState(initialView);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [loginEmail, setLoginEmail] = useState(portalRole === 'member' ? 'member@xlb.local' : 'admin@xlb.local');
@@ -130,7 +134,6 @@ export default function App() {
         throw new Error(portalRole === 'member' ? '请使用会员账户登录' : '请使用管理员账户登录');
       }
       setUser(next);
-      setView('overview');
       notify('已进入本地演示环境');
     } catch (error) { notify((error as Error).message); }
   };
@@ -390,15 +393,20 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
     try { await navigator.clipboard.writeText(absolute); notify('已复制订阅地址'); }
     catch { setCreatedUrl(absolute); notify('无法访问剪贴板，请手动复制'); }
   };
+  const showQr = (url: string) => {
+    setCreatedUrl(url);
+    setRotateTarget(null);
+    setShowSubscription(true);
+  };
   const current = rows?.find(row => row.status === 'active' && row.url);
   return <div className="page-stack">
-    <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="购买后自动准备固定订阅地址；后续续费继续使用同一地址。也可以在购买前获取。" action={<button className="primary-button" disabled={busy || !rows} onClick={() => { if (current?.url) void copy(current.url); else { setCreatedUrl(''); setRotateTarget(null); setShowSubscription(true); } }}><Clipboard size={15} />{current ? '复制固定链接' : '获取订阅链接'}</button>} />
+    <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="购买后自动准备固定订阅地址；后续续费继续使用同一地址。也可以在购买前获取。" action={<div className="subscription-actions"><button className="secondary-button" disabled={!current?.url} onClick={() => current?.url && void copy(current.url)}><Clipboard size={15} />复制链接</button><button className="primary-button" disabled={busy || !rows} onClick={() => { if (current?.url) showQr(current.url); else { setCreatedUrl(''); setRotateTarget(null); setShowSubscription(true); } }}><QrCode size={16} />{current ? '扫码导入' : '获取二维码'}</button></div>} />
     <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>权限说明</b> 订阅链接可预先创建；客户端仅会在当前会员权益有效且线路可用时取得配置。本地预览使用测试节点，不提供真实连接。</span></div>
     {showSubscription && <Modal title={createdUrl ? '固定订阅链接' : rotateTarget ? '轮换订阅链接' : '获取固定订阅链接'} detail={createdUrl ? '可随时在此页面重新复制；请勿公开分享' : rotateTarget ? '旧链接将立即失效' : '同一账户重复获取时会返回现有链接'} onClose={() => { if (busy) return; setShowSubscription(false); setCreatedUrl(''); setRotateTarget(null); }}>
-      {createdUrl ? <div className="secret-result"><div><span className="eyebrow">固定订阅 · 可重复复制</span><code>{new URL(createdUrl, window.location.origin).toString()}</code></div><button className="secondary-button" onClick={() => void copy(createdUrl)}><Clipboard size={15} /> 复制链接</button></div> : <><p className="modal-copy">{rotateTarget ? '确认轮换后，当前订阅链接立即失效。请更新已连接的客户端。' : '订阅链接可以提前获取；会员权益生效且有可用线路后，兼容客户端即可从此地址获取配置。'}</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowSubscription(false); setRotateTarget(null); }}>取消</button><button className="primary-button" disabled={busy} onClick={() => void (rotateTarget ? rotate(rotateTarget) : create())}>{rotateTarget ? '确认轮换' : '获取链接'}</button></div></>}
+      {createdUrl ? <div className="subscription-qr-layout"><div className="subscription-qr"><QRCodeSVG value={new URL(createdUrl, window.location.origin).toString()} size={196} level="M" title="固定订阅二维码" /><b>用客户端扫描导入</b><span>二维码包含订阅凭证，请勿转发或公开展示。</span></div><div className="secret-result"><div><span className="eyebrow">固定订阅 · 可重复复制</span><code>{new URL(createdUrl, window.location.origin).toString()}</code></div><button className="secondary-button" onClick={() => void copy(createdUrl)}><Clipboard size={15} /> 复制链接</button></div></div> : <><p className="modal-copy">{rotateTarget ? '确认轮换后，当前订阅链接立即失效。请更新已连接的客户端。' : '订阅链接可以提前获取；会员权益生效且有可用线路后，兼容客户端即可从此地址获取配置。'}</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowSubscription(false); setRotateTarget(null); }}>取消</button><button className="primary-button" disabled={busy} onClick={() => void (rotateTarget ? rotate(rotateTarget) : create())}>{rotateTarget ? '确认轮换' : '获取链接'}</button></div></>}
     </Modal>}
     <section className="panel"><SectionTitle title="订阅凭证" detail={rows ? rows.length + ' 条记录' : '读取中'} action={<button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新</button>} />
-      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="尚未创建订阅" detail="获取固定链接后，可随时在这里复制或轮换地址。" /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>凭证状态</th><th>创建时间</th><th>配置权限</th><th>最近访问</th><th>操作</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><span className="table-main"><Link2 size={15} />{row.name}</span><small className="table-sub">{row.id.slice(0, 14)}</small></td><td><StatusPill status={row.status === 'active' ? '可用凭证' : '已撤销'} tone={row.status === 'active' ? 'green' : 'gray'} /></td><td>{shortDate(row.created_at)}</td><td>需有效会员权益</td><td>{shortDate(row.last_used_at)}</td><td><div className="row-actions">{row.status === 'active' && <>{row.url && <button className="text-button" aria-label="复制固定订阅链接" title="复制固定订阅链接" onClick={() => void copy(row.url!)}><Clipboard size={14} />复制</button>}<button className="text-button" onClick={() => { setCreatedUrl(''); setRotateTarget(row); setShowSubscription(true); }}>轮换</button><button className="text-button danger-text" onClick={() => void revoke(row)}>撤销</button></>}</div></td></tr>)}</tbody></table></div>}
+      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="尚未创建订阅" detail="获取固定链接后，可随时在这里复制或轮换地址。" /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>凭证状态</th><th>创建时间</th><th>配置权限</th><th>最近访问</th><th>操作</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><span className="table-main"><Link2 size={15} />{row.name}</span><small className="table-sub">{row.id.slice(0, 14)}</small></td><td><StatusPill status={row.status === 'active' ? '可用凭证' : '已撤销'} tone={row.status === 'active' ? 'green' : 'gray'} /></td><td>{shortDate(row.created_at)}</td><td>需有效会员权益</td><td>{shortDate(row.last_used_at)}</td><td><div className="row-actions">{row.status === 'active' && <>{row.url && <><button className="text-button" aria-label="复制固定订阅链接" title="复制固定订阅链接" onClick={() => void copy(row.url!)}><Clipboard size={14} />复制</button><button className="text-button" aria-label="显示订阅二维码" title="显示订阅二维码" onClick={() => showQr(row.url!)}><QrCode size={14} />二维码</button></>}<button className="text-button" onClick={() => { setCreatedUrl(''); setRotateTarget(row); setShowSubscription(true); }}>轮换</button><button className="text-button danger-text" onClick={() => void revoke(row)}>撤销</button></>}</div></td></tr>)}</tbody></table></div>}
     </section>
     <div className="two-column"><section className="panel"><SectionTitle title="连接客户端" detail="外部客户端兼容性仍需逐版本验证" /><div className="client-list"><div><span className="client-icon"><Monitor size={17} /></span><span><b>Clash Verge Rev</b><small>Mihomo 内核 · 计划首批验证</small></span><StatusPill status="待验证" tone="amber" /></div><div><span className="client-icon"><Smartphone size={17} /></span><span><b>Clash Mi</b><small>应用名称与平台待确认</small></span><StatusPill status="待确认" tone="gray" /></div></div></section><section className="panel"><SectionTitle title="使用状态" detail="权限与接入边界" /><div className="policy-list"><p><ShieldCheck size={15} /> 令牌以摘要校验、加密密文保存。</p><p><RefreshCw size={15} /> 轮换会立即废止旧链接。</p><p><Activity size={15} /> 用量由服务端策略执行，不依赖配置文案。</p><p><Globe2 size={15} /> 本地测试节点使用保留地址，不提供真实连接。</p></div></section></div>
   </div>;
@@ -426,8 +434,8 @@ function ClientDownloadPage({ refresh, setView, notify }: { refresh: number; set
   } as const)[status];
 
   return <div className="page-stack client-guide">
-    <PageHeading eyebrow="设备接入" title="客户端下载" subtitle="按设备选择客户端，并按照步骤导入迅连宝订阅。" action={<button className="secondary-button" onClick={() => setView('subscriptions')}><Link2 size={15} /> 订阅与设备</button>} />
-    <div className="notice notice-neutral"><ShieldCheck size={16} /><span><b>本地开发预览</b> 正式安装包和生产线路尚未配置，下载入口会在文件来源与版本验证完成后开放。</span></div>
+    <PageHeading eyebrow="设备接入" title="客户端下载" subtitle="按设备选择客户端，并按照步骤导入迅连宝订阅。" action={<button className="primary-button" onClick={() => setView('subscriptions')}><QrCode size={15} /> 扫码导入</button>} />
+    <div className="notice notice-neutral"><ShieldCheck size={16} /><span><b>本地开发预览</b> 当前订阅接口仅生成 Mihomo / Clash YAML 示例；节点仍为保留地址，不能建立真实连接。其他客户端格式需逐版本适配与验证。</span></div>
     <div className="client-platform-tabs" role="tablist" aria-label="选择设备平台">
       {clientPlatforms.map(item => {
         const Icon = item.icon;
@@ -442,6 +450,7 @@ function ClientDownloadPage({ refresh, setView, notify }: { refresh: number; set
           return <article className="client-download-card" key={client.id}>
             <div className="client-download-head"><span className="client-icon"><PlatformIcon size={18} /></span><div><h3>{client.name}</h3><p>{client.version ? '版本 ' + client.version : '版本待配置'}</p></div><StatusPill status={status.label} tone={status.tone} /></div>
             <p className="client-download-detail">{client.description || '暂无说明。'}</p>
+            <div className="client-format-label">{['Clash Mi', 'Clash Verge Rev', 'FlClash', 'Mihomo'].includes(client.name) ? '订阅格式：Clash / Mihomo YAML · 真实连接待验证' : '订阅格式：待适配验证'}</div>
             {client.qr_code_url && <a className="client-qr-link" href={client.qr_code_url} target="_blank" rel="noopener noreferrer"><img src={client.qr_code_url} alt={client.name + ' 下载二维码'} loading="lazy" />查看下载二维码</a>}
             <div className="client-entry-links">
               {client.download_url ? <a className="secondary-button" href={client.download_url} target="_blank" rel="noopener noreferrer"><ArrowDownToLine size={15} />下载客户端</a> : <button className="secondary-button" type="button" disabled title="下载地址尚未配置"><ArrowDownToLine size={15} />下载地址待配置</button>}
@@ -456,8 +465,8 @@ function ClientDownloadPage({ refresh, setView, notify }: { refresh: number; set
       <ol className="client-setup-steps">
         <li><span>01</span><div><b>安装客户端</b><p>从客户端官方渠道安装对应平台的应用，并确认版本与系统兼容。</p></div></li>
         <li><span>02</span><div><b>获取固定订阅地址</b><p>首次购买后自动准备；未购买时也可提前获取，后续续费沿用同一地址。</p></div></li>
-        <li><span>03</span><div><b>添加远程订阅</b><p>在客户端选择添加订阅或配置，将地址粘贴后更新配置。</p></div></li>
-        <li><span>04</span><div><b>检查线路状态</b><p>当前会员权益生效且有可用线路时，客户端才会获取线路配置并建立连接。</p></div></li>
+        <li><span>03</span><div><b>扫码或粘贴订阅</b><p>Clash Mi 等客户端选择扫码导入；桌面客户端可复制固定地址后添加远程订阅。</p></div></li>
+        <li><span>04</span><div><b>更新并检查连接</b><p>当前只验证本地格式流程；需接入隔离测试节点后才能确认真实线路连接。</p></div></li>
       </ol>
     </section>
     <section className="client-help-section" aria-labelledby="client-help-title">
@@ -471,11 +480,15 @@ function ClientDownloadPage({ refresh, setView, notify }: { refresh: number; set
 
 function PlansPage({ role, refresh, notify, onDataChange }: { role: User['role']; refresh: number; notify: (value: string) => void; onDataChange: () => void }) {
   const [plans, setPlans] = useState<Plan[] | null>(null);
+  const [account, setAccount] = useState<Overview | null>(null);
   const [selection, setSelection] = useState<{ plan: Plan; key: string } | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  useEffect(() => { api<Plan[]>('/api/v1/catalog/plans').then(setPlans).catch(error => notify((error as Error).message)); }, [refresh, notify]);
+  useEffect(() => {
+    api<Plan[]>('/api/v1/catalog/plans').then(setPlans).catch(error => notify((error as Error).message));
+    if (role === 'member') api<Overview>('/api/v1/me/overview').then(setAccount).catch(error => notify((error as Error).message));
+  }, [refresh, role, notify]);
   const create = async () => {
     if (!selection || busy) return;
     setBusy(true); setError('');
@@ -485,7 +498,7 @@ function PlansPage({ role, refresh, notify, onDataChange }: { role: User['role']
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
   };
-  return <div className="page-stack"><PageHeading eyebrow="套餐中心" title="套餐权益" subtitle="查看套餐期限、流量和设备数量。" /><div className="notice notice-neutral"><CreditCard size={16} /><span>本地购买流程预览：可选择套餐并生成演示订单。支付尚未接入，不会扣款、开通真实权益或结算佣金。</span></div>
+  return <div className="page-stack"><PageHeading eyebrow="套餐中心" title="套餐权益" subtitle="查看套餐期限、流量和设备数量。" />{role === 'member' && <section className="vip-account-summary" aria-label="当前会员账户"><div><span>当前账号</span><b>{account?.user.email ?? '读取中'}</b></div><div><span>会员等级</span><b>{account?.entitlement?.plan_name ?? '尚未开通'}</b></div><div><span>到期时间</span><b>{account?.entitlement ? dateTime(account.entitlement.ends_at) : '—'}</b></div><button className="text-button" onClick={onDataChange}><RefreshCw size={14} />刷新状态</button></section>}<div className="notice notice-neutral"><CreditCard size={16} /><span>本地购买流程预览：可选择套餐并生成演示订单。支付尚未接入，不会扣款、开通真实权益或结算佣金。</span></div>
     <section className="panel"><SectionTitle title="可选套餐" detail={plans ? plans.length + ' 种方案' : '载入中'} />{!plans ? <LoadingBlock /> : !plans.length ? <Empty title="暂无上架套餐" detail="套餐上架后会显示在这里。" /> : <div className="plan-grid">{plans.map(plan => <div className="plan-row" key={plan.id}><div className="plan-period"><span className="plan-icon"><BadgeCheck size={17} /></span><span><b>{plan.name}</b><small>{plan.period_label}有效</small></span></div><div><b>{money(plan.price_cents)}</b><small>演示售价</small></div><div><b>{plan.traffic_gb} GB</b><small>套餐流量</small></div><div><b>{plan.max_devices} 台</b><small>同时在线</small></div>{role === 'member' ? <button className="secondary-button" onClick={() => { setError(''); setSelection({ plan, key: crypto.randomUUID() }); }}>选择套餐</button> : <StatusPill status="会员端可测试下单" tone="gray" />}</div>)}</div>}</section>
     <section className="panel"><SectionTitle title="权益一致性" detail="唯一事实源设计" /><div className="service-strip"><ServiceItem label="官网展示" status="共用套餐 API" icon={Globe2} /><ServiceItem label="自有 App" status="共用账户权益" icon={Smartphone} /><ServiceItem label="Clash 订阅" status="服务端校验" icon={Link2} /><ServiceItem label="运营后台" status="审计可查" icon={ShieldCheck} /></div></section>
     {selection && <Modal title="购买流程预览" detail="确认所选套餐；当前为本地演示" onClose={() => { if (!busy) setSelection(null); }}>

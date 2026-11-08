@@ -437,13 +437,15 @@
 .member-preview-banner svg { flex: none; }
 .member-preview-banner b { margin-right: 4px; }
 .member-portal[data-theme="dark"] .member-preview-banner { border-color: #645339; background: #413a2c; color: #f2d18c; }
+.member-portal { font-size: 16px; }
+.member-portal .member-preview-banner { font-size: 14px; }
 .member-portal .page-stack { gap: 18px; }
 .member-portal .page-heading h1 { color: var(--ink); font-size: 28px; }
-.member-portal .page-heading p { color: var(--muted); font-size: 14px; }
+.member-portal .page-heading p { color: var(--muted); font-size: 15px; }
 .member-portal .eyebrow { color: var(--green); font-size: 12px; }
 .member-portal .panel { background: var(--surface); border-color: var(--line); }
-.member-portal .section-title h2 { color: var(--ink); font-size: 17px; }
-.member-portal .section-title span { color: var(--muted); font-size: 14px; }
+.member-portal .section-title h2 { color: var(--ink); font-size: 18px; }
+.member-portal .section-title span { color: var(--muted); font-size: 15px; }
 .member-portal .service-item small { color: var(--muted); font-size: 13px; }
 .member-portal .plan-row { min-height: 82px; grid-template-columns: minmax(180px,1.5fr) repeat(3,minmax(90px,.7fr)) auto; gap: 18px; color: var(--ink); }
 .member-portal .plan-row > div > b { font-size: 16px; }
@@ -457,12 +459,14 @@
 .member-portal .status-pill { font-size: 13px; }
 .member-portal .table-wrap { overflow-x: auto; }
 .member-portal .table-wrap table { min-width: 960px; }
-.member-portal .table-wrap th { padding: 15px 18px; font-size: 14px; line-height: 1.5; }
-.member-portal .table-wrap td { min-height: 68px; height: 68px; padding: 15px 18px; font-size: 15px; line-height: 1.55; }
-.member-portal .table-main { gap: 8px; font-size: 15px; }
-.member-portal .table-sub { display: block; margin-top: 5px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.member-portal .table-wrap th { padding: 16px 18px; font-size: 15px; line-height: 1.5; }
+.member-portal .table-wrap td { min-height: 72px; height: 72px; padding: 16px 18px; font-size: 16px; line-height: 1.55; }
+.member-portal .table-main { gap: 8px; font-size: 16px; }
+.member-portal .table-sub { display: block; margin-top: 5px; color: var(--muted); font-size: 14px; line-height: 1.5; }
 .member-portal .row-actions { gap: 12px; white-space: nowrap; }
-.member-portal .row-actions .text-button { min-height: 36px; gap: 5px; font-size: 14px; }
+.member-portal .row-actions .text-button { min-height: 38px; gap: 5px; font-size: 15px; }
+.member-portal .text-button { color: var(--green); }
+.member-portal .text-button:hover { color: var(--green-dark); }
 .member-portal .policy-list p { font-size: 14px; line-height: 1.7; }
 .member-portal .client-download-head p { font-size: 13px; }
 .member-portal .app-footer { display: none; }
@@ -477,6 +481,20 @@
 .member-portal .detail-grid > div { border-color: var(--line); }
 .member-portal .secondary-button { border-color: var(--line); background: var(--surface); color: var(--ink); }
 .member-portal .secondary-button:hover { background: var(--subtle-bg); }
+.member-portal .subscription-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.member-portal .subscription-qr-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 22px; }
+.member-portal .subscription-qr { display: grid; justify-items: center; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #263a32; text-align: center; }
+.member-portal .subscription-qr b { font-size: 14px; }
+.member-portal .subscription-qr span { color: #62756a; font-size: 12px; line-height: 1.5; }
+.member-portal .subscription-qr svg { width: 100%; max-width: 196px; height: auto; }
+.member-portal .subscription-qr-layout .secret-result { min-width: 0; display: grid; gap: 13px; }
+.member-portal .subscription-qr-layout .secret-result > div { min-width: 0; }
+.member-portal .subscription-qr-layout .secret-result code { overflow-wrap: anywhere; word-break: break-all; }
+.member-portal .vip-account-summary { min-width: 0; display: grid; grid-template-columns: minmax(180px, 1.2fr) repeat(2, minmax(190px, 1fr)) auto; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.member-portal .vip-account-summary > div { min-width: 0; display: grid; gap: 5px; }
+.member-portal .vip-account-summary span { color: var(--muted); font-size: 14px; }
+.member-portal .vip-account-summary b { color: var(--ink); font-size: 16px; overflow-wrap: anywhere; }
+.member-portal .vip-account-summary .text-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 14px; }
 @media (max-width: 960px) {
   .member-header { grid-template-columns: auto 1fr; gap: 10px 18px; padding: 10px 18px; }
   .member-nav { grid-column: 1 / -1; grid-row: 2; }
@@ -504,6 +522,7 @@
 .member-portal .client-download-head h3 { margin: 0; color: var(--ink); font-size: 15px; }
 .client-download-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .client-download-detail { min-height: 42px; margin: 16px 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.member-portal .client-format-label { min-height: 42px; margin: 0 0 14px; padding: 9px 10px; border-left: 3px solid var(--green); background: var(--subtle-bg); color: var(--muted); font-size: 14px; line-height: 1.6; }
 .member-portal .client-download-card .secondary-button { width: 100%; min-height: 40px; justify-content: center; }
 .member-portal .client-download-card .secondary-button:disabled { opacity: .72; cursor: not-allowed; }
 .member-portal .client-entry-links { display: flex; flex-direction: column; align-items: stretch; gap: 9px; }
@@ -521,6 +540,9 @@
 .client-help-section summary { color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer; }
 .client-help-section details p { max-width: 860px; margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
 @media (max-width: 960px) {
+  .member-portal .vip-account-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .member-portal .subscription-qr-layout { grid-template-columns: minmax(0, 1fr); }
+  .member-portal .subscription-qr { width: min(100%, 260px); justify-self: center; }
   .client-setup-steps { grid-template-columns: repeat(2,minmax(0,1fr)); row-gap: 18px; }
   .client-setup-steps li:nth-child(3) { padding-left: 0; border-left: 0; }
 }
@@ -537,6 +559,9 @@
   .client-setup-steps li, .client-setup-steps li:first-child, .client-setup-steps li:nth-child(3) { padding: 0 0 0 13px; border-left: 2px solid var(--line); }
 }
 @media (max-width: 620px) {
+  .member-portal .vip-account-summary { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .member-portal .vip-account-summary .text-button { justify-self: start; }
+  .member-portal .subscription-actions { justify-content: flex-start; }
   .member-header { padding: 9px 14px; }
   .member-brand { font-size: 15px; }
   .member-account-name { font-size: 0; }

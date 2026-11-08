@@ -56,7 +56,9 @@ class SandboxPaymentTest extends TestCase
         $this->getJson('/api/v1/me/orders/'.$orderId)->assertOk()
             ->assertJsonPath('data.payment.id', $paymentId)
             ->assertJsonPath('data.entitlement_grant.entitlement_id', $entitlementId);
-        $this->getJson('/api/v1/me/overview')->assertJsonPath('data.entitlement.plan_name', '年会员');
+        $this->getJson('/api/v1/me/overview')->assertOk()
+            ->assertJsonPath('data.entitlement.plan_name', '年会员')
+            ->assertJsonPath('data.entitlement.ends_at', $grant->ends_at);
         $this->assertSame($currentEnd, DB::table('entitlements')->where('user_id', 'user-member')->where('starts_at', '<=', now()->toIso8601String())->value('ends_at'));
         $this->assertDatabaseCount('entitlement_grants', 1);
         $this->assertDatabaseCount('sandbox_payment_events', 1);

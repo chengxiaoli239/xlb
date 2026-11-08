@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "迅连宝",
+  "version": "0.1.0",
+  "description": "迅连宝账户、线路与订阅入口的本地开发版。",
+  "action": {
+    "default_title": "迅连宝",
+    "default_popup": "popup.html"
+  }
+}
