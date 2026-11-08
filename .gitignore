@@ -9,3 +9,5 @@ data/
 *.sqlite-wal
 *.tsbuildinfo
 .DS_Store
+__pycache__/
+ops/.state/
