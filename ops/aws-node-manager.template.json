@@ -1,0 +1,273 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Dedicated XLB admin-only VPN test node, automatic full-stack expiry cleanup. No shared production instances.",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "ImageId": {
+      "Type": "AWS::EC2::Image::Id"
+    },
+    "InstanceProfile": {
+      "Type": "String",
+      "AllowedValues": [
+        "XlbNodeSsmProfile"
+      ]
+    },
+    "CleanupRoleArn": {
+      "Type": "String"
+    },
+    "ExpiresAtUtc": {
+      "Type": "String"
+    },
+    "NodeId": {
+      "Type": "String",
+      "AllowedPattern": "xlb-auto-[a-f0-9]{32}"
+    },
+    "ClientCidr": {
+      "Type": "String",
+      "AllowedPattern": "[0-9.]+/32"
+    },
+    "InstanceType": {
+      "Type": "String",
+      "AllowedValues": [
+        "t3.micro",
+        "t3.small"
+      ],
+      "Default": "t3.micro"
+    }
+  },
+  "Resources": {
+    "Credential": {
+      "Type": "AWS::SecretsManager::Secret",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "xlb/auto/${NodeId}"
+        },
+        "Description": "XLB isolated administrator test credential",
+        "GenerateSecretString": {
+          "PasswordLength": 32,
+          "ExcludePunctuation": true
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "xlb"
+          },
+          {
+            "Key": "Environment",
+            "Value": "test"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "xlb-node-manager"
+          },
+          {
+            "Key": "DeploymentId",
+            "Value": {
+              "Ref": "NodeId"
+            }
+          },
+          {
+            "Key": "XlbRole",
+            "Value": "dedicated-test-node"
+          }
+        ]
+      }
+    },
+    "NodeSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "GroupDescription": "XLB test: single administrator IPv4 only, no SSH",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 18443,
+            "ToPort": 18443,
+            "CidrIp": {
+              "Ref": "ClientCidr"
+            }
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "xlb"
+          },
+          {
+            "Key": "Environment",
+            "Value": "test"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "xlb-node-manager"
+          },
+          {
+            "Key": "DeploymentId",
+            "Value": {
+              "Ref": "NodeId"
+            }
+          },
+          {
+            "Key": "XlbRole",
+            "Value": "dedicated-test-node"
+          }
+        ]
+      }
+    },
+    "ExpirySchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": {
+          "Fn::Sub": "${NodeId}-expiry"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${ExpiresAtUtc})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "State": "ENABLED",
+        "Target": {
+          "Arn": "arn:aws:scheduler:::aws-sdk:cloudformation:deleteStack",
+          "RoleArn": {
+            "Ref": "CleanupRoleArn"
+          },
+          "Input": {
+            "Fn::Sub": "{\"StackName\":\"${AWS::StackName}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 3600,
+            "MaximumRetryAttempts": 10
+          }
+        }
+      }
+    },
+    "Node": {
+      "Type": "AWS::EC2::Instance",
+      "DependsOn": "ExpirySchedule",
+      "Properties": {
+        "ImageId": {
+          "Ref": "ImageId"
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "IamInstanceProfile": {
+          "Ref": "InstanceProfile"
+        },
+        "MetadataOptions": {
+          "HttpTokens": "required",
+          "HttpEndpoint": "enabled",
+          "HttpPutResponseHopLimit": 1
+        },
+        "CreditSpecification": {
+          "CPUCredits": "standard"
+        },
+        "InstanceInitiatedShutdownBehavior": "terminate",
+        "PropagateTagsToVolumeOnCreation": true,
+        "NetworkInterfaces": [
+          {
+            "DeviceIndex": "0",
+            "AssociatePublicIpAddress": true,
+            "SubnetId": {
+              "Ref": "SubnetId"
+            },
+            "GroupSet": [
+              {
+                "Ref": "NodeSecurityGroup"
+              }
+            ]
+          }
+        ],
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/xvda",
+            "Ebs": {
+              "VolumeType": "gp3",
+              "VolumeSize": 12,
+              "Encrypted": true,
+              "DeleteOnTermination": true
+            }
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Sub": "#!/bin/bash\nset -euo pipefail\numask 077\nexpiry=$(date -u -d '${ExpiresAtUtc}Z' +%s)\nremaining=$((expiry - $(date -u +%s)))\ntest $remaining -gt 0\nsystemd-run --unit=xlb-node-expiry --on-active=\"$remaining seconds\" /usr/sbin/shutdown -h now\nuseradd --system --no-create-home --shell /sbin/nologin xlb-node\nmkdir -p /etc/xlb-node /opt/xlb-node\ncurl --fail --silent --show-error --location --max-time 120 --output /opt/xlb-node/archive.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-linux-amd64.tar.gz\necho '699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968  /opt/xlb-node/archive.tar.gz' | sha256sum --check --status\ntar -xzf /opt/xlb-node/archive.tar.gz -C /opt/xlb-node --strip-components=1\nrm /opt/xlb-node/archive.tar.gz\naws secretsmanager get-secret-value --region ${AWS::Region} --secret-id '${Credential}' --query SecretString --output text | python3 -c 'import base64,json,sys; secret=sys.stdin.read().strip(); assert len(secret)==32; config={\"log\":{\"level\":\"error\"},\"dns\":{\"servers\":[{\"type\":\"local\",\"tag\":\"system\"}]},\"route\":{\"default_domain_resolver\":\"system\",\"rules\":[{\"ip_is_private\":True,\"action\":\"reject\"}]},\"inbounds\":[{\"type\":\"shadowsocks\",\"listen\":\"0.0.0.0\",\"listen_port\":18443,\"method\":\"2022-blake3-aes-256-gcm\",\"password\":base64.b64encode(secret.encode()).decode()}],\"outbounds\":[{\"type\":\"direct\",\"tag\":\"direct\"}]}; open(\"/etc/xlb-node/config.json\",\"w\").write(json.dumps(config))'\nchown root:xlb-node /etc/xlb-node/config.json\nchmod 640 /etc/xlb-node/config.json\nchmod 755 /etc/xlb-node /opt/xlb-node\n/opt/xlb-node/sing-box check -c /etc/xlb-node/config.json >/dev/null 2>&1\ncat > /etc/systemd/system/xlb-node.service <<'UNIT'\n[Unit]\nDescription=XLB isolated test node\nAfter=network-online.target\nWants=network-online.target\n[Service]\nUser=xlb-node\nGroup=xlb-node\nExecStart=/opt/xlb-node/sing-box run -c /etc/xlb-node/config.json\nRestart=on-failure\nRestartSec=3\nCPUQuota=50%\nMemoryMax=128M\nTasksMax=64\nLimitNOFILE=1024\nNoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=yes\nPrivateTmp=yes\n[Install]\nWantedBy=multi-user.target\nUNIT\nsystemctl daemon-reload\nsystemctl enable --now xlb-node.service\nsystemctl is-active --quiet xlb-node.service\n"
+          }
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "xlb"
+          },
+          {
+            "Key": "Environment",
+            "Value": "test"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "xlb-node-manager"
+          },
+          {
+            "Key": "DeploymentId",
+            "Value": {
+              "Ref": "NodeId"
+            }
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Ref": "NodeId"
+            }
+          },
+          {
+            "Key": "ExpiresAt",
+            "Value": {
+              "Ref": "ExpiresAtUtc"
+            }
+          },
+          {
+            "Key": "XlbRole",
+            "Value": "dedicated-test-node"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceId": {
+      "Value": {
+        "Ref": "Node"
+      }
+    },
+    "PublicIp": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Node",
+          "PublicIp"
+        ]
+      }
+    },
+    "SecretArn": {
+      "Value": {
+        "Ref": "Credential"
+      }
+    }
+  }
+}

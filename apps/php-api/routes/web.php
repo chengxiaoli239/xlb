@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ClientCatalogController;
+use App\Http\Controllers\NodeAutomationController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PlatformController;
 use App\Http\Controllers\SandboxPaymentController;
@@ -34,6 +35,11 @@ Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
 });
 
 Route::prefix('api/v1/admin')->middleware(['auth', 'admin'])->group(function (): void {
+    Route::get('/node-deployments', [NodeAutomationController::class, 'index']);
+    Route::post('/node-deployments', [NodeAutomationController::class, 'store'])->middleware('throttle:5,1');
+    Route::get('/node-deployments/{id}', [NodeAutomationController::class, 'show']);
+    Route::post('/node-deployments/{id}/retire', [NodeAutomationController::class, 'retire'])->middleware('throttle:10,1');
+    Route::get('/node-deployments/{id}/profile', [NodeAutomationController::class, 'profile'])->middleware('throttle:5,1');
     Route::get('/orders', [OrderController::class, 'listAdmin']);
     Route::get('/orders/{id}', [OrderController::class, 'detail']);
     Route::get('/summary', [PlatformController::class, 'summary']);

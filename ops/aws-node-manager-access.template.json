@@ -1,0 +1,616 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "XLB isolated test-node roles and EC2 control-plane workload identity.",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id"
+    },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id"
+    },
+    "ImageId": {
+      "Type": "AWS::EC2::Image::Id"
+    }
+  },
+  "Resources": {
+    "ManagerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "XlbNodeManagerRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "ManageDedicatedTestStacks",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudformation:CreateStack"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:cloudformation:us-west-2:${AWS::AccountId}:stack/xlb-auto-*/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestTag/Project": "xlb",
+                      "aws:RequestTag/Environment": "test",
+                      "aws:RequestTag/ManagedBy": "xlb-node-manager",
+                      "aws:RequestTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "aws:RequestTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudformation:DeleteStack",
+                    "cloudformation:DescribeStacks",
+                    "cloudformation:DescribeStackEvents",
+                    "cloudformation:ListStackResources"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:cloudformation:us-west-2:${AWS::AccountId}:stack/xlb-auto-*/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:ResourceTag/Project": "xlb",
+                      "aws:ResourceTag/Environment": "test",
+                      "aws:ResourceTag/ManagedBy": "xlb-node-manager",
+                      "aws:ResourceTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "aws:ResourceTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "iam:PassRole",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:iam::${AWS::AccountId}:role/XlbNodeProvisionRole"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:PassedToService": "cloudformation.amazonaws.com"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances",
+                    "ec2:DescribeVolumes",
+                    "ec2:DescribeSecurityGroups",
+                    "ec2:DescribeNetworkInterfaces"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:DescribeSecret",
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:secretsmanager:us-west-2:${AWS::AccountId}:secret:xlb/auto/xlb-auto-*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:ResourceTag/Project": "xlb",
+                      "aws:ResourceTag/Environment": "test",
+                      "aws:ResourceTag/ManagedBy": "xlb-node-manager",
+                      "aws:ResourceTag/XlbRole": "dedicated-test-node"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "scheduler:GetSchedule",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:scheduler:us-west-2:${AWS::AccountId}:schedule/default/xlb-auto-*-expiry"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "sts:GetCallerIdentity",
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ManagerProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "InstanceProfileName": "XlbNodeManagerProfile",
+        "Roles": [
+          {
+            "Ref": "ManagerRole"
+          }
+        ]
+      }
+    },
+    "ProvisionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "XlbNodeProvisionRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudformation.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:aws:cloudformation:us-west-2:${AWS::AccountId}:stack/xlb-auto-*/*"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "CreateAndDeleteOwnedTestNodes",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "ec2:RunInstances",
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2::image/${ImageId}"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:instance/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:volume/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:network-interface/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:security-group/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:subnet/${SubnetId}"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:InstanceType": [
+                        "t3.micro",
+                        "t3.small"
+                      ],
+                      "ec2:Image": {
+                        "Ref": "ImageId"
+                      },
+                      "ec2:Subnet": {
+                        "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:subnet/${SubnetId}"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:CreateSecurityGroup"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:security-group/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestTag/Project": "xlb",
+                      "aws:RequestTag/Environment": "test",
+                      "aws:RequestTag/ManagedBy": "xlb-node-manager",
+                      "aws:RequestTag/XlbRole": "dedicated-test-node",
+                      "ec2:Vpc": {
+                        "Ref": "VpcId"
+                      }
+                    },
+                    "StringLike": {
+                      "aws:RequestTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:AuthorizeSecurityGroupIngress",
+                    "ec2:RevokeSecurityGroupIngress",
+                    "ec2:DeleteSecurityGroup"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:security-group/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "xlb",
+                      "ec2:ResourceTag/Environment": "test",
+                      "ec2:ResourceTag/ManagedBy": "xlb-node-manager",
+                      "ec2:ResourceTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "ec2:ResourceTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "ec2:CreateTags",
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:security-group/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:instance/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:volume/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:network-interface/*"
+                    }
+                  ],
+                  "Condition": {
+                    "ForAllValues:StringEquals": {
+                      "aws:TagKeys": [
+                        "Project",
+                        "Environment",
+                        "ManagedBy",
+                        "DeploymentId",
+                        "Name",
+                        "ExpiresAt",
+                        "XlbRole"
+                      ]
+                    },
+                    "StringEquals": {
+                      "aws:RequestTag/Project": "xlb",
+                      "aws:RequestTag/Environment": "test",
+                      "aws:RequestTag/ManagedBy": "xlb-node-manager",
+                      "aws:RequestTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "aws:RequestTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "ec2:DeleteTags",
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:security-group/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:instance/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:volume/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:network-interface/*"
+                    }
+                  ],
+                  "Condition": {
+                    "ForAllValues:StringEquals": {
+                      "aws:TagKeys": [
+                        "Name",
+                        "ExpiresAt"
+                      ]
+                    },
+                    "Null": {
+                      "aws:TagKeys": "false"
+                    },
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "xlb",
+                      "ec2:ResourceTag/Environment": "test",
+                      "ec2:ResourceTag/ManagedBy": "xlb-node-manager",
+                      "ec2:ResourceTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "ec2:ResourceTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "ec2:TerminateInstances",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:ec2:us-west-2:${AWS::AccountId}:instance/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "xlb",
+                      "ec2:ResourceTag/Environment": "test",
+                      "ec2:ResourceTag/ManagedBy": "xlb-node-manager",
+                      "ec2:ResourceTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "ec2:ResourceTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances",
+                    "ec2:DescribeVolumes",
+                    "ec2:DescribeSecurityGroups",
+                    "ec2:DescribeNetworkInterfaces"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "secretsmanager:CreateSecret",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:secretsmanager:us-west-2:${AWS::AccountId}:secret:xlb/auto/xlb-auto-*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestTag/Project": "xlb",
+                      "aws:RequestTag/Environment": "test",
+                      "aws:RequestTag/ManagedBy": "xlb-node-manager",
+                      "aws:RequestTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "aws:RequestTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:DescribeSecret",
+                    "secretsmanager:GetSecretValue",
+                    "secretsmanager:DeleteSecret"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:secretsmanager:us-west-2:${AWS::AccountId}:secret:xlb/auto/xlb-auto-*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:ResourceTag/Project": "xlb",
+                      "aws:ResourceTag/Environment": "test",
+                      "aws:ResourceTag/ManagedBy": "xlb-node-manager",
+                      "aws:ResourceTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "aws:ResourceTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "scheduler:CreateSchedule",
+                    "scheduler:UpdateSchedule",
+                    "scheduler:DeleteSchedule",
+                    "scheduler:GetSchedule"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:scheduler:us-west-2:${AWS::AccountId}:schedule/default/xlb-auto-*-expiry"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "iam:PassRole",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:iam::${AWS::AccountId}:role/XlbNodeSsmRole"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:PassedToService": "ec2.amazonaws.com"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "iam:PassRole",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:iam::${AWS::AccountId}:role/XlbNodeCleanupRole"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:PassedToService": "scheduler.amazonaws.com"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "NodeRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "XlbNodeSsmRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "ReadXlbTestCredential",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "secretsmanager:GetSecretValue",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:secretsmanager:us-west-2:${AWS::AccountId}:secret:xlb/auto/xlb-auto-*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:ResourceTag/Project": "xlb",
+                      "aws:ResourceTag/ManagedBy": "xlb-node-manager",
+                      "aws:ResourceTag/Environment": "test",
+                      "aws:ResourceTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "aws:ResourceTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "NodeProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "InstanceProfileName": "XlbNodeSsmProfile",
+        "Roles": [
+          {
+            "Ref": "NodeRole"
+          }
+        ]
+      }
+    },
+    "CleanupRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "XlbNodeCleanupRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnEquals": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:aws:scheduler:us-west-2:${AWS::AccountId}:schedule-group/default"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "ReclaimXlbTestStacks",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "cloudformation:DeleteStack",
+                  "Resource": {
+                    "Fn::Sub": "arn:aws:cloudformation:us-west-2:${AWS::AccountId}:stack/xlb-auto-*/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:ResourceTag/Project": "xlb",
+                      "aws:ResourceTag/Environment": "test",
+                      "aws:ResourceTag/ManagedBy": "xlb-node-manager",
+                      "aws:ResourceTag/XlbRole": "dedicated-test-node"
+                    },
+                    "StringLike": {
+                      "aws:ResourceTag/DeploymentId": "xlb-auto-*"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "ManagerProfileArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ManagerProfile",
+          "Arn"
+        ]
+      }
+    },
+    "ManagerRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ManagerRole",
+          "Arn"
+        ]
+      }
+    },
+    "ProvisionRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ProvisionRole",
+          "Arn"
+        ]
+      }
+    },
+    "NodeProfileArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "NodeProfile",
+          "Arn"
+        ]
+      }
+    },
+    "CleanupRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "CleanupRole",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

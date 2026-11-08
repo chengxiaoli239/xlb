@@ -11,3 +11,6 @@ Artisan::command('inspire', function () {
 if (app()->environment(['local', 'testing'])) {
     Schedule::command('orders:expire-test')->everyMinute()->withoutOverlapping();
 }
+
+// Reclamation continues when new provisioning is disabled.
+Schedule::command('nodes:reconcile')->everyTenSeconds()->withoutOverlapping(10);

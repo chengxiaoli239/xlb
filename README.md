@@ -66,7 +66,7 @@ pnpm dev
 ## 尚未实现
 
 - 真实支付、退款和财务/代理结算操作。
-- 真实节点部署、密钥管理、健康探测、流量采集或连接服务。
+- 正式会员节点的用户级鉴权、到期断开、流量采集和会话迁移。管理员独立 AWS 测试节点的自动部署、真实协议验证及到期整栈回收已接通，见 [节点运维](docs/node-retirement-and-reclamation.md)。
 - 自有 Android、iOS、Windows、macOS App。
 - Chrome/Firefox 可安装扩展。
 - Clash Verge Rev 或 Clash Mi 真实客户端导入验证。

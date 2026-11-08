@@ -1,0 +1,85 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Dedicated XLB laboratory access only. Separate from production roles. Explicit CAPABILITY_NAMED_IAM approval required before creation.",
+  "Parameters": {
+    "LabRegion": {
+      "Type": "String",
+      "Default": "us-west-2",
+      "AllowedValues": ["us-west-2"]
+    }
+  },
+  "Resources": {
+    "SsmRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "XlbLabSsmRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "ec2.amazonaws.com"},
+            "Action": "sts:AssumeRole"
+          }]
+        },
+        "ManagedPolicyArns": [{"Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"}],
+        "Tags": [
+          {"Key": "Project", "Value": "xlb"},
+          {"Key": "Environment", "Value": "test"},
+          {"Key": "ManagedBy", "Value": "xlb-node-lab"}
+        ]
+      }
+    },
+    "SsmProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "InstanceProfileName": "XlbLabSsmProfile",
+        "Roles": [{"Ref": "SsmRole"}]
+      }
+    },
+    "ExpiryRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "XlbLabExpiryRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "scheduler.amazonaws.com"},
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "StringEquals": {"aws:SourceAccount": {"Ref": "AWS::AccountId"}},
+              "ArnEquals": {"aws:SourceArn": {"Fn::Sub": "arn:${AWS::Partition}:scheduler:${LabRegion}:${AWS::AccountId}:schedule-group/default"}}
+            }
+          }]
+        },
+        "Policies": [{
+          "PolicyName": "TerminateTaggedXlbLabInstancesOnly",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": "ec2:TerminateInstances",
+              "Resource": {"Fn::Sub": "arn:${AWS::Partition}:ec2:${LabRegion}:${AWS::AccountId}:instance/*"},
+              "Condition": {
+                "StringEquals": {
+                  "ec2:ResourceTag/Project": "xlb",
+                  "ec2:ResourceTag/Environment": "test",
+                  "ec2:ResourceTag/ManagedBy": "xlb-node-lab"
+                }
+              }
+            }]
+          }
+        }],
+        "Tags": [
+          {"Key": "Project", "Value": "xlb"},
+          {"Key": "Environment", "Value": "test"},
+          {"Key": "ManagedBy", "Value": "xlb-node-lab"}
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceProfile": {"Value": {"Ref": "SsmProfile"}},
+    "ExpiryRoleArn": {"Value": {"Fn::GetAtt": ["ExpiryRole", "Arn"]}}
+  }
+}

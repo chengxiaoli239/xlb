@@ -288,6 +288,9 @@ class PlatformController extends Controller
             if (! $node) {
                 return ['error' => ['code' => 'not_found', 'message' => '节点不存在', 'status' => 404]];
             }
+            if (DB::table('node_deployments')->where('node_id', $id)->exists()) {
+                return ['error' => ['code' => 'managed_node', 'message' => '云节点请使用部署任务的永久下架操作', 'status' => 409]];
+            }
             if (! $node->is_test) {
                 return ['error' => ['code' => 'live_node_unsupported', 'message' => '本地控制台不能操作真实节点', 'status' => 409]];
             }
@@ -367,7 +370,8 @@ class PlatformController extends Controller
         $record = DB::table('subscriptions')->where('token_hash', hash('sha256', $token))->first(['id', 'user_id', 'status', 'expires_at']);
         $now = now()->toIso8601String();
         $entitlement = $record ? DB::table('entitlements')->where('user_id', $record->user_id)->where('status', 'active')->where('starts_at', '<=', $now)->where('ends_at', '>', $now)->exists() : false;
-        $node = DB::table('nodes')->where('status', 'available')->where('is_test', true)->first(['name', 'endpoint_host', 'endpoint_port']);
+        $node = DB::table('nodes')->where('status', 'available')->where('is_test', true)
+            ->whereNotIn('id', DB::table('node_deployments')->select('node_id'))->first(['name', 'endpoint_host', 'endpoint_port']);
         if (! $record || $record->status !== 'active' || ! $entitlement || ! $node) {
             return response('Subscription unavailable', 404)->header('Content-Type', 'text/plain')->header('Cache-Control', 'no-store');
         }
@@ -411,6 +415,7 @@ class PlatformController extends Controller
             'endpoint_port' => (int) $node->endpoint_port,
             'status' => $node->status,
             'is_test' => (bool) $node->is_test,
+            'automation_managed' => DB::table('node_deployments')->where('node_id', $node->id)->exists(),
             'max_sessions' => (int) $node->max_sessions,
             'active_sessions' => (int) $node->active_sessions,
             'latency_ms' => $node->latency_ms === null ? null : (int) $node->latency_ms,
@@ -418,7 +423,7 @@ class PlatformController extends Controller
             'last_health_check_at' => $node->last_health_check_at,
             'config_version' => (int) $node->config_version,
             'updated_at' => $node->updated_at,
-            'allowed_transitions' => $node->is_test ? (self::NODE_TRANSITIONS[$node->status] ?? []) : [],
+            'allowed_transitions' => $node->is_test && ! DB::table('node_deployments')->where('node_id', $node->id)->exists() ? (self::NODE_TRANSITIONS[$node->status] ?? []) : [],
         ];
     }
 

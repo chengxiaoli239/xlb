@@ -585,3 +585,9 @@
   .member-footer { min-height: 52px; padding: 0 14px; gap: 8px; font-size: 11px; }
   .member-footer span:nth-child(2) { display: none; }
 }
+
+.app-shell .node-transition input, .app-shell .node-create-form select {
+  width: 100%; min-height: 42px; padding: 8px 12px; border: 1px solid var(--field-border);
+  border-radius: 7px; background: var(--field-bg); color: var(--ink); font: inherit; font-size: 14px;
+}
+.app-shell .node-transition input:focus-visible, .app-shell .node-create-form select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

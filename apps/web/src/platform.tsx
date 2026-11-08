@@ -18,7 +18,7 @@ type Overview = {
   recentOrders: Array<{ id: string; plan_name: string; total_cents: number; status: string; created_at: string }>;
 };
 type NodeStatus = 'candidate' | 'available' | 'draining' | 'maintenance' | 'isolated' | 'retired' | 'disabled';
-type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: NodeStatus; is_test: boolean; max_sessions: number; active_sessions: number; latency_ms: number | null; health_status: string; last_health_check_at: string | null; config_version: number; allowed_transitions: NodeStatus[]; updated_at: string };
+type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: NodeStatus; is_test: boolean; automation_managed: boolean; max_sessions: number; active_sessions: number; latency_ms: number | null; health_status: string; last_health_check_at: string | null; config_version: number; allowed_transitions: NodeStatus[]; updated_at: string };
 type NodeDetail = Node & { changes: Array<{ id: string; from_status: NodeStatus; to_status: NodeStatus; created_at: string; actor_name: string }> };
 type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
 type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string | null; last_used_at: string | null; url: string | null };
@@ -892,6 +892,58 @@ function UsersPage({ refresh, notify }: { refresh: number; notify: (value: strin
   return <div className="page-stack"><PageHeading eyebrow="运营管理" title="用户与会员" subtitle="只展示本地演示用户；真实用户信息不会连接或复制。" action={<button className="secondary-button"><ArrowDownToLine size={15} /> 导出列表</button>} /><section className="panel"><SectionTitle title="用户账户" detail={rows ? rows.length + ' 个账户' : '读取中'} /><div className="table-wrap"><table><thead><tr><th>用户</th><th>账户状态</th><th>当前方案</th><th>流量使用</th><th>权益到期</th></tr></thead><tbody>{rows?.map(row => <tr key={String(row.id)}><td><span className="user-cell"><span className="profile-avatar">{String(row.name).slice(0, 1)}</span><span><b>{String(row.name)}</b><small>{String(row.email)}</small></span></span></td><td><StatusPill status={String(row.status)} tone="green" /></td><td>{String(row.plan_name ?? '无有效权益')}</td><td>{row.data_used_gb == null ? '—' : Number(row.data_used_gb).toFixed(1) + ' / ' + row.traffic_gb + ' GB'}</td><td>{shortDate(row.ends_at as string | null)}</td></tr>)}</tbody></table></div></section></div>;
 }
 
+type Deployment = { id: string; name: string; provider: string; deployment_key: string; node_id: string; stack_name: string; phase: string; instance_type: string; expires_at: string; created_at: string; released_at: string | null; verified_at: string | null; last_error: string | null; events?: Array<{ id: string; phase: string; message: string; created_at: string }> };
+const deploymentPhase: Record<string, string> = { queued: '已排队', provisioning: '创建服务器', bootstrapping: '安装服务', verifying: '验证真实连接', available: '测试可用', draining: '等待排空', releasing: '释放并核对资源', released: '已全部释放' };
+function CloudNodes({ notify }: { notify: (value: string) => void }) {
+  const [state, setState] = useState<{ enabled: boolean; max_nodes: number; items: Deployment[] } | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [name, setName] = useState('美国测试节点');
+  const [size, setSize] = useState('t3.micro');
+  const [minutes, setMinutes] = useState(15);
+  const [requestId, setRequestId] = useState('');
+  const [detail, setDetail] = useState<Deployment | null>(null);
+  const [confirmation, setConfirmation] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    try { setState(await api('/api/v1/admin/node-deployments')); }
+    catch (error) { notify((error as Error).message); }
+  }, [notify]);
+  useEffect(() => { void load(); const timer = setInterval(() => void load(), 10000); return () => clearInterval(timer); }, [load]);
+  useEffect(() => {
+    if (!detail) return;
+    const timer = setInterval(() => { api<Deployment>('/api/v1/admin/node-deployments/' + detail.id).then(setDetail).catch(error => notify((error as Error).message)); }, 10000);
+    return () => clearInterval(timer);
+  }, [detail?.id, notify]);
+  const open = async (id: string) => {
+    try { setDetail(await api('/api/v1/admin/node-deployments/' + id)); setConfirmation(''); }
+    catch (error) { notify((error as Error).message); }
+  };
+  const create = async (event: React.FormEvent) => {
+    event.preventDefault(); setBusy(true);
+    try {
+      const row = await api<Deployment>('/api/v1/admin/node-deployments', { method: 'POST', body: JSON.stringify({ name, request_id: requestId, instance_type: size, lifetime_minutes: minutes }) });
+      setCreateOpen(false); await load(); await open(row.id); notify('任务已排队，系统将自动创建、安装和验证');
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  const retire = async () => {
+    if (!detail) return;
+    setBusy(true);
+    try {
+      await api('/api/v1/admin/node-deployments/' + detail.id + '/retire', { method: 'POST', body: JSON.stringify({ confirmation }) });
+      await load(); await open(detail.id); notify('已申请永久下架，排空后自动释放资源');
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  return <section className="panel">
+    <div className="section-title"><div><h2>云节点自动化</h2><span>美国西部 · 独立服务器 · 最多 {state?.max_nodes ?? 2} 台 · 每 10 秒更新</span></div><button className="primary-button" disabled={!state?.enabled} onClick={() => { setRequestId(crypto.randomUUID()); setCreateOpen(true); }}><Server size={15} /> 自动部署测试节点</button></div>
+    <div className="notice notice-neutral"><ShieldCheck size={16} /><span>真实服务器按量计费；仅允许配置的管理员 IP 测试。到期由 AWS 自动删除整栈，电脑关机仍生效。会员鉴权与流量计量尚未接入。</span></div>
+    {!state ? <LoadingBlock /> : <><p className="modal-copy">{state.enabled ? '新建已启用' : '新建未启用'}；已有节点的到期回收继续执行。pd01、pd02 不在此管理范围。</p><div className="table-wrap"><table><thead><tr><th>节点 / 服务商 / 规格</th><th>任务阶段</th><th>自动回收时间</th><th>创建时间</th><th>操作</th></tr></thead><tbody>{state.items.map(row => <tr key={row.id}><td><b>{row.name}</b><small className="table-sub">{row.provider.toUpperCase()} · {row.instance_type}</small></td><td><StatusPill status={deploymentPhase[row.phase] ?? row.phase} tone={row.phase === 'available' ? 'green' : row.phase === 'released' ? 'gray' : 'amber'} />{row.last_error && <small className="table-sub">{row.last_error}</small>}</td><td>{dateTime(row.expires_at)}</td><td>{dateTime(row.created_at)}</td><td><button className="text-button" onClick={() => void open(row.id)}>详情 / 下架</button></td></tr>)}</tbody></table></div>{!state.items.length && <Empty title="暂无云节点任务" detail="创建后自动安装节点服务，并以真实协议验证出网。" />}</>}
+    {createOpen && <Modal title="自动部署测试节点" detail="创建独立 AWS 服务器，到期自动回收全部节点资源" onClose={() => { if (!busy) setCreateOpen(false); }}><form className="node-create-form" onSubmit={create}><label>节点名称<input required minLength={2} maxLength={60} value={name} onChange={event => setName(event.target.value)} /></label><label>服务器规格<select value={size} onChange={event => setSize(event.target.value)}><option value="t3.micro">t3.micro · 2 核 / 1GB</option><option value="t3.small">t3.small · 2 核 / 2GB</option></select></label><label>测试有效期<select value={minutes} onChange={event => setMinutes(Number(event.target.value))}>{[15, 30, 60].map(value => <option key={value} value={value}>{value} 分钟</option>)}</select></label><p className="modal-copy">区域固定为美国西部；不开 SSH，测试端口仅允许管理员来源 IP。真实连接验证通过后才会显示“测试可用”。</p><div className="modal-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setCreateOpen(false)}>取消</button><button className="primary-button" disabled={busy}>创建并自动部署</button></div></form></Modal>}
+    {detail && <Modal title="云节点任务详情" detail={detail.provider.toUpperCase() + ' · ' + detail.deployment_key} onClose={() => { if (!busy) setDetail(null); }} wide><dl className="detail-grid"><div><dt>服务商</dt><dd>{detail.provider.toUpperCase()}</dd></div><div><dt>阶段</dt><dd>{deploymentPhase[detail.phase] ?? detail.phase}</dd></div><div><dt>到期回收</dt><dd>{dateTime(detail.expires_at)}</dd></div><div><dt>协议验证</dt><dd>{dateTime(detail.verified_at)}</dd></div><div><dt>资源释放完成</dt><dd>{dateTime(detail.released_at)}</dd></div></dl>{detail.last_error && <div className="notice notice-warning">{detail.last_error}</div>}{detail.phase === 'available' && <a className="secondary-button" href={'/api/v1/admin/node-deployments/' + detail.id + '/profile'} download>下载管理员 Clash 测试配置</a>}{!['draining', 'releasing', 'released'].includes(detail.phase) && <div className="node-transition"><label>永久下架并释放<input value={confirmation} placeholder="输入：永久下架并释放" onChange={event => setConfirmation(event.target.value)} /></label><button className="primary-button" disabled={busy || confirmation !== '永久下架并释放'} onClick={() => void retire()}>确认下架并回收</button></div>}<div className="node-history"><h3>自动化任务时间线</h3><p className="modal-copy">后台按对应服务商的实际状态、端口检查和协议验证记录流程节点；这不是服务商原始操作日志。AWS 节点的原始资源事件请查 CloudFormation Stack Events，API 调用身份和结果请查 CloudTrail。</p>{detail.events?.map(event => <div key={event.id}><b>{event.message}</b><span>{dateTime(event.created_at)}</span></div>)}</div></Modal>}
+  </section>;
+}
+
 function NodesPage({ refresh, notify }: { refresh: number; notify: (value: string) => void }) {
   const [rows, setRows] = useState<Node[] | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -901,7 +953,7 @@ function NodesPage({ refresh, notify }: { refresh: number; notify: (value: strin
   const [name, setName] = useState('');
   const [region, setRegion] = useState('');
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => api<Node[]>('/api/v1/admin/nodes').then(setRows).catch(error => notify((error as Error).message)), [notify]);
+  const load = useCallback(() => api<Node[]>('/api/v1/admin/nodes').then(nodes => setRows(nodes.filter(node => !node.automation_managed))).catch(error => notify((error as Error).message)), [notify]);
   useEffect(() => { void load(); }, [load, refresh]);
   const openDetail = async (id: string) => {
     setSelectedId(id);
@@ -936,9 +988,9 @@ function NodesPage({ refresh, notify }: { refresh: number; notify: (value: strin
     finally { setBusy(false); }
   };
   return <div className="page-stack">
-    <PageHeading eyebrow="运营管理" title="节点运维" subtitle="维护本地演示节点目录与生命周期；目录状态不代表真实连接或探测结果。" action={<div className="heading-actions"><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新列表</button><button className="primary-button" onClick={() => setShowCreate(true)}><Server size={14} /> 新建测试记录</button></div>} />
-    <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>演示边界</b> 新记录只使用 .invalid 保留域名；健康探测、部署、SSH、密钥管理和真实节点控制均未接入。</span></div>
-    <section className="panel"><SectionTitle title="节点目录" detail={rows ? rows.length + ' 个记录' : '载入中'} />
+    <PageHeading eyebrow="运营管理" title="节点运维" subtitle="自动部署独立测试服务器，验证真实连接并按期回收资源。" action={<div className="heading-actions"><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新列表</button><button className="primary-button" onClick={() => setShowCreate(true)}><Server size={14} /> 新建测试记录</button></div>} />
+    <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>目录记录</b> 下方演示记录只更新目录；真实测试服务器请通过“云节点自动化”创建和永久下架。</span></div>
+    <CloudNodes notify={notify} /><section className="panel"><SectionTitle title="节点目录" detail={rows ? rows.length + ' 个记录' : '载入中'} />
       {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="暂无节点记录" detail="点击右上角新建本地测试记录。" /> : <div className="table-wrap"><table><thead><tr><th>节点</th><th>协议 / 测试地址</th><th>样例容量</th><th>目录状态</th><th>健康探测</th><th>配置版本</th><th>操作</th></tr></thead><tbody>{rows.map(node => <tr key={node.id}>
         <td><span className="node-cell"><span className={'node-indicator' + (node.status === 'available' ? '' : ' inactive')} /><span><b>{node.name}</b><small>{node.region} · {node.is_test ? '演示记录' : '只读记录'}</small></span></span></td>
         <td><code>{node.protocol}</code><small className="table-sub">{node.endpoint_host}:{node.endpoint_port}</small></td>
