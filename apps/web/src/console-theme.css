@@ -194,6 +194,10 @@
 .app-shell .status-pill.gray { background: var(--gray-bg); color: var(--muted); }
 .app-shell .status-pill.blue { background: var(--blue-bg); color: var(--blue-text); }
 .app-shell .status-pill.red { background: var(--red-bg); color: var(--red-text); }
+.app-shell .status-pill.catalog-published { border: 1px solid #3c846c; background: #1e5747; color: #c1f5df; font-weight: 700; }
+.app-shell .status-pill.catalog-unpublished { border: 1px solid #a25e63; background: #542e35; color: #ffd2cf; font-weight: 700; }
+.app-shell[data-theme="light"] .status-pill.catalog-published { border-color: #71b99d; background: #d8f4e7; color: #075e42; }
+.app-shell[data-theme="light"] .status-pill.catalog-unpublished { border-color: #dc8980; background: #fde5e2; color: #8f2924; }
 .app-shell .notice { min-height: 48px; padding: 12px 16px; border-radius: 10px; font-size: 13px; line-height: 1.8; }
 .app-shell .notice-warning { background: var(--amber-bg); border-color: var(--amber-border); color: var(--amber-text); }
 .app-shell .notice-neutral { background: var(--subtle-bg); border-color: var(--button-border); color: var(--muted); }
@@ -205,6 +209,12 @@
 .app-shell td code, .app-shell .table-sub { color: var(--muted); font-size: 12px; }
 .app-shell .table-main { color: var(--ink); }
 .app-shell .row-actions { gap: 14px; }
+.app-shell .row-actions .catalog-status-action { min-height: 32px; padding: 4px 9px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid; border-radius: 6px; font-weight: 650; text-decoration: none; }
+.app-shell .row-actions .catalog-status-action.publish { border-color: var(--accent-border); background: var(--accent-bg); color: var(--accent-text); }
+.app-shell .row-actions .catalog-status-action.publish:hover { background: var(--green); color: var(--on-accent); }
+.app-shell .row-actions .catalog-status-action.unpublish { border-color: #a25e63; background: var(--red-bg); color: var(--red-text); }
+.app-shell[data-theme="light"] .row-actions .catalog-status-action.unpublish { border-color: #dc8980; }
+.app-shell .row-actions .catalog-status-action.unpublish:hover { background: #a33b32; border-color: #a33b32; color: #fff; }
 .app-shell .user-cell, .app-shell .node-cell { gap: 11px; }
 .app-shell .user-cell b, .app-shell .node-cell b { color: var(--ink); font-size: 14px; }
 .app-shell .user-cell small, .app-shell .node-cell small { color: var(--muted); font-size: 12px; }
@@ -217,6 +227,7 @@
 .app-shell .plan-editor input, .app-shell .node-create-form input { height: 42px; padding: 0 12px; background: var(--field-bg); border-color: var(--field-border); color: var(--ink); font-size: 14px; }
 .app-shell .plan-editor { gap: 18px; }
 .app-shell .client-editor { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.app-shell .client-field-hint { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .app-shell .client-editor input:not([type=checkbox]), .app-shell .client-editor textarea, .app-shell .client-editor select { width: 100%; min-width: 0; min-height: 42px; padding: 9px 12px; background: var(--field-bg); border: 1px solid var(--field-border); border-radius: 7px; color: var(--ink); font: inherit; }
 .app-shell .client-editor textarea { resize: vertical; }
 .app-shell .client-editor .client-editor-wide, .app-shell .client-editor .plan-editor-actions { grid-column: 1 / -1; }
@@ -545,6 +556,8 @@
 .client-help-section details { padding: 14px 2px; border-bottom: 1px solid var(--line); }
 .client-help-section summary { color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer; }
 .client-help-section details p { max-width: 860px; margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.app-shell .client-usage-note { border-color: var(--accent-border); }
+.app-shell .client-usage-note b, .app-shell .notice-neutral b { color: var(--ink); }
 @media (max-width: 960px) {
   .member-portal .vip-account-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .member-portal .subscription-qr-layout { grid-template-columns: minmax(0, 1fr); }

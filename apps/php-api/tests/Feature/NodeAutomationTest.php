@@ -84,6 +84,16 @@ class NodeAutomationTest extends TestCase
         ]);
     }
 
+    public function test_admin_deployment_list_exposes_provider_and_provider_resource_key(): void
+    {
+        $row = $this->createDeployment();
+        $this->admin()->getJson('/api/v1/admin/node-deployments')
+            ->assertOk()
+            ->assertJsonPath('data.items.0.provider', 'aws')
+            ->assertJsonPath('data.items.0.deployment_key', $row->deployment_key)
+            ->assertJsonPath('data.items.0.provider_resource_key', $row->provider_resource_key);
+    }
+
     public function test_existing_deployment_uses_its_persisted_provider_after_default_changes(): void
     {
         $row = $this->createDeployment();
