@@ -29,6 +29,10 @@ class SandboxPaymentTest extends TestCase
             ->assertJsonPath('data.status', 'paid_test')
             ->assertJsonPath('data.payment.status', 'accepted_test')
             ->assertJsonPath('data.entitlement_grant.status', 'granted_test');
+        $subscription = $response->json('data.subscription');
+        $this->assertNotEmpty($subscription['url']);
+        $this->assertDatabaseCount('subscriptions', 1);
+        $this->assertNotNull(DB::table('subscriptions')->where('id', $subscription['id'])->value('token_encrypted'));
         $paymentId = $response->json('data.payment.id');
         $entitlementId = $response->json('data.entitlement_grant.entitlement_id');
         $grant = DB::table('entitlements')->where('id', $entitlementId)->first();
@@ -44,14 +48,31 @@ class SandboxPaymentTest extends TestCase
 
         $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-payment')->assertOk()
             ->assertJsonPath('data.payment.id', $paymentId)
-            ->assertJsonPath('data.entitlement_grant.entitlement_id', $entitlementId);
+            ->assertJsonPath('data.entitlement_grant.entitlement_id', $entitlementId)
+            ->assertJsonPath('data.subscription.url', $subscription['url']);
+        $this->getJson('/api/v1/me/subscriptions')->assertOk()
+            ->assertJsonPath('data.0.id', $subscription['id'])
+            ->assertJsonPath('data.0.url', $subscription['url']);
         $this->getJson('/api/v1/me/orders/'.$orderId)->assertOk()
             ->assertJsonPath('data.payment.id', $paymentId)
             ->assertJsonPath('data.entitlement_grant.entitlement_id', $entitlementId);
-        $this->getJson('/api/v1/me/overview')->assertJsonPath('data.entitlement.plan_name', '月会员');
+        $this->getJson('/api/v1/me/overview')->assertJsonPath('data.entitlement.plan_name', '年会员');
+        $this->assertSame($currentEnd, DB::table('entitlements')->where('user_id', 'user-member')->where('starts_at', '<=', now()->toIso8601String())->value('ends_at'));
         $this->assertDatabaseCount('entitlement_grants', 1);
         $this->assertDatabaseCount('sandbox_payment_events', 1);
         $this->assertDatabaseCount('order_events', 2);
+    }
+
+    public function test_confirmed_renewal_reuses_the_existing_subscription_link(): void
+    {
+        $existing = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data');
+        $orderId = $this->createOrder();
+
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-payment')->assertCreated()
+            ->assertJsonPath('data.subscription.id', $existing['id'])
+            ->assertJsonPath('data.subscription.url', $existing['url']);
+
+        $this->assertDatabaseCount('subscriptions', 1);
     }
 
     public function test_expired_sandbox_payment_is_recorded_for_review_without_granting_entitlement(): void

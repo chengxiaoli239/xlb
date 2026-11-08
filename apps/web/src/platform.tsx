@@ -3,7 +3,7 @@ import {
   Activity, ArrowDownToLine, ArrowLeftRight, ArrowUpRight, BadgeCheck,
   Bell, ChevronDown, CircleHelp, CircleUserRound, Clipboard, Command,
   CreditCard, Gauge, Globe2, KeyRound, LayoutDashboard, LifeBuoy, Link2,
-  LogOut, Menu, Monitor, Moon, MoreHorizontal, Network, RefreshCw, Search,
+  LogOut, Menu, Monitor, Moon, MoreHorizontal, Network, Puzzle, RefreshCw, Search,
   Server, Settings2, ShieldCheck, Smartphone, Sun, Users, X,
 } from 'lucide-react';
 
@@ -12,7 +12,7 @@ type Plan = { id: string; name: string; period_label: string; duration_days: num
 type ManagedPlan = Plan & { family_id: string; version: number; active: number };
 type Overview = {
   user: User;
-  entitlement: null | { status: string; ends_at: string; data_used_gb: number; plan_name: string; traffic_gb: number; max_devices: number };
+  entitlement: null | { status: string; ends_at: string; data_used_gb: number; plan_name: string; period_label: string; traffic_gb: number; max_devices: number };
   activeSubscriptions: number;
   recentOrders: Array<{ id: string; plan_name: string; total_cents: number; status: string; created_at: string }>;
 };
@@ -20,7 +20,12 @@ type NodeStatus = 'candidate' | 'available' | 'draining' | 'maintenance' | 'isol
 type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: NodeStatus; is_test: boolean; max_sessions: number; active_sessions: number; latency_ms: number | null; health_status: string; last_health_check_at: string | null; config_version: number; allowed_transitions: NodeStatus[]; updated_at: string };
 type NodeDetail = Node & { changes: Array<{ id: string; from_status: NodeStatus; to_status: NodeStatus; created_at: string; actor_name: string }> };
 type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
-type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string; last_used_at: string | null; url?: string };
+type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string | null; last_used_at: string | null; url: string | null };
+type ClientPlatform = 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'browser';
+type ClientCompatibility = 'pending' | 'verified' | 'maintenance' | 'unsupported';
+type ClientCatalogItem = { id: string; platform: ClientPlatform; name: string; version: string | null; description: string | null; download_url: string | null; qr_code_url: string | null; tutorial_url: string | null; compatibility_status: ClientCompatibility };
+type ManagedClient = ClientCatalogItem & { is_active: boolean; sort_order: number };
+type ClientForm = { platform: ClientPlatform; name: string; version: string; description: string; download_url: string; qr_code_url: string; tutorial_url: string; compatibility_status: ClientCompatibility; sort_order: string; is_active: boolean };
 type Commission = { id: string; partner_name: string; amount_cents: number; status: string; order_id: string; created_at: string };
 type TicketStatus = 'open' | 'in_progress' | 'resolved';
 type TicketSummary = { id: string; category: string; subject: string; status: TicketStatus; created_at: string; updated_at: string; user_name: string };
@@ -59,14 +64,25 @@ const nav = [
   { id: 'orders', label: '订单记录', icon: ArrowLeftRight },
   { id: 'support', label: '帮助工单', icon: LifeBuoy },
 ];
+const memberNav = [...nav, { id: 'clients', label: '客户端下载', icon: ArrowDownToLine }];
+const clientPlatforms: Array<{ id: ClientPlatform; label: string; icon: typeof Smartphone }> = [
+  { id: 'android', label: 'Android 安卓系统', icon: Smartphone },
+  { id: 'ios', label: 'iPhone / iPad', icon: Smartphone },
+  { id: 'windows', label: 'Windows 系统', icon: Monitor },
+  { id: 'macos', label: 'macOS 苹果电脑', icon: Monitor },
+  { id: 'linux', label: 'Linux / 路由器', icon: Network },
+  { id: 'browser', label: '浏览器扩展', icon: Puzzle },
+];
 const adminNav = [
   { id: 'admin-plans', label: '套餐管理', icon: CreditCard },
+  { id: 'admin-clients', label: '客户端目录', icon: Monitor },
   { id: 'users', label: '用户与会员', icon: Users },
   { id: 'nodes', label: '节点运维', icon: Server },
   { id: 'commissions', label: '代理结算', icon: ArrowUpRight },
 ];
 
 export default function App() {
+  const portalRole = window.location.pathname.startsWith('/account') || new URLSearchParams(window.location.search).get('portal') === 'member' ? 'member' : 'admin';
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try { return window.localStorage.getItem('xlb-console-theme') === 'light' ? 'light' : 'dark'; }
     catch { return 'dark'; }
@@ -75,8 +91,8 @@ export default function App() {
   const [view, setView] = useState('overview');
   const [mobileMenu, setMobileMenu] = useState(false);
   const [toast, setToast] = useState('');
-  const [loginEmail, setLoginEmail] = useState('admin@xlb.local');
-  const [password, setPassword] = useState('admin-local-2026');
+  const [loginEmail, setLoginEmail] = useState(portalRole === 'member' ? 'member@xlb.local' : 'admin@xlb.local');
+  const [password, setPassword] = useState(portalRole === 'member' ? 'member-local-2026' : 'admin-local-2026');
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => setNonce(value => value + 1), []);
@@ -91,8 +107,15 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    api<User | null>('/api/v1/auth/session').then(setUser).catch(() => setUser(null)).finally(() => setLoading(false));
-  }, []);
+    api<User | null>('/api/v1/auth/session').then(async current => {
+      if (current && current.role !== portalRole) {
+        await api('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
+        setUser(null);
+        return;
+      }
+      setUser(current);
+    }).catch(() => setUser(null)).finally(() => setLoading(false));
+  }, [portalRole]);
   useEffect(() => {
     if (!user) return;
     api<User | null>('/api/v1/auth/session').then(setUser).catch(() => setUser(null));
@@ -102,6 +125,10 @@ export default function App() {
     event.preventDefault();
     try {
       const next = await api<User>('/api/v1/auth/login', { method: 'POST', body: JSON.stringify({ email: loginEmail, password }) });
+      if (next.role !== portalRole) {
+        await api('/api/v1/auth/logout', { method: 'POST' });
+        throw new Error(portalRole === 'member' ? '请使用会员账户登录' : '请使用管理员账户登录');
+      }
       setUser(next);
       setView('overview');
       notify('已进入本地演示环境');
@@ -114,7 +141,8 @@ export default function App() {
   };
 
   if (loading) return <main className="boot"><span className="brand-mark">X</span><span>迅连宝控制台</span></main>;
-  if (!user) return <Login email={loginEmail} setEmail={setLoginEmail} password={password} setPassword={setPassword} onSubmit={login} />;
+  if (!user) return <Login portalRole={portalRole} email={loginEmail} setEmail={setLoginEmail} password={password} setPassword={setPassword} onSubmit={login} />;
+  if (user.role === 'member') return <MemberPortal user={user} view={view} setView={setView} theme={theme} setTheme={setTheme} refresh={nonce} refreshData={refresh} notify={notify} logout={logout} toast={toast} />;
 
   return <div className="app-shell" data-theme={theme}>
     <Sidebar view={view} setView={setView} role={user.role} mobile={mobileMenu} close={() => setMobileMenu(false)} logout={logout} user={user} />
@@ -142,6 +170,7 @@ export default function App() {
         {view === 'support' && <SupportPage role={user.role} refresh={nonce} notify={notify} />}
         {view === 'users' && user.role === 'admin' && <UsersPage refresh={nonce} notify={notify} />}
         {view === 'admin-plans' && user.role === 'admin' && <AdminPlansPage notify={notify} />}
+        {view === 'admin-clients' && user.role === 'admin' && <AdminClientsPage notify={notify} />}
         {view === 'nodes' && user.role === 'admin' && <NodesPage refresh={nonce} notify={notify} />}
         {view === 'commissions' && user.role === 'admin' && <CommissionsPage refresh={nonce} notify={notify} />}
       </main>
@@ -151,9 +180,38 @@ export default function App() {
   </div>;
 }
 
+function MemberPortal({ user, view, setView, theme, setTheme, refresh, refreshData, notify, logout, toast }: {
+  user: User; view: string; setView: (view: string) => void; theme: 'dark' | 'light'; setTheme: (theme: 'dark' | 'light') => void;
+  refresh: number; refreshData: () => void; notify: (message: string) => void; logout: () => Promise<void>; toast: string;
+}) {
+  return <div className="member-portal" data-theme={theme}>
+    <header className="member-header">
+      <a className="member-brand" href="/account" aria-label="迅连宝会员中心"><span className="brand-mark">X</span><span>迅连宝<small>VPN</small></span></a>
+      <nav className="member-nav" aria-label="会员导航">
+        {memberNav.map(item => <button key={item.id} type="button" aria-current={view === item.id ? 'page' : undefined} onClick={() => setView(item.id)}><item.icon size={16} />{item.label}</button>)}
+      </nav>
+      <div className="member-account"><span className="member-account-name"><span className="profile-avatar">{user.name.slice(0, 1)}</span>{user.name}</span>
+        <button type="button" className="icon-button theme-toggle" aria-label={theme === 'dark' ? '切换浅色主题' : '切换深色主题'} title={theme === 'dark' ? '切换浅色主题' : '切换深色主题'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
+        <button type="button" className="member-logout" onClick={() => void logout()}><LogOut size={15} />退出</button>
+      </div>
+    </header>
+    <main className="member-main">
+      <div className="member-preview-banner"><ShieldCheck size={17} /><span><b>本地开发预览</b> 套餐操作只生成演示订单，不会扣款，也不会开通真实 VPN 连接。</span></div>
+      {view === 'overview' && <OverviewPage user={user} refresh={refresh} setView={setView} notify={notify} />}
+      {view === 'subscriptions' && <SubscriptionsPage refresh={refresh} notify={notify} />}
+      {view === 'clients' && <ClientDownloadPage refresh={refresh} setView={setView} notify={notify} />}
+      {view === 'plans' && <PlansPage role="member" refresh={refresh} notify={notify} onDataChange={refreshData} />}
+      {view === 'orders' && <OrdersPage role="member" refresh={refresh} notify={notify} onDataChange={refreshData} />}
+      {view === 'support' && <SupportPage role="member" refresh={refresh} notify={notify} />}
+    </main>
+    <footer className="member-footer"><span>迅连宝会员中心</span><span>本地重建 · 数据仅用于开发验证</span><button type="button" onClick={refreshData}><RefreshCw size={14} />刷新</button></footer>
+    {toast && <div className="toast" role="status">{toast}</div>}
+  </div>;
+}
+
 function labelFor(view: string, role?: User['role']) {
   if (view === 'orders' && role === 'admin') return '订单管理';
-  return [...nav, ...adminNav].find(item => item.id === view)?.label ?? '总览';
+  return [...memberNav, ...adminNav].find(item => item.id === view)?.label ?? '总览';
 }
 
 function Sidebar({ view, setView, role, mobile, close, logout, user }: {
@@ -189,23 +247,23 @@ function NavItem({ label, icon: Icon, active, onClick }: { label: string; icon: 
   return <button className={'nav-item' + (active ? ' active' : '')} onClick={onClick}><Icon size={17} strokeWidth={1.8} /><span>{label}</span>{active && <span className="nav-indicator" />}</button>;
 }
 
-function Login({ email, setEmail, password, setPassword, onSubmit }: {
-  email: string; setEmail: (value: string) => void; password: string; setPassword: (value: string) => void; onSubmit: (event: React.FormEvent) => void;
+function Login({ portalRole, email, setEmail, password, setPassword, onSubmit }: {
+  portalRole: User['role']; email: string; setEmail: (value: string) => void; password: string; setPassword: (value: string) => void; onSubmit: (event: React.FormEvent) => void;
 }) {
   return <main className="login-shell">
     <div className="login-aside">
       <div className="login-logo"><span className="brand-mark">X</span><span className="brand-word">迅连宝<small>VPN</small></span></div>
-      <div className="login-copy"><span className="eyebrow"><i /> SERVICE CONTROL PLANE</span><h1>连接服务，<br />一处管理。</h1><p>账户、订阅、节点和结算状态，在同一工作区清楚呈现。</p></div>
+      <div className="login-copy"><span className="eyebrow"><i /> {portalRole === 'member' ? 'MEMBER ACCOUNT' : 'SERVICE CONTROL PLANE'}</span><h1>{portalRole === 'member' ? <>管理账户，<br />轻松连接。</> : <>连接服务，<br />一处管理。</>}</h1><p>{portalRole === 'member' ? '查看会员权益、订阅和账户服务。' : '账户、订阅、节点和结算状态，在同一工作区清楚呈现。'}</p></div>
       <div className="login-art"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="orbit-core"><ShieldCheck size={30} /></div><div className="orbit-node node-one" /><div className="orbit-node node-two" /><div className="orbit-node node-three" /><div className="art-label label-one"><span>API</span> 控制面在线</div><div className="art-label label-two"><span>01</span> 测试节点</div></div>
       <div className="login-aside-foot"><span>XL B · LOCAL PLATFORM</span><span>安全 · 可审计 · 可维护</span></div>
     </div>
     <section className="login-panel"><div className="login-panel-top"><span className="environment"><i /> 本地开发环境</span><button className="icon-button"><CircleHelp size={17} /></button></div>
-      <form className="login-form" onSubmit={onSubmit}><span className="eyebrow">欢迎回来</span><h2>登录你的工作区</h2><p>请选择一个本地演示账户继续。</p>
+      <form className="login-form" onSubmit={onSubmit}><span className="eyebrow">欢迎回来</span><h2>{portalRole === 'member' ? '登录会员中心' : '登录管理后台'}</h2><p>{portalRole === 'member' ? '管理你的套餐、设备与订阅。' : '请选择一个本地演示账户继续。'}</p>
         <label>邮箱地址<input type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /></label>
         <label>登录密码<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
         <div className="form-meta"><label className="remember"><input type="checkbox" defaultChecked /> 保持登录</label><span>本机演示账号</span></div>
-        <button className="primary-button login-submit">登录控制台 <ArrowUpRight size={16} /></button>
-        <div className="demo-hint"><ShieldCheck size={15} /><span>默认管理员：<b>admin@xlb.local</b> / <b>admin-local-2026</b></span></div>
+        <button className="primary-button login-submit">{portalRole === 'member' ? '登录会员中心' : '登录管理后台'} <ArrowUpRight size={16} /></button>
+        {portalRole === 'admin' && <div className="demo-hint"><ShieldCheck size={15} /><span>默认管理员：<b>admin@xlb.local</b> / <b>admin-local-2026</b></span></div>}
         <div className="demo-hint"><CircleUserRound size={15} /><span>会员演示：<b>member@xlb.local</b> / <b>member-local-2026</b></span></div>
       </form>
       <div className="login-panel-foot"><span>© 2026 迅连宝</span><span>仅用于本地开发与验证</span></div>
@@ -278,7 +336,7 @@ function Metric({ label, value, note, icon: Icon, tone }: { label: string; value
 function MemberEntitlement({ entitlement, setView }: { entitlement?: Overview['entitlement']; setView: (view: string) => void }) {
   if (!entitlement) return <section className="panel member-empty"><BadgeCheck size={22} /><div><b>当前没有有效会员权益</b><span>请从正式购买入口确认账户套餐。</span></div></section>;
   const used = percent(entitlement.data_used_gb, entitlement.traffic_gb);
-  return <section className="member-hero"><div className="member-main"><div className="member-tag"><BadgeCheck size={14} /> 当前有效会员</div><h2>{entitlement.plan_name}</h2><p>有效至 {shortDate(entitlement.ends_at)} · 最多 {entitlement.max_devices} 台设备</p><button className="member-link" onClick={() => setView('plans')}>查看会员权益 <ArrowUpRight size={14} /></button></div><div className="usage"><div className="usage-top"><span>已用流量</span><b>{entitlement.data_used_gb.toFixed(1)} <small>/ {entitlement.traffic_gb} GB</small></b></div><div className="usage-bar"><span style={{ width: used + '%' }} /></div><div className="usage-foot"><span>剩余 {(entitlement.traffic_gb - entitlement.data_used_gb).toFixed(1)} GB</span><span>{used}%</span></div></div><div className="member-side"><span>当前连接</span><b><i /> 未连接</b><small>演示状态 · 无真实节点</small></div></section>;
+  return <section className="member-hero"><div className="member-main"><div className="member-tag"><BadgeCheck size={14} /> 当前有效会员</div><h2>{entitlement.plan_name}</h2><p>有效至 {shortDate(entitlement.ends_at)} · 最多 {entitlement.max_devices} 台设备</p><button className="member-link" onClick={() => setView('plans')}>查看会员权益 <ArrowUpRight size={14} /></button></div><div className="usage"><div className="usage-top"><span>套餐周期已用流量</span><b>{entitlement.data_used_gb.toFixed(1)} <small>/ {entitlement.traffic_gb} GB</small></b></div><div className="usage-bar"><span style={{ width: used + '%' }} /></div><div className="usage-foot"><span>剩余 {(entitlement.traffic_gb - entitlement.data_used_gb).toFixed(1)} GB</span><span>{used}% · 周期累计</span></div></div><div className="member-side"><span>当前连接</span><b><i /> 未连接</b><small>演示状态 · 无真实节点</small></div></section>;
 }
 function AuditList({ rows }: { rows?: AdminSummary['recentAudit'] }) {
   if (!rows) return <LoadingBlock />;
@@ -313,7 +371,7 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
   useEffect(() => { void load(); }, [load, refresh]);
   const create = async () => {
     setBusy(true);
-    try { const item = await api<Subscription>('/api/v1/me/subscriptions', { method: 'POST' }); setCreatedUrl(item.url ?? ''); setShowSubscription(true); notify('订阅链接已生成，请立即复制保存'); await load(); }
+    try { const item = await api<Subscription>('/api/v1/me/subscriptions', { method: 'POST' }); setCreatedUrl(item.url ?? ''); setShowSubscription(true); notify('订阅链接已生成；会员权益生效后可获取线路配置'); await load(); }
     catch (error) { notify((error as Error).message); }
     finally { setBusy(false); }
   };
@@ -323,7 +381,7 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
   };
   const rotate = async (row: Subscription) => {
     setBusy(true);
-    try { const next = await api<Subscription>('/api/v1/me/subscriptions/' + row.id + '/rotate', { method: 'POST' }); setCreatedUrl(next.url ?? ''); setRotateTarget(null); notify('旧链接已撤销，新链接仅显示一次'); await load(); }
+    try { const next = await api<Subscription>('/api/v1/me/subscriptions/' + row.id + '/rotate', { method: 'POST' }); setCreatedUrl(next.url ?? ''); setRotateTarget(null); notify('旧链接已撤销，新链接可随时复制'); await load(); }
     catch (error) { notify((error as Error).message); }
     finally { setBusy(false); }
   };
@@ -332,16 +390,82 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
     try { await navigator.clipboard.writeText(absolute); notify('已复制订阅地址'); }
     catch { setCreatedUrl(absolute); notify('无法访问剪贴板，请手动复制'); }
   };
+  const current = rows?.find(row => row.status === 'active' && row.url);
   return <div className="page-stack">
-    <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="生成、轮换或撤销 Clash 兼容订阅。订阅链接等同账户凭证，请妥善保管。" action={<button className="primary-button" disabled={busy} onClick={() => { setCreatedUrl(''); setRotateTarget(null); setShowSubscription(true); }}><Link2 size={15} /> 新建订阅</button>} />
-    <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>本地开发订阅</b> 仅用于查看 Mihomo 配置格式，不含真实可连接节点。不要导入生产客户端或分享真实凭证。</span></div>
-    {showSubscription && <Modal title={createdUrl ? '订阅链接已生成' : rotateTarget ? '轮换订阅链接' : '新建订阅'} detail={createdUrl ? '链接仅显示本次，请及时复制保存' : rotateTarget ? '旧链接将立即失效' : '订阅链接是账户凭证，请勿公开分享'} onClose={() => { if (busy) return; setShowSubscription(false); setCreatedUrl(''); setRotateTarget(null); }}>
-      {createdUrl ? <div className="secret-result"><div><span className="eyebrow">新凭证 · 仅显示本次</span><code>{new URL(createdUrl, window.location.origin).toString()}</code></div><button className="secondary-button" onClick={() => void copy(createdUrl)}><Clipboard size={15} /> 复制链接</button></div> : <><p className="modal-copy">{rotateTarget ? '确认轮换后，当前订阅链接立即失效。请复制新链接并更新已连接的客户端。' : '生成后可在兼容客户端导入本地测试配置；当前没有真实可连接节点。'}</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowSubscription(false); setRotateTarget(null); }}>取消</button><button className="primary-button" disabled={busy} onClick={() => void (rotateTarget ? rotate(rotateTarget) : create())}>{rotateTarget ? '确认轮换' : '生成订阅'}</button></div></>}
+    <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="购买后自动准备固定订阅地址；后续续费继续使用同一地址。也可以在购买前获取。" action={<button className="primary-button" disabled={busy || !rows} onClick={() => { if (current?.url) void copy(current.url); else { setCreatedUrl(''); setRotateTarget(null); setShowSubscription(true); } }}><Clipboard size={15} />{current ? '复制固定链接' : '获取订阅链接'}</button>} />
+    <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>权限说明</b> 订阅链接可预先创建；客户端仅会在当前会员权益有效且线路可用时取得配置。本地预览使用测试节点，不提供真实连接。</span></div>
+    {showSubscription && <Modal title={createdUrl ? '固定订阅链接' : rotateTarget ? '轮换订阅链接' : '获取固定订阅链接'} detail={createdUrl ? '可随时在此页面重新复制；请勿公开分享' : rotateTarget ? '旧链接将立即失效' : '同一账户重复获取时会返回现有链接'} onClose={() => { if (busy) return; setShowSubscription(false); setCreatedUrl(''); setRotateTarget(null); }}>
+      {createdUrl ? <div className="secret-result"><div><span className="eyebrow">固定订阅 · 可重复复制</span><code>{new URL(createdUrl, window.location.origin).toString()}</code></div><button className="secondary-button" onClick={() => void copy(createdUrl)}><Clipboard size={15} /> 复制链接</button></div> : <><p className="modal-copy">{rotateTarget ? '确认轮换后，当前订阅链接立即失效。请更新已连接的客户端。' : '订阅链接可以提前获取；会员权益生效且有可用线路后，兼容客户端即可从此地址获取配置。'}</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowSubscription(false); setRotateTarget(null); }}>取消</button><button className="primary-button" disabled={busy} onClick={() => void (rotateTarget ? rotate(rotateTarget) : create())}>{rotateTarget ? '确认轮换' : '获取链接'}</button></div></>}
     </Modal>}
     <section className="panel"><SectionTitle title="订阅凭证" detail={rows ? rows.length + ' 条记录' : '读取中'} action={<button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新</button>} />
-      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="尚未创建订阅" detail="创建订阅后，可在本机查看测试配置格式。" /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>状态</th><th>创建时间</th><th>到期时间</th><th>最近访问</th><th /></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><span className="table-main"><Link2 size={15} />{row.name}</span><small className="table-sub">{row.id.slice(0, 14)}</small></td><td><StatusPill status={row.status === 'active' ? '有效' : '已撤销'} tone={row.status === 'active' ? 'green' : 'gray'} /></td><td>{shortDate(row.created_at)}</td><td>{shortDate(row.expires_at)}</td><td>{shortDate(row.last_used_at)}</td><td><div className="row-actions">{row.status === 'active' && <><button className="text-button" onClick={() => { setCreatedUrl(''); setRotateTarget(row); setShowSubscription(true); }}>轮换</button><button className="text-button danger-text" onClick={() => void revoke(row)}>撤销</button></>}</div></td></tr>)}</tbody></table></div>}
+      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="尚未创建订阅" detail="获取固定链接后，可随时在这里复制或轮换地址。" /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>凭证状态</th><th>创建时间</th><th>配置权限</th><th>最近访问</th><th>操作</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><span className="table-main"><Link2 size={15} />{row.name}</span><small className="table-sub">{row.id.slice(0, 14)}</small></td><td><StatusPill status={row.status === 'active' ? '可用凭证' : '已撤销'} tone={row.status === 'active' ? 'green' : 'gray'} /></td><td>{shortDate(row.created_at)}</td><td>需有效会员权益</td><td>{shortDate(row.last_used_at)}</td><td><div className="row-actions">{row.status === 'active' && <>{row.url && <button className="text-button" aria-label="复制固定订阅链接" title="复制固定订阅链接" onClick={() => void copy(row.url!)}><Clipboard size={14} />复制</button>}<button className="text-button" onClick={() => { setCreatedUrl(''); setRotateTarget(row); setShowSubscription(true); }}>轮换</button><button className="text-button danger-text" onClick={() => void revoke(row)}>撤销</button></>}</div></td></tr>)}</tbody></table></div>}
     </section>
-    <div className="two-column"><section className="panel"><SectionTitle title="连接客户端" detail="外部客户端兼容性仍需逐版本验证" /><div className="client-list"><div><span className="client-icon"><Monitor size={17} /></span><span><b>Clash Verge Rev</b><small>Mihomo 内核 · 计划首批验证</small></span><StatusPill status="待验证" tone="amber" /></div><div><span className="client-icon"><Smartphone size={17} /></span><span><b>Clash Mi</b><small>应用名称与平台待确认</small></span><StatusPill status="待确认" tone="gray" /></div></div></section><section className="panel"><SectionTitle title="使用状态" detail="权限与接入边界" /><div className="policy-list"><p><ShieldCheck size={15} /> 订阅地址作为密钥存储，只保留摘要。</p><p><RefreshCw size={15} /> 轮换会立即废止旧链接。</p><p><Activity size={15} /> 用量由服务端策略执行，不依赖配置文案。</p><p><Globe2 size={15} /> 本地测试节点使用保留地址，不提供连接服务。</p></div></section></div>
+    <div className="two-column"><section className="panel"><SectionTitle title="连接客户端" detail="外部客户端兼容性仍需逐版本验证" /><div className="client-list"><div><span className="client-icon"><Monitor size={17} /></span><span><b>Clash Verge Rev</b><small>Mihomo 内核 · 计划首批验证</small></span><StatusPill status="待验证" tone="amber" /></div><div><span className="client-icon"><Smartphone size={17} /></span><span><b>Clash Mi</b><small>应用名称与平台待确认</small></span><StatusPill status="待确认" tone="gray" /></div></div></section><section className="panel"><SectionTitle title="使用状态" detail="权限与接入边界" /><div className="policy-list"><p><ShieldCheck size={15} /> 令牌以摘要校验、加密密文保存。</p><p><RefreshCw size={15} /> 轮换会立即废止旧链接。</p><p><Activity size={15} /> 用量由服务端策略执行，不依赖配置文案。</p><p><Globe2 size={15} /> 本地测试节点使用保留地址，不提供真实连接。</p></div></section></div>
+  </div>;
+}
+
+function ClientDownloadPage({ refresh, setView, notify }: { refresh: number; setView: (view: string) => void; notify: (value: string) => void }) {
+  const [platformId, setPlatformId] = useState<string>('android');
+  const [clients, setClients] = useState<ClientCatalogItem[] | null>(null);
+  const platform = clientPlatforms.find(item => item.id === platformId) ?? clientPlatforms[0];
+  const platformClients = clients?.filter(item => item.platform === platform.id) ?? [];
+  const PlatformIcon = platform.icon;
+
+  useEffect(() => {
+    api<ClientCatalogItem[]>('/api/v1/me/clients').then(setClients).catch(error => {
+      notify((error as Error).message);
+      setClients([]);
+    });
+  }, [refresh, notify]);
+
+  const compatibility = (status: ClientCompatibility) => ({
+    pending: { label: '待验证', tone: 'amber' },
+    verified: { label: '已验证', tone: 'green' },
+    maintenance: { label: '维护中', tone: 'amber' },
+    unsupported: { label: '暂不支持', tone: 'gray' },
+  } as const)[status];
+
+  return <div className="page-stack client-guide">
+    <PageHeading eyebrow="设备接入" title="客户端下载" subtitle="按设备选择客户端，并按照步骤导入迅连宝订阅。" action={<button className="secondary-button" onClick={() => setView('subscriptions')}><Link2 size={15} /> 订阅与设备</button>} />
+    <div className="notice notice-neutral"><ShieldCheck size={16} /><span><b>本地开发预览</b> 正式安装包和生产线路尚未配置，下载入口会在文件来源与版本验证完成后开放。</span></div>
+    <div className="client-platform-tabs" role="tablist" aria-label="选择设备平台">
+      {clientPlatforms.map(item => {
+        const Icon = item.icon;
+        return <button key={item.id} type="button" role="tab" aria-selected={platformId === item.id} onClick={() => setPlatformId(item.id)}><Icon size={16} />{item.label}</button>;
+      })}
+    </div>
+    <section className="client-catalog-section" aria-labelledby="client-platform-title">
+      <div className="client-catalog-heading"><div><span className="eyebrow">{clients ? platformClients.length + ' 个客户端选项' : '读取中'}</span><h2 id="client-platform-title"><PlatformIcon size={21} />{platform.label}</h2></div><span className="client-release-status">下载与兼容状态以目录配置为准</span></div>
+      <div className="client-download-grid">
+        {!clients ? <LoadingBlock /> : !platformClients.length ? <Empty title="暂无上架客户端" detail="管理员配置并上架后会显示在这里。" /> : platformClients.map(client => {
+          const status = compatibility(client.compatibility_status);
+          return <article className="client-download-card" key={client.id}>
+            <div className="client-download-head"><span className="client-icon"><PlatformIcon size={18} /></span><div><h3>{client.name}</h3><p>{client.version ? '版本 ' + client.version : '版本待配置'}</p></div><StatusPill status={status.label} tone={status.tone} /></div>
+            <p className="client-download-detail">{client.description || '暂无说明。'}</p>
+            {client.qr_code_url && <a className="client-qr-link" href={client.qr_code_url} target="_blank" rel="noopener noreferrer"><img src={client.qr_code_url} alt={client.name + ' 下载二维码'} loading="lazy" />查看下载二维码</a>}
+            <div className="client-entry-links">
+              {client.download_url ? <a className="secondary-button" href={client.download_url} target="_blank" rel="noopener noreferrer"><ArrowDownToLine size={15} />下载客户端</a> : <button className="secondary-button" type="button" disabled title="下载地址尚未配置"><ArrowDownToLine size={15} />下载地址待配置</button>}
+              {client.tutorial_url && <a className="text-button" href={client.tutorial_url} target="_blank" rel="noopener noreferrer">查看教程 <ArrowUpRight size={14} /></a>}
+            </div>
+          </article>;
+        })}
+      </div>
+    </section>
+    <section className="client-setup-section" aria-labelledby="client-setup-title">
+      <div className="client-catalog-heading"><div><span className="eyebrow">连接流程</span><h2 id="client-setup-title">导入订阅</h2></div><button className="text-button" onClick={() => setView('subscriptions')}>管理订阅 <ArrowUpRight size={14} /></button></div>
+      <ol className="client-setup-steps">
+        <li><span>01</span><div><b>安装客户端</b><p>从客户端官方渠道安装对应平台的应用，并确认版本与系统兼容。</p></div></li>
+        <li><span>02</span><div><b>获取固定订阅地址</b><p>首次购买后自动准备；未购买时也可提前获取，后续续费沿用同一地址。</p></div></li>
+        <li><span>03</span><div><b>添加远程订阅</b><p>在客户端选择添加订阅或配置，将地址粘贴后更新配置。</p></div></li>
+        <li><span>04</span><div><b>检查线路状态</b><p>当前会员权益生效且有可用线路时，客户端才会获取线路配置并建立连接。</p></div></li>
+      </ol>
+    </section>
+    <section className="client-help-section" aria-labelledby="client-help-title">
+      <div className="client-catalog-heading"><div><span className="eyebrow">问题排查</span><h2 id="client-help-title">连接前检查</h2></div></div>
+      <details><summary>客户端更新后没有线路</summary><p>确认会员权益已经生效，再手动更新订阅。权益未生效、节点维护或本地演示环境都可能导致配置暂不可用。</p></details>
+      <details><summary>客户端提示配置格式不兼容</summary><p>确认选择了与设备匹配的客户端，并检查该版本对 Mihomo 或 Clash 订阅格式的支持情况；当前兼容性仍在验证中。</p></details>
+      <details><summary>仍然无法连接</summary><p>记录设备系统版本、客户端名称和版本、发生时间及提示内容，然后在帮助工单中提交。请勿附上密码或完整订阅地址。</p></details>
+    </section>
   </div>;
 }
 
@@ -361,14 +485,14 @@ function PlansPage({ role, refresh, notify, onDataChange }: { role: User['role']
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
   };
-  return <div className="page-stack"><PageHeading eyebrow="套餐中心" title="套餐权益" subtitle="Web、App 与第三方客户端将共享同一权益数据源。" /><div className="notice notice-neutral"><CreditCard size={16} /><span>当前可创建本地测试订单，30 分钟后超时。真实支付未接入；沙箱模拟只生成测试事件与测试权益，不扣款或结算佣金。</span></div>
-    <section className="panel"><SectionTitle title="会员方案" detail={plans ? plans.length + ' 种方案' : '载入中'} />{!plans ? <LoadingBlock /> : !plans.length ? <Empty title="暂无上架套餐" detail="套餐上架后会显示在这里。" /> : <div className="plan-grid">{plans.map(plan => <div className="plan-row" key={plan.id}><div className="plan-period"><span className="plan-icon"><BadgeCheck size={17} /></span><span><b>{plan.name}</b><small>{plan.period_label}有效</small></span></div><div><b>{money(plan.price_cents)}</b><small>测试标价</small></div><div><b>{plan.traffic_gb} GB</b><small>套餐流量</small></div><div><b>{plan.max_devices} 台</b><small>同时在线</small></div>{role === 'member' ? <button className="secondary-button" onClick={() => { setError(''); setSelection({ plan, key: crypto.randomUUID() }); }}>创建测试订单</button> : <StatusPill status="会员端可测试下单" tone="gray" />}</div>)}</div>}</section>
+  return <div className="page-stack"><PageHeading eyebrow="套餐中心" title="套餐权益" subtitle="查看套餐期限、流量和设备数量。" /><div className="notice notice-neutral"><CreditCard size={16} /><span>本地购买流程预览：可选择套餐并生成演示订单。支付尚未接入，不会扣款、开通真实权益或结算佣金。</span></div>
+    <section className="panel"><SectionTitle title="可选套餐" detail={plans ? plans.length + ' 种方案' : '载入中'} />{!plans ? <LoadingBlock /> : !plans.length ? <Empty title="暂无上架套餐" detail="套餐上架后会显示在这里。" /> : <div className="plan-grid">{plans.map(plan => <div className="plan-row" key={plan.id}><div className="plan-period"><span className="plan-icon"><BadgeCheck size={17} /></span><span><b>{plan.name}</b><small>{plan.period_label}有效</small></span></div><div><b>{money(plan.price_cents)}</b><small>演示售价</small></div><div><b>{plan.traffic_gb} GB</b><small>套餐流量</small></div><div><b>{plan.max_devices} 台</b><small>同时在线</small></div>{role === 'member' ? <button className="secondary-button" onClick={() => { setError(''); setSelection({ plan, key: crypto.randomUUID() }); }}>选择套餐</button> : <StatusPill status="会员端可测试下单" tone="gray" />}</div>)}</div>}</section>
     <section className="panel"><SectionTitle title="权益一致性" detail="唯一事实源设计" /><div className="service-strip"><ServiceItem label="官网展示" status="共用套餐 API" icon={Globe2} /><ServiceItem label="自有 App" status="共用账户权益" icon={Smartphone} /><ServiceItem label="Clash 订阅" status="服务端校验" icon={Link2} /><ServiceItem label="运营后台" status="审计可查" icon={ShieldCheck} /></div></section>
-    {selection && <Modal title="创建测试订单" detail="确认套餐，价格以服务端最新校验为准" onClose={() => { if (!busy) setSelection(null); }}>
+    {selection && <Modal title="购买流程预览" detail="确认所选套餐；当前为本地演示" onClose={() => { if (!busy) setSelection(null); }}>
       <dl className="detail-grid"><div><dt>套餐</dt><dd>{selection.plan.name}</dd></div><div><dt>金额</dt><dd>{money(selection.plan.price_cents)}</dd></div><div><dt>有效期</dt><dd>{selection.plan.duration_days} 天</dd></div><div><dt>套餐流量</dt><dd>{selection.plan.traffic_gb} GB</dd></div></dl>
-      <div className="notice notice-neutral"><CreditCard size={16} /><span>此步骤仅生成测试订单，不会扣款。支付及权益发放尚未开放。</span></div>
+      <div className="notice notice-neutral"><CreditCard size={16} /><span>此步骤只生成本地演示订单，不会扣款或开通实际服务；真实支付与权益发放尚未接入。</span></div>
       {error && <p className="order-error" role="alert">{error}</p>}
-      <div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setSelection(null)}>返回</button><button className="primary-button" disabled={busy} onClick={() => void create()}>{busy ? '提交中…' : '确认创建'}</button></div>
+      <div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setSelection(null)}>返回</button><button className="primary-button" disabled={busy} onClick={() => void create()}>{busy ? '提交中…' : '生成演示订单'}</button></div>
     </Modal>}
     {orderId && <OrderDialog id={orderId} role={role} onClose={() => setOrderId(null)} onChange={onDataChange} notify={notify} />}
   </div>;
@@ -472,6 +596,7 @@ function OrderDialog({ id, role, onClose, onChange, notify }: { id: string; role
   const [busy, setBusy] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmPayment, setConfirmPayment] = useState(false);
+  const [subscriptionUrl, setSubscriptionUrl] = useState('');
   const sequence = useRef(0);
   const base = '/api/v1/' + (role === 'admin' ? 'admin' : 'me') + '/orders/';
   useEffect(() => {
@@ -497,13 +622,22 @@ function OrderDialog({ id, role, onClose, onChange, notify }: { id: string; role
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
   };
+  const copySubscription = async () => {
+    try {
+      await navigator.clipboard.writeText(new URL(subscriptionUrl, window.location.origin).toString());
+      notify('已复制固定订阅地址');
+    } catch {
+      notify('剪贴板不可用，请手动选择上方链接');
+    }
+  };
   const simulatePayment = async () => {
     if (busy) return;
     setBusy(true); setError(''); ++sequence.current;
     try {
-      await api('/api/v1/me/orders/' + id + '/sandbox-payment', { method: 'POST' });
+      const payment = await api<{ subscription: { url: string } | null }>('/api/v1/me/orders/' + id + '/sandbox-payment', { method: 'POST' });
+      setSubscriptionUrl(payment.subscription?.url ?? '');
       const updated = await api<OrderDetail>(base + id);
-      setDetail(updated); setConfirmPayment(false); onChange(); notify('本地测试付款已记录，测试权益已生成');
+      setDetail(updated); setConfirmPayment(false); onChange(); notify('本地测试付款已记录，固定订阅链接已准备好');
     } catch (error) {
       setError((error as Error).message);
       try { setDetail(await api<OrderDetail>(base + id)); } catch { /* Keep the last visible order state if refresh also fails. */ }
@@ -515,6 +649,7 @@ function OrderDialog({ id, role, onClose, onChange, notify }: { id: string; role
     {!detail ? (error ? <Empty title="无法读取订单" detail="请关闭弹框后重试。" /> : <LoadingBlock />) : <>
       <dl className="detail-grid"><div className="order-full"><dt>订单号</dt><dd><code>{detail.id}</code></dd></div><div><dt>订单状态</dt><dd><StatusPill status={orderStatusText[detail.status] ?? detail.status} tone={orderTone(detail.status)} /></dd></div><div><dt>订单金额</dt><dd>{money(detail.total_cents)}</dd></div><div><dt>套餐版本</dt><dd>{detail.plan_name} · v{detail.plan_snapshot.version}</dd></div><div><dt>权益快照</dt><dd>{detail.plan_snapshot.duration_days} 天 / {detail.plan_snapshot.traffic_gb} GB / {detail.plan_snapshot.max_devices} 台</dd></div><div><dt>创建时间</dt><dd>{dateTime(detail.created_at)}</dd></div><div><dt>支付期限</dt><dd>{dateTime(detail.expires_at)}</dd></div>{role === 'admin' && <div className="order-full"><dt>下单用户</dt><dd>{detail.user_name} · {detail.user_email}</dd></div>}</dl>
       <div className="notice notice-neutral"><CreditCard size={16} /><span>{detail.payment?.status === 'accepted_test' ? '本地沙箱模拟事件已记录，不代表真实渠道付款。此测试权益不产生真实服务或佣金。' : detail.status === 'paid_test' ? '这是预置的已支付样例，并未通过支付渠道扣款。' : '真实支付尚未接入；本地沙箱模拟不会扣款或生成佣金。'}</span></div>
+      {role === 'member' && subscriptionUrl && detail.payment?.status === 'accepted_test' && <div className="secret-result"><div><span className="eyebrow">固定订阅链接 · 续费沿用</span><code>{new URL(subscriptionUrl, window.location.origin).toString()}</code></div><button className="secondary-button" onClick={() => void copySubscription()}><Clipboard size={15} /> 复制链接</button></div>}
       {detail.payment && <dl className="detail-grid order-payment"><div><dt>沙箱事件</dt><dd>{detail.payment.status === 'accepted_test' ? '已模拟接受' : '待核验'}</dd></div><div><dt>记录金额</dt><dd>{money(detail.payment.amount_cents)} {detail.payment.currency}</dd></div><div className="order-full"><dt>事件编号</dt><dd><code>{detail.payment.id}</code></dd></div></dl>}
       {detail.entitlement_grant && <div className="order-grant"><BadgeCheck size={16} /><span>本地测试权益：{dateTime(detail.entitlement_grant.starts_at)} 至 {dateTime(detail.entitlement_grant.ends_at)}</span></div>}
       <section className="order-history"><h3>状态记录</h3>{detail.events.length ? <ol>{detail.events.map(event => <li key={event.id}><span><b>{event.from_status ? (orderStatusText[event.from_status] ?? event.from_status) + ' → ' : ''}{orderStatusText[event.to_status] ?? event.to_status}</b><small>{event.actor_name ?? '系统'} · {dateTime(event.created_at)}</small></span></li>)}</ol> : <p>历史样例暂无事件记录。</p>}{detail.status === 'expired_test' && detail.events.at(-1)?.to_status === 'pending_test' && <p>支付期限已到，超时事件将在到期任务运行后记录。</p>}</section>
@@ -617,6 +752,113 @@ function SupportPage({ role, refresh, notify }: { role: User['role']; refresh: n
         <div className="support-events">{detail.events.map(item => item.kind === 'status_changed' ? <div key={item.id} className="support-event system">{item.actor_name} 将状态从 {ticketStatusText[item.from_status!]} 改为 {ticketStatusText[item.to_status!]} · {new Date(item.created_at).toLocaleString('zh-CN')}</div> : <div key={item.id} className={'support-event' + (item.actor_role === 'admin' ? ' staff' : '')}><div><b>{item.actor_name}</b><small>{new Date(item.created_at).toLocaleString('zh-CN')}</small></div><p>{item.body}</p></div>)}</div>
         <form className="support-reply" onSubmit={sendReply}><label htmlFor="support-reply">{role === 'admin' ? '回复会员' : '补充说明'}</label><textarea id="support-reply" value={reply} onChange={event => setReply(event.target.value)} maxLength={2000} minLength={2} rows={3} placeholder="请勿填写密码或完整订阅地址" required /><button className="primary-button" disabled={busy}>发送回复 <ArrowUpRight size={14} /></button></form>
       </>}
+    </Modal>}
+  </div>;
+}
+
+function AdminClientsPage({ notify }: { notify: (value: string) => void }) {
+  const blank = (): ClientForm => ({ platform: 'android', name: '', version: '', description: '', download_url: '', qr_code_url: '', tutorial_url: '', compatibility_status: 'pending', sort_order: '100', is_active: true });
+  const [rows, setRows] = useState<ManagedClient[] | null>(null);
+  const [modal, setModal] = useState<{ mode: 'create' } | { mode: 'edit' | 'detail'; row: ManagedClient } | null>(null);
+  const [form, setForm] = useState<ClientForm>(blank);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => api<ManagedClient[]>('/api/v1/admin/clients').then(setRows).catch(error => notify((error as Error).message)), [notify]);
+  useEffect(() => { void load(); }, [load]);
+
+  const edit = (row: ManagedClient) => {
+    setForm({
+      platform: row.platform,
+      name: row.name,
+      version: row.version ?? '',
+      description: row.description ?? '',
+      download_url: row.download_url ?? '',
+      qr_code_url: row.qr_code_url ?? '',
+      tutorial_url: row.tutorial_url ?? '',
+      compatibility_status: row.compatibility_status,
+      sort_order: String(row.sort_order),
+      is_active: row.is_active,
+    });
+    setModal({ mode: 'edit', row });
+  };
+  const create = () => { setForm(blank()); setModal({ mode: 'create' }); };
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!modal || modal.mode === 'detail') return;
+    setBusy(true);
+    const payload = {
+      ...form,
+      name: form.name.trim(),
+      version: form.version.trim() || null,
+      description: form.description.trim() || null,
+      download_url: form.download_url.trim() || null,
+      qr_code_url: form.qr_code_url.trim() || null,
+      tutorial_url: form.tutorial_url.trim() || null,
+      sort_order: Number(form.sort_order),
+    };
+    try {
+      await api('/api/v1/admin/clients' + (modal.mode === 'edit' ? '/' + encodeURIComponent(modal.row.id) : ''), {
+        method: modal.mode === 'edit' ? 'PUT' : 'POST',
+        body: JSON.stringify(payload),
+      });
+      setModal(null);
+      notify(modal.mode === 'edit' ? '客户端目录已更新' : '客户端目录已创建');
+      await load();
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const changeStatus = async (row: ManagedClient) => {
+    try {
+      await api('/api/v1/admin/clients/' + encodeURIComponent(row.id) + '/status', { method: 'PATCH', body: JSON.stringify({ is_active: !row.is_active }) });
+      notify(row.is_active ? '客户端已下架' : '客户端已上架');
+      await load();
+    } catch (error) {
+      notify((error as Error).message);
+    }
+  };
+  const platformLabel = (value: ClientPlatform) => clientPlatforms.find(item => item.id === value)?.label ?? value;
+  const compatibility = (value: ClientCompatibility) => ({
+    pending: { label: '待验证', tone: 'amber' },
+    verified: { label: '已验证', tone: 'green' },
+    maintenance: { label: '维护中', tone: 'amber' },
+    unsupported: { label: '暂不支持', tone: 'gray' },
+  } as const)[value];
+
+  return <div className="page-stack">
+    <PageHeading eyebrow="运营管理" title="客户端目录" subtitle="维护各平台客户端、版本、下载来源与兼容验证状态。" action={<button className="primary-button" onClick={create}><Monitor size={15} /> 添加客户端</button>} />
+    <div className="notice notice-neutral"><ShieldCheck size={16} /><span>客户端下载页只展示已上架条目；未配置的下载地址会保持关闭。请在实际客户端验证订阅导入后，再将兼容状态改为“已验证”。</span></div>
+    <section className="panel"><SectionTitle title="客户端列表" detail={rows ? rows.length + ' 个条目' : '读取中'} />
+      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="暂无客户端" detail="点击右上角添加客户端目录项。" /> : <div className="table-wrap"><table><thead><tr><th>平台</th><th>客户端 / 版本</th><th>兼容状态</th><th>下载与教程</th><th>目录状态</th><th>操作</th></tr></thead><tbody>{rows.map(row => {
+        const status = compatibility(row.compatibility_status);
+        const configuredLinks = [row.download_url, row.qr_code_url, row.tutorial_url].filter(Boolean).length;
+        return <tr key={row.id}><td>{platformLabel(row.platform)}</td><td><b>{row.name}</b><small className="table-sub">{row.version ? '版本 ' + row.version : '版本待配置'}</small></td><td><StatusPill status={status.label} tone={status.tone} /></td><td>{configuredLinks} 项已配置</td><td><StatusPill status={row.is_active ? '已上架' : '已下架'} tone={row.is_active ? 'green' : 'gray'} /></td><td><div className="row-actions"><button className="text-button" onClick={() => setModal({ mode: 'detail', row })}>详情</button><button className="text-button" onClick={() => edit(row)}>编辑</button><button className="text-button" onClick={() => void changeStatus(row)}>{row.is_active ? '下架' : '上架'}</button></div></td></tr>;
+      })}</tbody></table></div>}
+    </section>
+    {modal && <Modal title={modal.mode === 'create' ? '添加客户端' : modal.mode === 'edit' ? '编辑客户端' : '客户端详情'} detail={modal.mode === 'detail' ? '客户端目录配置与发布状态' : '验证后再配置公开下载来源'} onClose={() => { if (!busy) setModal(null); }} wide={modal.mode !== 'detail'}>
+      {modal.mode === 'detail' ? <><dl className="detail-grid">
+        <div><dt>平台</dt><dd>{platformLabel(modal.row.platform)}</dd></div><div><dt>客户端名称</dt><dd>{modal.row.name}</dd></div>
+        <div><dt>版本</dt><dd>{modal.row.version || '未配置'}</dd></div><div><dt>兼容状态</dt><dd>{compatibility(modal.row.compatibility_status).label}</dd></div>
+        <div><dt>目录状态</dt><dd>{modal.row.is_active ? '已上架' : '已下架'}</dd></div><div><dt>排序值</dt><dd>{modal.row.sort_order}</dd></div>
+        <div><dt>说明</dt><dd>{modal.row.description || '未配置'}</dd></div>
+        <div><dt>下载地址</dt><dd>{modal.row.download_url ? <a href={modal.row.download_url} target="_blank" rel="noopener noreferrer">打开下载来源</a> : '未配置'}</dd></div>
+        <div><dt>二维码图片</dt><dd>{modal.row.qr_code_url ? <a href={modal.row.qr_code_url} target="_blank" rel="noopener noreferrer">打开二维码</a> : '未配置'}</dd></div>
+        <div><dt>使用教程</dt><dd>{modal.row.tutorial_url ? <a href={modal.row.tutorial_url} target="_blank" rel="noopener noreferrer">打开教程</a> : '未配置'}</dd></div>
+      </dl><div className="modal-actions"><button className="secondary-button" onClick={() => setModal(null)}>关闭</button><button className="primary-button" onClick={() => edit(modal.row)}>编辑</button></div></> :
+      <form className="client-editor" onSubmit={save}>
+        <label>设备平台<select value={form.platform} onChange={event => setForm({ ...form, platform: event.target.value as ClientPlatform })}>{clientPlatforms.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+        <label>客户端名称<input required minLength={2} maxLength={80} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
+        <label>版本号<input maxLength={40} value={form.version} onChange={event => setForm({ ...form, version: event.target.value })} placeholder="例如 1.2.3" /></label>
+        <label>兼容状态<select value={form.compatibility_status} onChange={event => setForm({ ...form, compatibility_status: event.target.value as ClientCompatibility })}><option value="pending">待验证</option><option value="verified">已验证</option><option value="maintenance">维护中</option><option value="unsupported">暂不支持</option></select></label>
+        <label>排序值<input required type="number" min="0" max="100000" step="1" value={form.sort_order} onChange={event => setForm({ ...form, sort_order: event.target.value })} /></label>
+        <label className="client-active-toggle"><input type="checkbox" checked={form.is_active} onChange={event => setForm({ ...form, is_active: event.target.checked })} /> 上架显示</label>
+        <label className="client-editor-wide">客户端说明<textarea maxLength={1000} rows={3} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></label>
+        <label className="client-editor-wide">HTTPS 下载地址<input type="url" value={form.download_url} onChange={event => setForm({ ...form, download_url: event.target.value })} placeholder="https://..." /></label>
+        <label className="client-editor-wide">HTTPS 二维码图片地址<input type="url" value={form.qr_code_url} onChange={event => setForm({ ...form, qr_code_url: event.target.value })} placeholder="https://..." /></label>
+        <label className="client-editor-wide">HTTPS 使用教程地址<input type="url" value={form.tutorial_url} onChange={event => setForm({ ...form, tutorial_url: event.target.value })} placeholder="https://..." /></label>
+        <div className="plan-editor-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary-button" disabled={busy}>{modal.mode === 'edit' ? '保存修改' : '创建客户端'}</button></div>
+      </form>}
     </Modal>}
   </div>;
 }

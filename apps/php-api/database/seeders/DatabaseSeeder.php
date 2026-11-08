@@ -33,5 +33,7 @@ class DatabaseSeeder extends Seeder
         DB::table('nodes')->insertOrIgnore(['id' => 'node-test-1', 'name' => '演示节点 01', 'region' => '测试区域', 'protocol' => 'SOCKS5', 'endpoint_host' => '198.51.100.10', 'endpoint_port' => 1080, 'status' => 'available', 'is_test' => true, 'max_sessions' => 100, 'active_sessions' => 12, 'latency_ms' => 38, 'updated_at' => $now]);
         DB::table('orders')->insertOrIgnore(['id' => 'order-demo-001', 'user_id' => 'user-member', 'plan_id' => 'annual', 'total_cents' => 27880, 'status' => 'paid_test', 'created_at' => $now]);
         DB::table('commission_entries')->insertOrIgnore(['id' => 'commission-demo-001', 'order_id' => 'order-demo-001', 'partner_name' => '演示渠道 A', 'amount_cents' => 4170, 'status' => 'pending', 'created_at' => $now]);
+
+        $this->call(ClientCatalogSeeder::class);
     }
 }

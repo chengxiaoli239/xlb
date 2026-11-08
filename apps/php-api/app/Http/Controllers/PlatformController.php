@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\SubscriptionCredentialService;
 use App\Services\TestOrderLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -156,10 +157,11 @@ class PlatformController extends Controller
     public function overview(Request $request): JsonResponse
     {
         $userId = $request->user()->id;
+        $now = now()->toIso8601String();
         $entitlement = DB::table('entitlements as e')->join('plans as p', 'p.id', '=', 'e.plan_id')
-            ->where('e.user_id', $userId)->where('e.status', 'active')->where('e.ends_at', '>', now()->toIso8601String())
+            ->where('e.user_id', $userId)->where('e.status', 'active')->where('e.starts_at', '<=', $now)->where('e.ends_at', '>', $now)
             ->orderByDesc('e.ends_at')->first(['e.id', 'e.status', 'e.starts_at', 'e.ends_at', 'e.data_used_gb', 'p.id as plan_id', 'p.name as plan_name', 'p.period_label', 'p.price_cents', 'p.traffic_gb', 'p.max_devices']);
-        $subscriptions = DB::table('subscriptions')->where('user_id', $userId)->where('status', 'active')->where('expires_at', '>', now()->toIso8601String())->count();
+        $subscriptions = DB::table('subscriptions')->where('user_id', $userId)->where('status', 'active')->count();
         $orders = DB::table('orders as o')->join('plans as p', 'p.id', '=', 'o.plan_id')->where('o.user_id', $userId)->orderByDesc('o.created_at')->limit(5)->get(['o.id', 'o.total_cents', 'o.status', 'o.expires_at', 'o.created_at', 'p.name as plan_name']);
         foreach ($orders as $order) {
             $order->status = TestOrderLifecycle::effectiveStatus($order);
@@ -171,11 +173,12 @@ class PlatformController extends Controller
     public function summary(): JsonResponse
     {
         $recentAudit = DB::table('audit_logs as a')->join('users as u', 'u.id', '=', 'a.actor_user_id')->orderByDesc('a.created_at')->limit(8)->get(['a.id', 'a.action', 'a.target_type', 'a.target_id', 'a.created_at', 'u.name as actor']);
+        $now = now()->toIso8601String();
 
         return response()->json(['data' => [
             'memberCount' => DB::table('users')->where('role', 'member')->count(),
-            'activeEntitlements' => DB::table('entitlements')->where('status', 'active')->where('ends_at', '>', now()->toIso8601String())->count(),
-            'activeSubscriptions' => DB::table('subscriptions')->where('status', 'active')->where('expires_at', '>', now()->toIso8601String())->count(),
+            'activeEntitlements' => DB::table('entitlements')->where('status', 'active')->where('starts_at', '<=', $now)->where('ends_at', '>', $now)->count(),
+            'activeSubscriptions' => DB::table('subscriptions')->where('status', 'active')->count(),
             'availableNodes' => DB::table('nodes')->where('is_test', true)->where('status', 'available')->count(),
             'nodeCount' => DB::table('nodes')->where('is_test', true)->count(),
             'pendingCommissionCents' => (int) DB::table('commission_entries')->where('status', 'pending')->sum('amount_cents'),
@@ -185,8 +188,9 @@ class PlatformController extends Controller
 
     public function users(): JsonResponse
     {
-        $users = DB::table('users as u')->leftJoin('entitlements as e', function ($join): void {
-            $join->on('e.user_id', '=', 'u.id')->where('e.status', '=', 'active');
+        $now = now()->toIso8601String();
+        $users = DB::table('users as u')->leftJoin('entitlements as e', function ($join) use ($now): void {
+            $join->on('e.user_id', '=', 'u.id')->where('e.status', '=', 'active')->where('e.starts_at', '<=', $now)->where('e.ends_at', '>', $now);
         })->leftJoin('plans as p', 'p.id', '=', 'e.plan_id')->where('u.role', 'member')->orderByDesc('u.created_at')
             ->get(['u.id', 'u.email', 'u.name', 'u.status', 'u.created_at', 'p.name as plan_name', 'e.ends_at', 'e.data_used_gb', 'p.traffic_gb']);
 
@@ -312,63 +316,38 @@ class PlatformController extends Controller
         return response()->json(['data' => $rows]);
     }
 
-    public function subscriptions(Request $request): JsonResponse
+    public function subscriptions(Request $request, SubscriptionCredentialService $credentials): JsonResponse
     {
-        $rows = DB::table('subscriptions')->where('user_id', $request->user()->id)->orderByDesc('created_at')->get(['id', 'name', 'status', 'created_at', 'expires_at', 'last_used_at']);
+        $rows = DB::table('subscriptions')->where('user_id', $request->user()->id)->orderByDesc('created_at')->get();
+        $data = $rows->map(fn (object $row): array => $credentials->present($row));
 
-        return response()->json(['data' => $rows]);
+        return response()->json(['data' => $data])->header('Cache-Control', 'no-store, private');
     }
 
-    public function createSubscription(Request $request): JsonResponse
+    public function createSubscription(Request $request, SubscriptionCredentialService $credentials): JsonResponse
     {
-        $result = DB::transaction(function () use ($request): array {
-            DB::table('users')->where('id', $request->user()->id)->lockForUpdate()->first();
-            $count = DB::table('subscriptions')->where('user_id', $request->user()->id)->where('status', 'active')->count();
-            if ($count >= 3) {
-                return ['error' => ['code' => 'subscription_limit', 'message' => '最多保留 3 个有效订阅'], 'status' => 409];
-            }
+        $subscription = $credentials->ensure($request->user()->id);
+        $created = $subscription['created'];
+        unset($subscription['created']);
 
-            $entitlement = DB::table('entitlements')->where('user_id', $request->user()->id)->where('status', 'active')->where('ends_at', '>', now()->toIso8601String())->orderByDesc('ends_at')->first(['ends_at']);
-            if (! $entitlement) {
-                return ['error' => ['code' => 'membership_required', 'message' => '当前账户没有有效会员权益'], 'status' => 403];
-            }
-
-            $id = (string) Str::uuid();
-            $secret = $this->newSubscriptionToken();
-            $created = now()->toIso8601String();
-            DB::table('subscriptions')->insert(['id' => $id, 'user_id' => $request->user()->id, 'name' => 'Clash 订阅', 'token_hash' => hash('sha256', $secret), 'status' => 'active', 'created_at' => $created, 'expires_at' => $entitlement->ends_at]);
-            $this->audit($request, 'subscription.created', 'subscription', $id);
-
-            return ['data' => ['id' => $id, 'name' => 'Clash 订阅', 'status' => 'active', 'created_at' => $created, 'expires_at' => $entitlement->ends_at, 'url' => '/subscribe/'.$secret], 'status' => 201];
-        });
-
-        return response()->json(isset($result['error']) ? ['error' => $result['error']] : ['data' => $result['data']], $result['status']);
+        return response()->json(['data' => $subscription], $created ? 201 : 200)->header('Cache-Control', 'no-store, private');
     }
 
-    public function rotateSubscription(Request $request, string $id): JsonResponse
+    public function rotateSubscription(Request $request, string $id, SubscriptionCredentialService $credentials): JsonResponse
     {
-        $result = DB::transaction(function () use ($request, $id): ?array {
-            $current = DB::table('subscriptions')->where('id', $id)->where('user_id', $request->user()->id)->where('status', 'active')->lockForUpdate()->first(['id', 'expires_at']);
-            if (! $current) {
-                return null;
-            }
+        $result = $credentials->rotate($request->user()->id, $id);
 
-            $newId = (string) Str::uuid();
-            $secret = $this->newSubscriptionToken();
-            $created = now()->toIso8601String();
-            DB::table('subscriptions')->where('id', $id)->update(['status' => 'revoked']);
-            DB::table('subscriptions')->insert(['id' => $newId, 'user_id' => $request->user()->id, 'name' => 'Clash 订阅', 'token_hash' => hash('sha256', $secret), 'status' => 'active', 'created_at' => $created, 'expires_at' => $current->expires_at]);
-            $this->audit($request, 'subscription.rotated', 'subscription', $id);
-
-            return ['id' => $newId, 'url' => '/subscribe/'.$secret, 'status' => 'active', 'created_at' => $created, 'expires_at' => $current->expires_at];
-        });
-
-        return $result ? response()->json(['data' => $result]) : $this->error('not_found', '订阅不存在或已撤销', 404);
+        return $result
+            ? response()->json(['data' => $result])->header('Cache-Control', 'no-store, private')
+            : $this->error('not_found', '订阅不存在或已撤销', 404);
     }
 
     public function revokeSubscription(Request $request, string $id): Response|JsonResponse
     {
-        $changed = DB::table('subscriptions')->where('id', $id)->where('user_id', $request->user()->id)->where('status', 'active')->update(['status' => 'revoked']);
+        $changed = DB::table('subscriptions')->where('id', $id)->where('user_id', $request->user()->id)->where('status', 'active')->update([
+            'status' => 'revoked',
+            'token_encrypted' => null,
+        ]);
         if (! $changed) {
             return $this->error('not_found', '订阅不存在或已撤销', 404);
         }
@@ -382,9 +361,9 @@ class PlatformController extends Controller
     {
         $record = DB::table('subscriptions')->where('token_hash', hash('sha256', $token))->first(['id', 'user_id', 'status', 'expires_at']);
         $now = now()->toIso8601String();
-        $entitlement = $record ? DB::table('entitlements')->where('user_id', $record->user_id)->where('status', 'active')->where('ends_at', '>', $now)->exists() : false;
+        $entitlement = $record ? DB::table('entitlements')->where('user_id', $record->user_id)->where('status', 'active')->where('starts_at', '<=', $now)->where('ends_at', '>', $now)->exists() : false;
         $node = DB::table('nodes')->where('status', 'available')->where('is_test', true)->first(['name', 'endpoint_host', 'endpoint_port']);
-        if (! $record || $record->status !== 'active' || $record->expires_at <= $now || ! $entitlement || ! $node) {
+        if (! $record || $record->status !== 'active' || ! $entitlement || ! $node) {
             return response('Subscription unavailable', 404)->header('Content-Type', 'text/plain')->header('Cache-Control', 'no-store');
         }
 
@@ -436,11 +415,6 @@ class PlatformController extends Controller
             'updated_at' => $node->updated_at,
             'allowed_transitions' => $node->is_test ? (self::NODE_TRANSITIONS[$node->status] ?? []) : [],
         ];
-    }
-
-    private function newSubscriptionToken(): string
-    {
-        return rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
     }
 
     /** @return array<string, int|float|string>|null */

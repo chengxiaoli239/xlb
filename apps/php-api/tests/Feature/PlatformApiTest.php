@@ -61,12 +61,54 @@ class PlatformApiTest extends TestCase
     {
         $this->actingAs(User::findOrFail('user-member'));
         $created = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data');
+        $this->assertSame(hash('sha256', basename($created['url'])), DB::table('subscriptions')->where('id', $created['id'])->value('token_hash'));
+        $this->assertNotSame(basename($created['url']), DB::table('subscriptions')->where('id', $created['id'])->value('token_encrypted'));
+        $this->getJson('/api/v1/me/subscriptions')->assertOk()->assertJsonPath('data.0.url', $created['url']);
+        $this->postJson('/api/v1/me/subscriptions')->assertOk()->assertJsonPath('data.url', $created['url']);
         $this->get($created['url'])->assertOk()->assertSee('type: socks5')->assertSee('198.51.100.10');
         $rotated = $this->postJson('/api/v1/me/subscriptions/'.$created['id'].'/rotate')->assertOk()->json('data');
+        $this->assertSame($created['id'], $rotated['id']);
         $this->get($created['url'])->assertNotFound();
         $this->get($rotated['url'])->assertOk();
+        $this->assertDatabaseCount('subscriptions', 1);
         $this->postJson('/api/v1/me/subscriptions/'.$rotated['id'].'/revoke')->assertNoContent();
         $this->get($rotated['url'])->assertNotFound();
+    }
+
+    public function test_subscription_can_be_created_before_membership_and_used_after_it_starts(): void
+    {
+        $this->actingAs(User::findOrFail('user-member'));
+        DB::table('entitlements')->where('user_id', 'user-member')->delete();
+
+        $created = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data');
+        $this->assertNull($created['expires_at']);
+        $this->assertSame($created['url'], $this->getJson('/api/v1/me/subscriptions')->assertOk()->json('data.0.url'));
+        $this->get($created['url'])->assertNotFound();
+
+        DB::table('entitlements')->insert([
+            'id' => 'entitlement-member-annual',
+            'user_id' => 'user-member',
+            'plan_id' => 'annual',
+            'status' => 'active',
+            'starts_at' => now()->subDay()->toIso8601String(),
+            'ends_at' => now()->addYear()->toIso8601String(),
+            'data_used_gb' => 0,
+        ]);
+
+        $this->get($created['url'])->assertOk();
+    }
+
+    public function test_future_membership_is_not_current_or_usable_for_subscription_profiles(): void
+    {
+        $this->actingAs(User::findOrFail('user-member'));
+        DB::table('entitlements')->where('user_id', 'user-member')->update([
+            'starts_at' => now()->addDay()->toIso8601String(),
+            'ends_at' => now()->addYear()->toIso8601String(),
+        ]);
+
+        $this->getJson('/api/v1/me/overview')->assertOk()->assertJsonPath('data.entitlement', null);
+        $created = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data');
+        $this->get($created['url'])->assertNotFound();
     }
 
     public function test_node_catalog_only_creates_local_test_records(): void

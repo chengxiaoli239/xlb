@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ClientCatalogController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PlatformController;
 use App\Http\Controllers\SandboxPaymentController;
@@ -16,6 +17,7 @@ Route::get('/subscribe/{token}', [PlatformController::class, 'subscriptionProfil
 
 Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
     Route::get('/overview', [PlatformController::class, 'overview']);
+    Route::get('/clients', [ClientCatalogController::class, 'memberIndex']);
     Route::get('/orders', [OrderController::class, 'listMember']);
     Route::get('/orders/{id}', [OrderController::class, 'detail']);
     Route::post('/orders', [OrderController::class, 'create'])->middleware('throttle:20,1');
@@ -45,6 +47,10 @@ Route::prefix('api/v1/admin')->middleware(['auth', 'admin'])->group(function ():
     Route::post('/plans', [PlatformController::class, 'createPlan']);
     Route::put('/plans/{family}', [PlatformController::class, 'updatePlan']);
     Route::patch('/plans/{family}/status', [PlatformController::class, 'updatePlanStatus']);
+    Route::get('/clients', [ClientCatalogController::class, 'adminIndex']);
+    Route::post('/clients', [ClientCatalogController::class, 'store']);
+    Route::put('/clients/{id}', [ClientCatalogController::class, 'update']);
+    Route::patch('/clients/{id}/status', [ClientCatalogController::class, 'updateStatus']);
     Route::get('/tickets', [TicketController::class, 'listAdmin']);
     Route::get('/tickets/{id}', [TicketController::class, 'detail']);
     Route::post('/tickets/{id}/replies', [TicketController::class, 'reply']);

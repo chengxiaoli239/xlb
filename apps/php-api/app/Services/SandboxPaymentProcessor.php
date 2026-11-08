@@ -11,9 +11,9 @@ class SandboxPaymentProcessor
     /**
      * @return array{status:int,body:array<string,mixed>}
      */
-    public function simulate(string $orderId, string $userId): array
+    public function simulate(string $orderId, string $userId, SubscriptionCredentialService $credentials): array
     {
-        return DB::transaction(function () use ($orderId, $userId): array {
+        return DB::transaction(function () use ($orderId, $userId, $credentials): array {
             $order = DB::table('orders')->where('id', $orderId)->where('user_id', $userId)->lockForUpdate()->first();
             if (! $order) {
                 return $this->failure(404, 'not_found', '订单不存在');
@@ -25,7 +25,7 @@ class SandboxPaymentProcessor
             $existing = DB::table('sandbox_payment_events')->where('order_id', $orderId)->first();
             if ($existing) {
                 if ($existing->status === 'accepted_test') {
-                    return $this->success($order, $existing, 200);
+                    return $this->success($order, $existing, 200, $credentials);
                 }
 
                 return $this->failure(409, 'payment_requires_review', '付款事件已进入待核验状态，不会自动开通权益');
@@ -92,7 +92,9 @@ class SandboxPaymentProcessor
                 'target_type' => 'order', 'target_id' => $orderId, 'created_at' => $at->toIso8601String(),
             ]);
 
-            return $this->success(DB::table('orders')->where('id', $orderId)->first(), DB::table('sandbox_payment_events')->where('id', $paymentId)->first(), 201);
+            $credentials->ensure($userId);
+
+            return $this->success(DB::table('orders')->where('id', $orderId)->first(), DB::table('sandbox_payment_events')->where('id', $paymentId)->first(), 201, $credentials);
         }, 3);
     }
 
@@ -112,12 +114,14 @@ class SandboxPaymentProcessor
     /**
      * @return array{status:int,body:array<string,mixed>}
      */
-    private function success(object $order, object $payment, int $status): array
+    private function success(object $order, object $payment, int $status, SubscriptionCredentialService $credentials): array
     {
         $grant = DB::table('entitlement_grants')->where('order_id', $order->id)->first();
+        $subscription = $credentials->current($order->user_id);
 
         return ['status' => $status, 'body' => ['data' => [
             'id' => $order->id, 'status' => $order->status, 'payment' => $payment, 'entitlement_grant' => $grant,
+            'subscription' => $subscription ? ['id' => $subscription['id'], 'name' => $subscription['name'], 'url' => $subscription['url']] : null,
         ]]];
     }
 
