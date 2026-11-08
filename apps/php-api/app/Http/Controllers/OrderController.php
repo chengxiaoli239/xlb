@@ -35,12 +35,15 @@ class OrderController extends Controller
         $user = DB::table('users')->where('id', $row->user_id)->first(['name', 'email']);
         $events = DB::table('order_events as e')->leftJoin('users as u', 'u.id', '=', 'e.actor_user_id')->where('e.order_id', $id)->orderBy('e.sequence')
             ->get(['e.id', 'e.from_status', 'e.to_status', 'e.created_at', 'u.name as actor_name']);
+        $payment = DB::table('sandbox_payment_events')->where('order_id', $id)->first();
+        $entitlementGrant = DB::table('entitlement_grants')->where('order_id', $id)->first();
 
         return response()->json(['data' => [
             'id' => $row->id, 'plan_id' => $row->plan_id, 'plan_name' => $plan['name'], 'plan_snapshot' => $plan,
             'total_cents' => $row->total_cents, 'status' => TestOrderLifecycle::effectiveStatus($row), 'is_test' => (bool) $row->is_test,
             'created_at' => $row->created_at, 'updated_at' => $row->updated_at, 'expires_at' => $row->expires_at,
             'user_name' => $user->name, 'user_email' => $user->email, 'events' => $events,
+            'payment' => $payment, 'entitlement_grant' => $entitlementGrant,
         ]]);
     }
 

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PlatformController;
+use App\Http\Controllers\SandboxPaymentController;
 use App\Http\Controllers\TicketController;
 use Illuminate\Support\Facades\Route;
 
@@ -19,6 +20,7 @@ Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
     Route::get('/orders/{id}', [OrderController::class, 'detail']);
     Route::post('/orders', [OrderController::class, 'create'])->middleware('throttle:20,1');
     Route::post('/orders/{id}/cancel', [OrderController::class, 'cancel']);
+    Route::post('/orders/{id}/sandbox-payment', [SandboxPaymentController::class, 'simulate'])->middleware('throttle:10,1');
     Route::get('/subscriptions', [PlatformController::class, 'subscriptions']);
     Route::post('/subscriptions', [PlatformController::class, 'createSubscription']);
     Route::post('/subscriptions/{id}/rotate', [PlatformController::class, 'rotateSubscription']);

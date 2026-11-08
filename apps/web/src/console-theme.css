@@ -363,4 +363,8 @@
 .app-shell .order-history b { display: block; font-size: 14px; font-weight: 500; }
 .app-shell .order-history small, .app-shell .order-history p { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; }
 .app-shell .order-cancel-confirm { margin-top: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle-bg); }
+.app-shell .order-payment-confirm { margin-top: 20px; padding: 16px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--accent-bg); }
+.app-shell .order-payment-confirm p { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.6; }
+.app-shell .order-payment { margin-top: 20px; }
+.app-shell .order-grant { display: flex; gap: 9px; align-items: flex-start; margin-top: 16px; color: var(--accent-text); font-size: 14px; line-height: 1.5; }
 @media (max-width: 680px) { .app-shell .order-toolbar { gap: 8px; } .app-shell .order-toolbar label { flex-wrap: wrap; } }
