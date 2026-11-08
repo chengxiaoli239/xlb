@@ -490,6 +490,12 @@
 .member-portal .subscription-qr-layout .secret-result { min-width: 0; display: grid; gap: 13px; }
 .member-portal .subscription-qr-layout .secret-result > div { min-width: 0; }
 .member-portal .subscription-qr-layout .secret-result code { overflow-wrap: anywhere; word-break: break-all; }
+.member-portal .app-modal .subscription-qr-layout .secret-result code { color: var(--ink); font-size: 13px; }
+.member-portal .subscription-import-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.member-portal .subscription-import-actions .secondary-button { min-height: 40px; justify-content: center; text-decoration: none; }
+.member-portal .order-subscription-access { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle-bg); }
+.member-portal .order-subscription-access .subscription-qr { width: min(100%, 200px); justify-self: center; }
+.member-portal .order-subscription-access .subscription-qr svg { max-width: 164px; }
 .member-portal .vip-account-summary { min-width: 0; display: grid; grid-template-columns: minmax(180px, 1.2fr) repeat(2, minmax(190px, 1fr)) auto; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .member-portal .vip-account-summary > div { min-width: 0; display: grid; gap: 5px; }
 .member-portal .vip-account-summary span { color: var(--muted); font-size: 14px; }
