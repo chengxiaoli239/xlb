@@ -230,6 +230,27 @@ class ManagerTest(unittest.TestCase):
         self.assertIn('--role-arn', command)
         self.assertEqual(command[command.index('--role-arn') + 1], environment['XLB_NODE_PROVISION_ROLE'])
 
+    def test_wireguard_lab_ingress_is_limited_to_the_test_client(self):
+        template = json.loads((Path(__file__).parent / 'aws-node-manager.template.json').read_text())
+        ingress = template['Resources']['NodeSecurityGroup']['Properties']['SecurityGroupIngress']
+        wireguard = next(rule for rule in ingress if rule['IpProtocol'] == 'udp')
+
+        self.assertEqual(wireguard['FromPort'], 51820)
+        self.assertEqual(wireguard['ToPort'], 51820)
+        self.assertEqual(wireguard['CidrIp'], {'Ref': 'ClientCidr'})
+        self.assertEqual(len(ingress), 2)
+
+    def test_wireguard_lab_bootstrap_keeps_peer_state_ephemeral_and_private(self):
+        template = json.loads((Path(__file__).parent / 'aws-node-manager.template.json').read_text())
+        user_data = template['Resources']['Node']['Properties']['UserData']['Fn::Base64']['Fn::Sub']
+
+        self.assertIn('wg genkey > /etc/wireguard/server.key', user_data)
+        self.assertIn('chmod 600 /etc/wireguard/server.key /etc/wireguard/wg0.conf', user_data)
+        self.assertIn('Address = 10.77.0.1/24', user_data)
+        self.assertIn('ListenPort = 51820', user_data)
+        self.assertIn('systemctl enable --now wg-quick@wg0.service', user_data)
+        self.assertNotIn('${', user_data.replace('${ExpiresAtUtc}', '').replace('${AWS::Region}', '').replace('${Credential}', ''))
+
 
 if __name__ == '__main__':
     unittest.main()
