@@ -14,6 +14,8 @@ class SubscriptionProfileService
 
     public const MODES = ['rule', 'global', 'direct'];
 
+    public function __construct(private SubscriptionRouteService $routes) {}
+
     public function respond(Request $request, string $token): Response
     {
         $record = DB::table('subscriptions as s')->join('users as u', 'u.id', '=', 's.user_id')
@@ -47,33 +49,37 @@ class SubscriptionProfileService
             return $this->jsonError('invalid_mode', '模式仅支持 rule、global 或 direct。', 400);
         }
 
-        $node = DB::table('nodes')->where('status', 'available')->where('is_test', true)
-            ->whereNotIn('id', DB::table('node_deployments')->select('node_id'))->orderBy('id')
-            ->first(['name', 'endpoint_host', 'endpoint_port']);
-        if (! $node) {
+        $route = $this->routes->resolve($record->user_id, (string) config('subscription_routes.scope'));
+        if (! $route) {
             return $this->unavailable();
         }
 
-        $nodeName = in_array($node->name, ['GLOBAL', 'DIRECT', 'REJECT', '迅连宝测试'], true)
-            ? $node->name.' · 节点'
-            : $node->name;
-        $profile = [
-            'mixed-port' => 7890,
-            'allow-lan' => false,
-            'mode' => $mode,
-            'log-level' => 'warning',
-            'proxies' => [[
+        $nodes = $route['nodes'];
+        $proxies = collect($nodes)->map(function (object $node): array {
+            $nodeName = in_array($node->name, ['GLOBAL', 'DIRECT', 'REJECT', '迅连宝测试'], true)
+                ? $node->name.' · 节点'
+                : $node->name;
+
+            return [
                 'name' => $nodeName,
                 'type' => 'socks5',
                 'server' => $node->endpoint_host,
                 'port' => (int) $node->endpoint_port,
                 'udp' => false,
-            ]],
+            ];
+        })->all();
+        $proxyNames = array_column($proxies, 'name');
+        $profile = [
+            'mixed-port' => 7890,
+            'allow-lan' => false,
+            'mode' => $mode,
+            'log-level' => 'warning',
+            'proxies' => $proxies,
             'proxy-groups' => [
                 [
                     'name' => '迅连宝测试',
                     'type' => 'select',
-                    'proxies' => [$nodeName, 'DIRECT'],
+                    'proxies' => [...$proxyNames, 'DIRECT'],
                 ],
                 [
                     'name' => 'GLOBAL',
@@ -83,7 +89,10 @@ class SubscriptionProfileService
             ],
             'rules' => ['MATCH,迅连宝测试'],
         ];
-        $yaml = "# 迅连宝本地开发配置，不包含真实节点或可用凭证。\n# 仅用于验证 Clash / Mihomo 订阅格式和导入流程。\n".Yaml::dump($profile, 6, 2);
+        $header = $route['version']->scope === 'test'
+            ? "# 迅连宝本地开发配置，不包含真实节点或可用凭证。\n# 仅用于验证 Clash / Mihomo 订阅格式和导入流程。\n"
+            : "# 迅连宝订阅配置，由当前已发布线路版本生成。\n";
+        $yaml = $header.Yaml::dump($profile, 6, 2);
         $expiresAt = Carbon::parse($entitlement->ends_at);
         $renewals = DB::table('entitlements')->where('user_id', $record->user_id)->where('status', 'active')
             ->where('ends_at', '>', $now->toIso8601String())->orderBy('starts_at')->get(['starts_at', 'ends_at']);
@@ -105,8 +114,9 @@ class SubscriptionProfileService
         return $this->privateResponse($yaml)
             ->header('Content-Type', 'text/yaml; charset=utf-8')
             ->header('X-XLB-Profile-Format', $format)
-            ->header('X-XLB-Profile-Scope', 'local-test')
-            ->header('X-XLB-Config-Version', '1-'.substr(hash('sha256', $yaml), 0, 12))
+            ->header('X-XLB-Profile-Scope', $route['version']->scope === 'test' ? 'local-test' : $route['version']->scope)
+            ->header('X-XLB-Route-Version', (string) $route['version']->version)
+            ->header('X-XLB-Config-Version', $route['version']->version.'-'.substr(hash('sha256', $yaml), 0, 12))
             ->header('X-XLB-Expires-At', $expiresAt->toIso8601String())
             ->header('Subscription-Userinfo', "upload=0; download={$usedBytes}; total={$totalBytes}; expire={$expiresAt->timestamp}")
             ->header('Profile-Update-Interval', '6');

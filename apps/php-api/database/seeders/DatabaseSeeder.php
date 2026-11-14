@@ -30,7 +30,14 @@ class DatabaseSeeder extends Seeder
         }
 
         DB::table('entitlements')->insertOrIgnore(['id' => 'entitlement-member-annual', 'user_id' => 'user-member', 'plan_id' => 'annual', 'status' => 'active', 'starts_at' => now()->subDays(16)->toIso8601String(), 'ends_at' => now()->addDays(349)->toIso8601String(), 'data_used_gb' => 326.4]);
-        DB::table('nodes')->insertOrIgnore(['id' => 'node-test-1', 'name' => '演示节点 01', 'region' => '测试区域', 'protocol' => 'SOCKS5', 'endpoint_host' => '198.51.100.10', 'endpoint_port' => 1080, 'status' => 'available', 'is_test' => true, 'max_sessions' => 100, 'active_sessions' => 12, 'latency_ms' => 38, 'updated_at' => $now]);
+        DB::table('nodes')->updateOrInsert(['id' => 'node-test-1'], ['name' => '演示节点 01', 'region' => '测试区域', 'protocol' => 'SOCKS5', 'endpoint_host' => '198.51.100.10', 'endpoint_port' => 1080, 'status' => 'available', 'is_test' => true, 'max_sessions' => 100, 'active_sessions' => 12, 'latency_ms' => 38, 'health_status' => 'verified_test', 'last_health_check_at' => $now, 'config_version' => 1, 'updated_at' => $now]);
+        DB::table('subscription_route_versions')->insertOrIgnore([
+            'id' => 'route-test-v1', 'scope' => 'test', 'version' => 1, 'status' => 'published', 'canary_percent' => 100,
+            'actor_user_id' => 'user-admin', 'published_at' => $now, 'created_at' => $now, 'updated_at' => $now,
+        ]);
+        DB::table('subscription_route_nodes')->insertOrIgnore([
+            'id' => 'route-test-v1-node-1', 'route_version_id' => 'route-test-v1', 'node_id' => 'node-test-1', 'weight' => 100, 'created_at' => $now,
+        ]);
         DB::table('orders')->insertOrIgnore(['id' => 'order-demo-001', 'user_id' => 'user-member', 'plan_id' => 'annual', 'total_cents' => 27880, 'status' => 'paid_test', 'created_at' => $now]);
         DB::table('commission_entries')->insertOrIgnore(['id' => 'commission-demo-001', 'order_id' => 'order-demo-001', 'partner_name' => '演示渠道 A', 'amount_cents' => 4170, 'status' => 'pending', 'created_at' => $now]);
 

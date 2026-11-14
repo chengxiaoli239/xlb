@@ -21,3 +21,4 @@ if (config('node_access.enabled') && ! ($nodeRevocationDriver instanceof Disable
 
 // Reclamation continues when new provisioning is disabled.
 Schedule::command('nodes:reconcile')->everyTenSeconds()->withoutOverlapping(10);
+Schedule::command('subscription-routes:reconcile')->everyMinute()->withoutOverlapping(60);

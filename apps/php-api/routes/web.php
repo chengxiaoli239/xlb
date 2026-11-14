@@ -5,6 +5,7 @@ use App\Http\Controllers\NodeAutomationController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PlatformController;
 use App\Http\Controllers\SandboxPaymentController;
+use App\Http\Controllers\SubscriptionRouteController;
 use App\Http\Controllers\TicketController;
 use Illuminate\Support\Facades\Route;
 
@@ -40,6 +41,11 @@ Route::prefix('api/v1/admin')->middleware(['auth', 'admin'])->group(function ():
     Route::get('/node-deployments/{id}', [NodeAutomationController::class, 'show']);
     Route::post('/node-deployments/{id}/retire', [NodeAutomationController::class, 'retire'])->middleware('throttle:10,1');
     Route::get('/node-deployments/{id}/profile', [NodeAutomationController::class, 'profile'])->middleware('throttle:5,1');
+    Route::get('/subscription-routes', [SubscriptionRouteController::class, 'index']);
+    Route::post('/subscription-routes', [SubscriptionRouteController::class, 'store']);
+    Route::post('/subscription-routes/{id}/canary', [SubscriptionRouteController::class, 'canary']);
+    Route::post('/subscription-routes/{id}/publish', [SubscriptionRouteController::class, 'publish']);
+    Route::post('/subscription-routes/{id}/rollback', [SubscriptionRouteController::class, 'rollback']);
     Route::get('/orders', [OrderController::class, 'listAdmin']);
     Route::get('/orders/{id}', [OrderController::class, 'detail']);
     Route::post('/orders/{id}/sandbox-refund', [OrderController::class, 'refund'])->middleware('throttle:5,1');

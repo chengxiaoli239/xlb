@@ -20,6 +20,7 @@ type Overview = {
 type NodeStatus = 'candidate' | 'available' | 'draining' | 'maintenance' | 'isolated' | 'retired' | 'disabled';
 type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: NodeStatus; is_test: boolean; automation_managed: boolean; max_sessions: number; active_sessions: number; latency_ms: number | null; health_status: string; last_health_check_at: string | null; config_version: number; allowed_transitions: NodeStatus[]; updated_at: string };
 type NodeDetail = Node & { changes: Array<{ id: string; from_status: NodeStatus; to_status: NodeStatus; created_at: string; actor_name: string }> };
+type RouteVersion = { id: string; scope: 'test' | 'production'; version: number; status: string; canary_percent: number; previous_version_id: string | null; note: string | null; drain_until: string | null; published_at: string | null; nodes: Array<{ id: string; name: string; region: string; status: string; is_test: boolean; health_status: string; weight: number }> };
 type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
 type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string | null; last_used_at: string | null; url: string | null };
 type ClientPlatform = 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'browser';
@@ -1195,7 +1196,7 @@ function NodesPage({ refresh, notify }: { refresh: number; notify: (value: strin
   return <div className="page-stack">
     <PageHeading eyebrow="运营管理" title="节点运维" subtitle="自动部署独立测试服务器，验证真实连接并按期回收资源。" action={<div className="heading-actions"><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新列表</button><button className="primary-button" onClick={() => setShowCreate(true)}><Server size={14} /> 新建测试记录</button></div>} />
     <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>目录记录</b> 下方演示记录只更新目录；真实测试服务器请通过“云节点自动化”创建和永久下架。</span></div>
-    <CloudNodes notify={notify} /><section className="panel"><SectionTitle title="节点目录" detail={rows ? rows.length + ' 个记录' : '载入中'} />
+    <CloudNodes notify={notify} /><SubscriptionRoutes notify={notify} /><section className="panel"><SectionTitle title="节点目录" detail={rows ? rows.length + ' 个记录' : '载入中'} />
       {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="暂无节点记录" detail="点击右上角新建本地测试记录。" /> : <div className="table-wrap"><table><thead><tr><th>节点</th><th>协议 / 测试地址</th><th>样例容量</th><th>目录状态</th><th>健康探测</th><th>配置版本</th><th>操作</th></tr></thead><tbody>{rows.map(node => <tr key={node.id}>
         <td><span className="node-cell"><span className={'node-indicator' + (node.status === 'available' ? '' : ' inactive')} /><span><b>{node.name}</b><small>{node.region} · {node.is_test ? '演示记录' : '只读记录'}</small></span></span></td>
         <td><code>{node.protocol}</code><small className="table-sub">{node.endpoint_host}:{node.endpoint_port}</small></td>
@@ -1220,6 +1221,52 @@ function NodesPage({ refresh, notify }: { refresh: number; notify: (value: strin
       <div className="node-history"><h3>状态变更记录</h3>{detail.changes.length ? detail.changes.map(item => <div key={item.id}><b>{nodeStatus(item.from_status)} → {nodeStatus(item.to_status)}</b><span>{item.actor_name} · {new Date(item.created_at).toLocaleString('zh-CN')}</span></div>) : <p>暂无状态变更。</p>}</div></>}
     </Modal>}
   </div>;
+}
+
+const routeStatusText: Record<string, string> = { draft: '草稿', canary: '灰度中', published: '已发布', draining: '排空中', rolled_back: '已回滚', retired: '已退役' };
+function SubscriptionRoutes({ notify }: { notify: (value: string) => void }) {
+  const [scope, setScope] = useState<'test' | 'production'>('test');
+  const [routes, setRoutes] = useState<RouteVersion[]>([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  const [percentValue, setPercentValue] = useState(10);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      const [routeData, nodeData] = await Promise.all([
+        api<{ scope: string; items: RouteVersion[] }>('/api/v1/admin/subscription-routes?scope=' + scope),
+        api<Node[]>('/api/v1/admin/nodes'),
+      ]);
+      setRoutes(routeData.items);
+      setNodes(nodeData);
+    } catch (error) { notify((error as Error).message); }
+  }, [notify, scope]);
+  useEffect(() => { setSelected([]); void load(); }, [load]);
+  const candidates = nodes.filter(node => node.status === 'available' && node.is_test === (scope === 'test') && !node.automation_managed);
+  const create = async () => {
+    if (!selected.length) { notify('至少选择一个可用节点'); return; }
+    setBusy(true);
+    try {
+      await api('/api/v1/admin/subscription-routes', { method: 'POST', body: JSON.stringify({ scope, node_ids: selected, note: note || null }) });
+      setSelected([]); setNote(''); await load(); notify('线路草稿已创建');
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  const mutate = async (id: string, action: 'canary' | 'publish' | 'rollback') => {
+    setBusy(true);
+    try {
+      await api('/api/v1/admin/subscription-routes/' + id + '/' + action, { method: 'POST', body: action === 'canary' ? JSON.stringify({ percent: percentValue }) : undefined });
+      await load(); notify(action === 'canary' ? '灰度已启动' : action === 'publish' ? '线路版本已发布' : '已回滚到上一线路版本');
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  return <section className="panel route-panel">
+    <div className="section-title"><div><h2>订阅线路发布</h2><span>版本化线路、灰度、回滚；固定订阅地址自动读取当前发布版本</span></div><label className="route-scope">范围<select value={scope} onChange={event => setScope(event.target.value as 'test' | 'production')}><option value="test">测试线路</option><option value="production">生产线路</option></select></label></div>
+    <div className="notice notice-neutral"><ShieldCheck size={16} /><span>生产线路只接受非测试节点；云节点自动化产生的临时实例不会进入客户订阅。</span></div>
+    <div className="route-create"><div><b>创建线路草稿</b><small>选择已经可用且通过健康校验的节点，发布前不会影响订阅。</small></div><div className="route-node-picker">{candidates.length ? candidates.map(node => <label key={node.id}><input type="checkbox" checked={selected.includes(node.id)} onChange={event => setSelected(current => event.target.checked ? [...current, node.id] : current.filter(id => id !== node.id))} />{node.name}<small>{node.region}</small></label>) : <span className="modal-copy">暂无符合范围的可用节点</span>}</div><input className="route-note" value={note} maxLength={190} placeholder="变更说明（可选）" onChange={event => setNote(event.target.value)} /><button className="secondary-button" disabled={busy || !selected.length} onClick={() => void create()}>创建草稿</button></div>
+    <div className="table-wrap"><table><thead><tr><th>版本</th><th>状态</th><th>节点</th><th>说明 / 排空</th><th>操作</th></tr></thead><tbody>{routes.map(route => <tr key={route.id}><td><b>v{route.version}</b><small className="table-sub">{route.scope} · {route.id.slice(0, 8)}</small></td><td><StatusPill status={routeStatusText[route.status] ?? route.status} tone={route.status === 'published' ? 'green' : route.status === 'canary' ? 'amber' : route.status === 'rolled_back' ? 'red' : 'gray'} /></td><td>{route.nodes.map(node => node.name).join('、')}</td><td>{route.note ?? '—'}{route.drain_until && <small className="table-sub">排空至 {dateTime(route.drain_until)}</small>}</td><td className="row-actions">{['draft', 'canary'].includes(route.status) && <button className="text-button" disabled={busy} onClick={() => void mutate(route.id, 'canary')}>灰度 {percentValue}%</button>}{['draft', 'canary'].includes(route.status) && <button className="text-button" disabled={busy} onClick={() => void mutate(route.id, 'publish')}>发布</button>}{['published', 'canary'].includes(route.status) && route.previous_version_id && <button className="text-button danger-text" disabled={busy} onClick={() => void mutate(route.id, 'rollback')}>回滚</button>}</td></tr>)}</tbody></table></div>{!routes.length && <Empty title="暂无线路版本" detail="先创建草稿，验证节点后再灰度发布。" />}
+  </section>;
 }
 function nodeStatus(status: NodeStatus) { return ({ candidate: '候选', available: '标记可用', draining: '排空中', maintenance: '维护中', isolated: '已隔离', retired: '已退役', disabled: '已停用（旧）' } as const)[status]; }
 function nodeTone(status: NodeStatus) { return status === 'available' ? 'green' : status === 'draining' || status === 'maintenance' ? 'amber' : status === 'isolated' ? 'red' : 'gray'; }
