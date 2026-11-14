@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\NodeAccessRevocationStatus;
 use App\Services\SandboxRefundProcessor;
 use App\Services\TestOrderLifecycle;
 use Illuminate\Http\JsonResponse;
@@ -12,6 +13,8 @@ use Illuminate\Support\Str;
 
 class OrderController extends Controller
 {
+    public function __construct(private NodeAccessRevocationStatus $nodeRevocationStatus) {}
+
     public function listMember(Request $request): JsonResponse
     {
         return $this->listOrders($request, false);
@@ -49,6 +52,7 @@ class OrderController extends Controller
             'created_at' => $row->created_at, 'updated_at' => $row->updated_at, 'expires_at' => $row->expires_at,
             'user_name' => $user->name, 'user_email' => $user->email, 'events' => $events,
             'payment' => $payment, 'refund' => $refund, 'entitlement_grant' => $entitlementGrant,
+            'node_revocations' => $this->nodeRevocationStatus->forRefund($refund?->id),
         ]]);
     }
 

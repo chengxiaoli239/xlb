@@ -8,6 +8,8 @@ use LogicException;
 
 class SandboxRefundProcessor
 {
+    public function __construct(private NodeAccessRevocationStatus $nodeRevocationStatus) {}
+
     /**
      * @return array{status:int,body:array<string,mixed>}
      */
@@ -93,6 +95,26 @@ class SandboxRefundProcessor
                             'target_type' => 'subscription', 'target_id' => $subscription->id, 'created_at' => $at,
                         ]);
                     }
+
+                    $peers = DB::table('node_access_peers')->where('user_id', $order->user_id)
+                        ->where('status', 'active')->lockForUpdate()->get(['id']);
+                    foreach ($peers as $peer) {
+                        $queued = DB::table('node_access_revocation_outbox')->insertOrIgnore([
+                            'id' => (string) Str::uuid(), 'peer_id' => $peer->id, 'refund_event_id' => $refundId,
+                            'status' => 'pending', 'attempts' => 0, 'next_attempt_at' => $at,
+                            'created_at' => $at, 'updated_at' => $at,
+                        ]);
+                        if ($queued === 1) {
+                            DB::table('node_access_peers')->where('id', $peer->id)->where('status', 'active')->update([
+                                'status' => 'revocation_pending', 'updated_at' => $at,
+                            ]);
+                            DB::table('audit_logs')->insert([
+                                'id' => (string) Str::uuid(), 'actor_user_id' => $adminId,
+                                'action' => 'node.peer_revocation_queued', 'target_type' => 'node_access_peer',
+                                'target_id' => $peer->id, 'created_at' => $at,
+                            ]);
+                        }
+                    }
                 }
 
                 return $this->success($orderId, DB::table('sandbox_refund_events')->where('id', $refundId)->first(), 201);
@@ -115,6 +137,7 @@ class SandboxRefundProcessor
             'status' => $order->status,
             'refund' => $refund,
             'entitlement_grant' => $grant,
+            'node_revocations' => $this->nodeRevocationStatus->forRefund($refund->id),
         ]]];
     }
 

@@ -46,10 +46,21 @@ class AwsNodeProvider implements NodeProvider
     /** @return array<string, mixed> */
     private function run(string $action, object $deployment): array
     {
-        $settings = config('node_automation.drivers.aws');
+        $profileKey = (string) ($deployment->provider_profile ?? '');
+        $settings = config('node_automation.profiles.'.$profileKey);
+        if (! is_array($settings) || ($settings['provider'] ?? null) !== 'aws'
+            || (int) ($deployment->provider_profile_version ?? 0) !== (int) ($settings['version'] ?? 0)
+            || ($deployment->region ?? null) !== ($settings['region'] ?? null)
+            || (string) ($deployment->provider_account_id ?? '') !== (string) ($settings['account_id'] ?? '')) {
+            throw new RuntimeException('AWS 部署目标与固定服务商档案不匹配，已拒绝云端操作');
+        }
+
         $env = [];
-        foreach (['profile', 'credential_source', 'aws_binary', 'account', 'region', 'vpc', 'subnet', 'image', 'client_cidr', 'instance_profile', 'cleanup_role', 'provision_role'] as $key) {
-            $env['XLB_NODE_'.strtoupper($key)] = (string) ($settings[$key] ?? '');
+        foreach (['profile' => 'profile', 'credential_source' => 'credential_source', 'aws_binary' => 'aws_binary',
+            'account_id' => 'account', 'region' => 'region', 'vpc' => 'vpc', 'subnet' => 'subnet', 'image' => 'image',
+            'client_cidr' => 'client_cidr', 'instance_profile' => 'instance_profile', 'cleanup_role' => 'cleanup_role',
+            'provision_role' => 'provision_role'] as $profileKey => $environmentKey) {
+            $env['XLB_NODE_'.strtoupper($environmentKey)] = (string) ($settings[$profileKey] ?? '');
         }
         $env['XLB_NODE_MIHOMO'] = (string) config('node_automation.worker.mihomo');
 

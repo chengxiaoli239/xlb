@@ -13,23 +13,28 @@ class NodeAutomation
 {
     public function __construct(private NodeProviderRegistry $providers) {}
 
-    /** @param array{name: string, request_id: string, instance_type: string, lifetime_minutes: int} $input */
+    /** @param array{name: string, request_id: string, instance_type: string, lifetime_minutes: int, provider_profile?: string} $input */
     public function create(array $input, string $actor): object
     {
         abort_unless(config('node_automation.enabled'), 409, '云节点自动化尚未启用');
+        $profileKey = $input['provider_profile'] ?? (string) config('node_automation.default_profile');
+        $profile = $this->providers->profile($profileKey);
+        abort_unless(array_key_exists($input['instance_type'], $profile['instance_types']), 422, '此部署档案不支持该服务器规格');
+        abort_unless(in_array($input['lifetime_minutes'], $profile['lifetime_minutes'] ?? [], true), 422, '此部署档案不支持该测试有效期');
 
-        return Cache::lock('node-automation', 600)->block(3, function () use ($input, $actor): object {
+        return Cache::lock('node-automation', 600)->block(3, function () use ($input, $actor, $profileKey, $profile): object {
             $existing = DB::table('node_deployments')->where('request_id', $input['request_id'])->first();
             if ($existing) {
                 $nodeName = DB::table('nodes')->where('id', $existing->node_id)->value('name');
-                abort_if($existing->actor_user_id !== $actor || $existing->instance_type !== $input['instance_type'] || $nodeName !== trim($input['name']), 409, '请求标识已被另一项部署使用');
+                abort_if($existing->actor_user_id !== $actor || $existing->instance_type !== $input['instance_type']
+                    || $existing->provider_profile !== $profileKey || $nodeName !== trim($input['name']), 409, '请求标识已被另一项部署使用');
 
                 return $existing;
             }
             abort_if(DB::table('node_deployments')->where('phase', '!=', 'released')->count() >= config('node_automation.max_nodes'), 409, '已达到测试节点上限，请等待资源释放');
 
-            return DB::transaction(function () use ($input, $actor): object {
-                $providerKey = (string) config('node_automation.default_provider', 'aws');
+            return DB::transaction(function () use ($input, $actor, $profileKey, $profile): object {
+                $providerKey = $profile['provider'];
                 $provider = $this->providers->resolve($providerKey);
                 $id = (string) Str::uuid();
                 $nodeId = (string) Str::uuid();
@@ -37,8 +42,8 @@ class NodeAutomation
                 $providerResourceKey = $provider->resourceKey($deploymentKey);
                 $now = now()->toIso8601String();
                 DB::table('nodes')->insert([
-                    'id' => $nodeId, 'name' => trim($input['name']), 'region' => config('node_automation.drivers.'.$providerKey.'.region_label'),
-                    'protocol' => 'SS2022', 'endpoint_host' => 'pending.invalid', 'endpoint_port' => 18443,
+                    'id' => $nodeId, 'name' => trim($input['name']), 'region' => $profile['region_label'] ?? $profile['region'],
+                    'protocol' => $profile['protocol'] ?? 'unknown', 'endpoint_host' => 'pending.invalid', 'endpoint_port' => (int) ($profile['endpoint_port'] ?? 0),
                     'status' => 'candidate', 'is_test' => true, 'max_sessions' => 0, 'active_sessions' => 0,
                     'latency_ms' => null, 'health_status' => 'pending', 'last_health_check_at' => null,
                     'config_version' => 1, 'updated_at' => $now,
@@ -46,8 +51,10 @@ class NodeAutomation
                 DB::table('node_deployments')->insert([
                     'id' => $id, 'request_id' => $input['request_id'], 'node_id' => $nodeId, 'actor_user_id' => $actor,
                     'provider' => $providerKey, 'deployment_key' => $deploymentKey,
+                    'provider_profile' => $profileKey, 'provider_profile_version' => $profile['version'],
+                    'provider_account_id' => (string) ($profile['account_id'] ?? ''),
                     'provider_resource_key' => $providerResourceKey, 'stack_name' => $providerResourceKey,
-                    'region' => config('node_automation.drivers.'.$providerKey.'.region'),
+                    'region' => $profile['region'],
                     'instance_type' => $input['instance_type'], 'phase' => 'queued',
                     'expires_at' => now()->addMinutes($input['lifetime_minutes'])->toIso8601String(),
                     'created_at' => $now, 'updated_at' => $now,
@@ -124,7 +131,7 @@ class NodeAutomation
             return;
         }
         if ($row->phase === 'releasing') {
-            $result = $this->providers->resolve($row->provider)->release($row);
+            $result = $this->providers->resolveDeployment($row)->release($row);
             $this->saveResources($row, $result);
             if (($result['state'] ?? '') === 'released') {
                 $this->markReleased($row);
@@ -133,15 +140,17 @@ class NodeAutomation
             return;
         }
         if ($row->phase === 'queued') {
-            $result = $this->providers->resolve($row->provider)->create($row);
+            $result = $this->providers->resolveDeployment($row)->create($row);
             $this->saveResources($row, $result);
             $this->transition($row, 'provisioning', strtoupper($row->provider).' 已受理创建；独立服务器正在准备');
 
             return;
         }
         if ($row->phase === 'verifying') {
-            $result = $this->providers->resolve($row->provider)->probe($row);
-            if (($result['verified'] ?? false) !== true) {
+            $result = $this->providers->resolveDeployment($row)->probe($row);
+            if (($result['verified'] ?? false) !== true
+                || ! is_string($result['public_ip'] ?? null)
+                || filter_var($result['public_ip'], FILTER_VALIDATE_IP) === false) {
                 throw new RuntimeException('协议连接未通过');
             }
             $this->transition($row, 'available', 'Mihomo 经公网节点完成 HTTPS 与出口 IP 校验；仅管理员测试可用', ['verified_at' => now()->toIso8601String()]);
@@ -152,7 +161,7 @@ class NodeAutomation
 
             return;
         }
-        $result = $this->providers->resolve($row->provider)->inspect($row);
+        $result = $this->providers->resolveDeployment($row)->inspect($row);
         $this->saveResources($row, $result);
         $state = $result['state'] ?? '';
         if ($state === 'released') {

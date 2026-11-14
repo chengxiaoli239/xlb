@@ -32,7 +32,13 @@ class NodeAutomationTest extends TestCase
 
     private function input(array $overrides = []): array
     {
-        return array_replace(['name' => '美国测试', 'request_id' => (string) Str::uuid(), 'instance_type' => 't3.micro', 'lifetime_minutes' => 15], $overrides);
+        return array_replace([
+            'name' => '美国测试',
+            'request_id' => (string) Str::uuid(),
+            'provider_profile' => 'aws-us-west-2-lab-v1',
+            'instance_type' => 't3.micro',
+            'lifetime_minutes' => 15,
+        ], $overrides);
     }
 
     private function createDeployment(): object
@@ -74,11 +80,16 @@ class NodeAutomationTest extends TestCase
         $deploymentKey = 'xlb-node-'.str_replace('-', '', $row->id);
 
         $this->assertSame('aws', $row->provider);
+        $this->assertSame('aws-us-west-2-lab-v1', $row->provider_profile);
+        $this->assertSame(1, $row->provider_profile_version);
         $this->assertSame($deploymentKey, $row->deployment_key);
         $this->assertSame('xlb-auto-'.substr($deploymentKey, strlen('xlb-node-')), $row->provider_resource_key);
         $this->assertDatabaseHas('node_deployments', [
             'id' => $row->id,
             'provider' => 'aws',
+            'provider_profile' => 'aws-us-west-2-lab-v1',
+            'provider_account_id' => config('node_automation.profiles.aws-us-west-2-lab-v1.account_id'),
+            'region' => 'us-west-2',
             'deployment_key' => $deploymentKey,
             'provider_resource_key' => 'xlb-auto-'.substr($deploymentKey, strlen('xlb-node-')),
         ]);
@@ -94,20 +105,90 @@ class NodeAutomationTest extends TestCase
             ->assertJsonPath('data.items.0.provider_resource_key', $row->provider_resource_key);
     }
 
+    public function test_provider_profile_catalog_exposes_only_safe_enabled_targets(): void
+    {
+        $response = $this->admin()->getJson('/api/v1/admin/node-deployments')
+            ->assertOk()
+            ->assertJsonPath('data.default_profile', 'aws-us-west-2-lab-v1')
+            ->assertJsonPath('data.profiles.0.id', 'aws-us-west-2-lab-v1')
+            ->assertJsonPath('data.profiles.0.provider', 'aws')
+            ->assertJsonPath('data.profiles.0.region', 'us-west-2')
+            ->assertJsonMissingPath('data.profiles.0.profile')
+            ->assertJsonMissingPath('data.profiles.0.account_id')
+            ->assertJsonMissingPath('data.profiles.0.vpc');
+
+        $this->assertSame('t3.micro · 2 核 / 1GB', $response->json('data.profiles.0.instance_types')['t3.micro']);
+    }
+
     public function test_existing_deployment_uses_its_persisted_provider_after_default_changes(): void
     {
         $row = $this->createDeployment();
-        config(['node_automation.default_provider' => 'unconfigured']);
+        config(['node_automation.default_profile' => 'unconfigured']);
 
-        $this->assertInstanceOf(AwsNodeProvider::class, app(NodeProviderRegistry::class)->resolve($row->provider));
-        $retry = app(NodeAutomation::class)->create([
+        $this->assertInstanceOf(AwsNodeProvider::class, app(NodeProviderRegistry::class)->resolveDeployment($row));
+        $retry = app(NodeAutomation::class)->create($this->input([
             'name' => DB::table('nodes')->where('id', $row->node_id)->value('name'),
             'request_id' => $row->request_id,
             'instance_type' => $row->instance_type,
-            'lifetime_minutes' => 15,
-        ], 'user-admin');
+        ]), 'user-admin');
         $this->assertSame($row->id, $retry->id);
         $this->assertSame('aws', $retry->provider);
+    }
+
+    public function test_unknown_or_disabled_provider_profile_is_rejected_without_cloud_fallback(): void
+    {
+        $this->admin();
+        $this->postJson('/api/v1/admin/node-deployments', $this->input(['provider_profile' => 'digitalocean-sfo-v1']))
+            ->assertUnprocessable();
+
+        config(['node_automation.profiles.aws-us-west-2-lab-v1.enabled' => false]);
+        $this->postJson('/api/v1/admin/node-deployments', $this->input())
+            ->assertUnprocessable();
+        $this->assertDatabaseCount('node_deployments', 0);
+    }
+
+    public function test_provider_profile_identity_mismatch_fails_closed_before_provider_call(): void
+    {
+        $row = $this->createDeployment();
+        DB::table('node_deployments')->where('id', $row->id)->update(['region' => 'eu-west-1']);
+        $row = DB::table('node_deployments')->where('id', $row->id)->first();
+
+        $this->expectException(\RuntimeException::class);
+        app(NodeProviderRegistry::class)->resolveDeployment($row);
+    }
+
+    public function test_provider_profile_account_or_version_mismatch_fails_closed(): void
+    {
+        $row = $this->createDeployment();
+        foreach ([['provider_account_id' => 'another-account'], ['provider_profile_version' => 2]] as $override) {
+            DB::table('node_deployments')->where('id', $row->id)->update($override);
+            $deployment = DB::table('node_deployments')->where('id', $row->id)->first();
+
+            try {
+                app(NodeProviderRegistry::class)->resolveDeployment($deployment);
+                $this->fail('Mismatched provider profile identity must be rejected.');
+            } catch (\RuntimeException $exception) {
+                $this->assertSame('部署目标与固定服务商档案不匹配，已拒绝云端操作', $exception->getMessage());
+            }
+
+            DB::table('node_deployments')->where('id', $row->id)->update([
+                'provider_account_id' => config('node_automation.profiles.aws-us-west-2-lab-v1.account_id'),
+                'provider_profile_version' => 1,
+            ]);
+        }
+    }
+
+    public function test_disabled_profile_still_allows_existing_deployment_release(): void
+    {
+        $row = $this->createDeployment();
+        DB::table('node_deployments')->where('id', $row->id)->update(['phase' => 'releasing']);
+        config(['node_automation.profiles.aws-us-west-2-lab-v1.enabled' => false]);
+        $this->mock(AwsNodeProvider::class)->shouldReceive('release')->once()->with(\Mockery::any())->andReturn(['state' => 'released']);
+
+        app(NodeAutomation::class)->reconcile();
+
+        $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'released']);
+        $this->assertDatabaseHas('nodes', ['id' => $row->node_id, 'status' => 'retired']);
     }
 
     public function test_unknown_provider_is_rejected_without_falling_back_to_default(): void
@@ -169,6 +250,21 @@ class NodeAutomationTest extends TestCase
         $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'available']);
         $this->assertDatabaseHas('nodes', ['id' => $row->node_id, 'status' => 'available', 'health_status' => 'verified_test']);
         $this->assertStringContainsString('InstanceId', $service->find($row->id)->resources);
+    }
+
+    public function test_verified_probe_with_invalid_public_ip_cannot_publish_node(): void
+    {
+        $row = $this->createDeployment();
+        DB::table('node_deployments')->where('id', $row->id)->update(['phase' => 'verifying']);
+        $this->mockAwsProvider()->shouldReceive('probe')->once()->with(\Mockery::any())->andReturn([
+            'verified' => true,
+            'public_ip' => 'not-an-ip',
+        ]);
+
+        app(NodeAutomation::class)->reconcile();
+
+        $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'verifying', 'verified_at' => null]);
+        $this->assertDatabaseHas('nodes', ['id' => $row->node_id, 'status' => 'candidate', 'endpoint_host' => 'pending.invalid']);
     }
 
     public function test_retirement_drains_and_does_not_claim_released_when_cloud_is_partial(): void

@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\NodeAccessRevocationProcessor;
+use App\Services\NodePeerRevocationDriver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -53,6 +55,97 @@ class SandboxRefundTest extends TestCase
         $this->get($subscriptionUrl)->assertNotFound();
     }
 
+    public function test_refund_queues_peer_revocation_and_persists_final_traffic_on_acknowledgement(): void
+    {
+        $member = User::factory()->create(['id' => (string) Str::uuid(), 'role' => 'member']);
+        $this->actingAs($member);
+        $orderId = $this->createPaidOrder();
+        $peerId = $this->createPeer($member->id);
+
+        $this->actingAs(User::findOrFail('user-admin'))
+            ->withHeader('Idempotency-Key', (string) Str::uuid())
+            ->postJson('/api/v1/admin/orders/'.$orderId.'/sandbox-refund', ['reason' => '撤销节点测试凭证'])
+            ->assertCreated()
+            ->assertJsonPath('data.node_revocations.status', 'pending')
+            ->assertJsonPath('data.node_revocations.pending_count', 1)
+            ->assertJsonPath('data.node_revocations.confirmed_count', 0);
+
+        $job = DB::table('node_access_revocation_outbox')->where('peer_id', $peerId)->first();
+        $this->assertSame('pending', $job->status);
+        $this->assertDatabaseHas('node_access_peers', ['id' => $peerId, 'status' => 'revocation_pending']);
+
+        config(['node_access.enabled' => true, 'node_access.driver' => 'mock']);
+        $driver = $this->mock(NodePeerRevocationDriver::class);
+        $driver->shouldReceive('revoke')->once()->andReturn([
+            'acknowledgement_id' => 'sandbox-ack-001',
+            'upload_bytes' => 900,
+            'download_bytes' => 2780,
+            'confirmation_status' => 'confirmed_test',
+        ]);
+
+        $this->assertSame(1, app(NodeAccessRevocationProcessor::class)->processDue());
+        $this->assertDatabaseHas('node_access_revocation_outbox', [
+            'id' => $job->id,
+            'status' => 'confirmed_test',
+            'acknowledgement_id' => 'sandbox-ack-001',
+            'final_upload_bytes' => 1000,
+            'final_download_bytes' => 2780,
+        ]);
+        $this->assertDatabaseHas('node_access_peers', [
+            'id' => $peerId,
+            'status' => 'revoked',
+            'upload_bytes' => 1000,
+            'download_bytes' => 2780,
+        ]);
+        $this->assertSame(0, app(NodeAccessRevocationProcessor::class)->processDue());
+
+        $this->getJson('/api/v1/admin/orders/'.$orderId)
+            ->assertOk()
+            ->assertJsonPath('data.node_revocations.status', 'confirmed_test')
+            ->assertJsonPath('data.node_revocations.confirmed_count', 1);
+    }
+
+    public function test_peer_revocation_failure_keeps_peer_pending_and_retries_without_leaking_driver_error(): void
+    {
+        $member = User::factory()->create(['id' => (string) Str::uuid(), 'role' => 'member']);
+        $this->actingAs($member);
+        $orderId = $this->createPaidOrder();
+        $peerId = $this->createPeer($member->id);
+
+        $this->actingAs(User::findOrFail('user-admin'))
+            ->withHeader('Idempotency-Key', (string) Str::uuid())
+            ->postJson('/api/v1/admin/orders/'.$orderId.'/sandbox-refund', ['reason' => '验证节点撤权重试'])
+            ->assertCreated();
+
+        config(['node_access.enabled' => true, 'node_access.driver' => 'mock']);
+        $driver = $this->mock(NodePeerRevocationDriver::class);
+        $driver->shouldReceive('revoke')->once()->andThrow(new \RuntimeException('private endpoint and credential'));
+        $processor = app(NodeAccessRevocationProcessor::class);
+
+        $this->assertSame(1, $processor->processDue());
+        $job = DB::table('node_access_revocation_outbox')->where('peer_id', $peerId)->first();
+        $this->assertSame('retry', $job->status);
+        $this->assertSame(1, $job->attempts);
+        $this->assertSame('provider_error', $job->last_error_code);
+        $this->assertNotNull($job->next_attempt_at);
+        $this->assertStringNotContainsString('private endpoint', $job->last_error_code);
+        $this->assertDatabaseHas('node_access_peers', ['id' => $peerId, 'status' => 'revocation_pending']);
+        $this->assertSame(0, $processor->processDue());
+
+        $this->travel(11)->seconds();
+        $retryDriver = $this->mock(NodePeerRevocationDriver::class);
+        $retryDriver->shouldReceive('revoke')->once()->andReturn([
+            'acknowledgement_id' => 'sandbox-ack-retry',
+            'upload_bytes' => 1400,
+            'download_bytes' => 2800,
+            'confirmation_status' => 'confirmed_test',
+        ]);
+        $processor = app(NodeAccessRevocationProcessor::class);
+        $this->assertSame(1, $processor->processDue());
+        $this->assertDatabaseHas('node_access_revocation_outbox', ['id' => $job->id, 'status' => 'confirmed_test']);
+        $this->assertDatabaseHas('node_access_peers', ['id' => $peerId, 'status' => 'revoked']);
+    }
+
     public function test_refund_is_idempotent_and_does_not_create_a_second_ledger_entry(): void
     {
         $member = User::factory()->create(['id' => (string) Str::uuid(), 'role' => 'member']);
@@ -97,6 +190,7 @@ class SandboxRefundTest extends TestCase
     {
         $this->actingAs(User::findOrFail('user-member'));
         $orderId = $this->createPaidOrder();
+        $peerId = $this->createPeer('user-member');
         $grant = DB::table('entitlement_grants')->where('order_id', $orderId)->first();
         $subscriptionUrl = $this->postJson('/api/v1/me/subscriptions')->assertOk()->json('data.url');
 
@@ -107,6 +201,8 @@ class SandboxRefundTest extends TestCase
 
         $this->assertDatabaseHas('entitlements', ['id' => 'entitlement-member-annual', 'status' => 'active']);
         $this->assertDatabaseHas('entitlements', ['id' => $grant->entitlement_id, 'status' => 'revoked_test']);
+        $this->assertDatabaseHas('node_access_peers', ['id' => $peerId, 'status' => 'active']);
+        $this->assertDatabaseCount('node_access_revocation_outbox', 0);
         $this->get($subscriptionUrl)->assertOk();
     }
 
@@ -136,5 +232,26 @@ class SandboxRefundTest extends TestCase
         $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-payment')->assertCreated();
 
         return $orderId;
+    }
+
+    private function createPeer(string $userId): string
+    {
+        $now = now()->utc()->toIso8601String();
+        $nodeId = (string) Str::uuid();
+        $peerId = (string) Str::uuid();
+        DB::table('nodes')->insert([
+            'id' => $nodeId, 'name' => '撤权测试节点', 'region' => '测试区域', 'protocol' => 'WireGuard',
+            'endpoint_host' => '127.0.0.1', 'endpoint_port' => 51820, 'status' => 'available', 'is_test' => true,
+            'max_sessions' => 10, 'active_sessions' => 1, 'latency_ms' => null, 'updated_at' => $now,
+            'health_status' => 'verified_test', 'last_health_check_at' => $now, 'config_version' => 1,
+        ]);
+        DB::table('node_access_peers')->insert([
+            'id' => $peerId, 'user_id' => $userId, 'node_id' => $nodeId,
+            'device_id' => 'device-'.$peerId, 'device_name' => '测试设备', 'public_key' => 'public-'.$peerId,
+            'status' => 'active', 'upload_bytes' => 1000, 'download_bytes' => 2000,
+            'last_observed_at' => $now, 'revoked_at' => null, 'created_at' => $now, 'updated_at' => $now,
+        ]);
+
+        return $peerId;
     }
 }
