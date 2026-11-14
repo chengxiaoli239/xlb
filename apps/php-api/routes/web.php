@@ -42,6 +42,7 @@ Route::prefix('api/v1/admin')->middleware(['auth', 'admin'])->group(function ():
     Route::get('/node-deployments/{id}/profile', [NodeAutomationController::class, 'profile'])->middleware('throttle:5,1');
     Route::get('/orders', [OrderController::class, 'listAdmin']);
     Route::get('/orders/{id}', [OrderController::class, 'detail']);
+    Route::post('/orders/{id}/sandbox-refund', [OrderController::class, 'refund'])->middleware('throttle:5,1');
     Route::get('/summary', [PlatformController::class, 'summary']);
     Route::get('/users', [PlatformController::class, 'users']);
     Route::get('/nodes', [PlatformController::class, 'nodes']);
@@ -57,6 +58,9 @@ Route::prefix('api/v1/admin')->middleware(['auth', 'admin'])->group(function ():
     Route::post('/clients', [ClientCatalogController::class, 'store']);
     Route::put('/clients/{id}', [ClientCatalogController::class, 'update']);
     Route::patch('/clients/{id}/status', [ClientCatalogController::class, 'updateStatus']);
+    Route::get('/clients/{id}/compatibility-runs', [ClientCatalogController::class, 'compatibilityRuns']);
+    Route::post('/clients/{id}/compatibility-runs', [ClientCatalogController::class, 'storeCompatibilityRun']);
+    Route::patch('/clients/{id}/compatibility-status', [ClientCatalogController::class, 'updateCompatibilityStatus']);
     Route::get('/tickets', [TicketController::class, 'listAdmin']);
     Route::get('/tickets/{id}', [TicketController::class, 'detail']);
     Route::post('/tickets/{id}/replies', [TicketController::class, 'reply']);

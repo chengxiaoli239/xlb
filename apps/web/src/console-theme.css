@@ -234,6 +234,43 @@
 .app-shell .client-editor .plan-editor-actions { margin-top: 2px; }
 .app-shell .client-active-toggle { min-height: 42px; display: flex; align-items: center; flex-direction: row; }
 .app-shell .client-active-toggle input { width: 18px; height: 18px; accent-color: var(--green); }
+.app-shell .row-actions .compatibility-action { min-height: 32px; padding: 4px 8px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--blue-border); border-radius: 6px; background: var(--blue-bg); color: var(--blue-text); font-weight: 650; }
+.app-shell .row-actions .compatibility-action:hover { border-color: var(--blue-text); }
+.app-shell .verification-stack { display: grid; gap: 20px; }
+.app-shell .verification-history, .app-shell .verification-form { min-width: 0; }
+.app-shell .verification-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.app-shell .verification-section-heading h3 { margin: 0; color: var(--text-strong); font-size: 16px; line-height: 1.5; }
+.app-shell .verification-section-heading span { display: block; margin-top: 3px; color: var(--muted); font-size: 13px; }
+.app-shell .verification-run-list { display: grid; gap: 10px; max-height: 350px; overflow-y: auto; }
+.app-shell .verification-run { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 9px; background: var(--subtle-bg); }
+.app-shell .verification-run-heading, .app-shell .verification-run-heading > div { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.app-shell .verification-run-heading { justify-content: space-between; }
+.app-shell .verification-run-heading b { color: var(--ink); font-size: 14px; }
+.app-shell .verification-run-heading time { color: var(--muted); font-size: 12px; }
+.app-shell .verification-stale { padding: 3px 7px; border-radius: 5px; background: var(--amber-bg); color: var(--amber-text); font-size: 12px; }
+.app-shell .verification-run-meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--secondary-text); font-size: 13px; }
+.app-shell .verification-check-results { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 7px; }
+.app-shell .verification-check-results span { padding: 4px 7px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; }
+.app-shell .verification-check-results .passed { border-color: var(--accent-border); background: var(--accent-bg); color: var(--accent-text); }
+.app-shell .verification-check-results .failed { border-color: var(--red-border); background: var(--red-bg); color: var(--red-text); }
+.app-shell .verification-evidence { margin-top: 11px; color: var(--muted); font-size: 12px; }
+.app-shell .verification-evidence code { margin-left: 5px; color: var(--ink); font-size: 13px; }
+.app-shell .verification-evidence p { margin: 7px 0 0; color: var(--secondary-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-shell .verification-empty { padding: 18px; border: 1px dashed var(--button-border); border-radius: 8px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.app-shell .verification-approved, .app-shell .verification-help { margin-top: 12px; padding: 11px 13px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--accent-border); border-radius: 7px; background: var(--accent-bg); color: var(--accent-text); font-size: 13px; line-height: 1.6; }
+.app-shell .verification-help { display: block; border-color: var(--amber-border); background: var(--amber-bg); color: var(--amber-text); }
+.app-shell .verification-form { padding-top: 18px; border-top: 1px solid var(--line); }
+.app-shell .verification-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.app-shell .verification-fields label, .app-shell .verification-notes { min-width: 0; display: grid; gap: 7px; color: var(--ink); font-size: 14px; }
+.app-shell .verification-fields input, .app-shell .verification-fields select, .app-shell .verification-notes textarea { width: 100%; min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid var(--field-border); border-radius: 7px; background: var(--field-bg); color: var(--ink); font: inherit; }
+.app-shell .verification-fields small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.app-shell .verification-udp-toggle { margin: 17px 0 10px; display: flex; align-items: center; gap: 9px; color: var(--ink); font-size: 14px; }
+.app-shell .verification-udp-toggle input, .app-shell .verification-check input { width: 17px; height: 17px; flex: none; accent-color: var(--green); }
+.app-shell .verification-check-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.app-shell .verification-check { min-width: 0; min-height: 42px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--subtle-bg); color: var(--ink); font-size: 13px; }
+.app-shell .verification-check span { overflow-wrap: anywhere; }
+.app-shell .verification-notes { margin-top: 15px; }
+.app-shell .verification-notes textarea { resize: vertical; }
 .app-shell .plan-grid { padding: 0 22px 12px; }
 .app-shell .plan-row { min-height: 84px; padding: 14px 5px; border-color: var(--line); }
 .app-shell .plan-row > div > b, .app-shell .plan-period b { color: var(--ink); font-size: 14px; }
@@ -356,6 +393,8 @@
   .app-shell .modal-head { padding: 18px 20px; }
   .app-shell .modal-body { padding: 20px; }
   .app-shell .modal-actions { flex-wrap: wrap; }
+  .app-shell .verification-section-heading { align-items: flex-start; flex-direction: column; }
+  .app-shell .verification-check-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .app-shell .node-history > div { flex-direction: column; gap: 4px; }
   .app-shell .app-footer { margin: 0 14px; }
 }
@@ -366,6 +405,8 @@
   .app-shell .metric-icon { width: 26px; height: 26px; }
   .app-shell .node-transition label { min-width: 0; }
   .app-shell .modal-head h2 { font-size: 20px; }
+  .app-shell .verification-fields, .app-shell .verification-check-grid { grid-template-columns: 1fr; }
+  .app-shell .verification-run-heading { align-items: flex-start; flex-direction: column; }
 }
 
 /* Local order lifecycle uses the same console palette in both themes. */

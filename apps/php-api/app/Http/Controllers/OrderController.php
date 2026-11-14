@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\SandboxRefundProcessor;
 use App\Services\TestOrderLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,14 +38,49 @@ class OrderController extends Controller
             ->get(['e.id', 'e.from_status', 'e.to_status', 'e.created_at', 'u.name as actor_name']);
         $payment = DB::table('sandbox_payment_events')->where('order_id', $id)->first();
         $entitlementGrant = DB::table('entitlement_grants')->where('order_id', $id)->first();
+        $refund = DB::table('sandbox_refund_events as r')->leftJoin('users as u', 'u.id', '=', 'r.actor_user_id')
+            ->where('r.order_id', $id)->first([
+                'r.id', 'r.amount_cents', 'r.currency', 'r.status', 'r.reason', 'r.created_at', 'u.name as processor_name',
+            ]);
 
         return response()->json(['data' => [
             'id' => $row->id, 'plan_id' => $row->plan_id, 'plan_name' => $plan['name'], 'plan_snapshot' => $plan,
             'total_cents' => $row->total_cents, 'status' => TestOrderLifecycle::effectiveStatus($row), 'is_test' => (bool) $row->is_test,
             'created_at' => $row->created_at, 'updated_at' => $row->updated_at, 'expires_at' => $row->expires_at,
             'user_name' => $user->name, 'user_email' => $user->email, 'events' => $events,
-            'payment' => $payment, 'entitlement_grant' => $entitlementGrant,
+            'payment' => $payment, 'refund' => $refund, 'entitlement_grant' => $entitlementGrant,
         ]]);
+    }
+
+    public function refund(Request $request, string $id, SandboxRefundProcessor $processor): JsonResponse
+    {
+        if (! app()->environment(['local', 'testing'])) {
+            return $this->error('test_only', '本地沙箱退款在当前环境不可用', 403);
+        }
+
+        $validator = Validator::make([
+            'reason' => $request->input('reason'),
+            'idempotency_key' => $request->header('Idempotency-Key'),
+        ], [
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+            'idempotency_key' => ['required', 'uuid'],
+        ]);
+        if ($validator->fails()) {
+            return $this->error('validation_error', '请提供退款原因及有效的请求标识', 400);
+        }
+        $reason = trim($validator->validated()['reason']);
+        if (mb_strlen($reason) < 3) {
+            return $this->error('validation_error', '退款原因至少需要 3 个字符', 400);
+        }
+
+        $result = $processor->refund(
+            $id,
+            $request->user()->id,
+            strtolower($request->header('Idempotency-Key')),
+            $reason,
+        );
+
+        return response()->json($result['body'], $result['status'])->header('Cache-Control', 'no-store, private');
     }
 
     public function create(Request $request, TestOrderLifecycle $lifecycle): JsonResponse

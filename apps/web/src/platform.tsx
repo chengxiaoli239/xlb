@@ -27,15 +27,18 @@ type ClientCompatibility = 'pending' | 'verified' | 'maintenance' | 'unsupported
 type ClientCatalogItem = { id: string; platform: ClientPlatform; name: string; version: string | null; description: string | null; download_url: string | null; qr_code_url: string | null; tutorial_url: string | null; compatibility_status: ClientCompatibility };
 type ManagedClient = ClientCatalogItem & { is_active: boolean; sort_order: number };
 type ClientForm = { platform: ClientPlatform; name: string; version: string; description: string; download_url: string; qr_code_url: string; tutorial_url: string; compatibility_status: ClientCompatibility; sort_order: string; is_active: boolean };
+type CompatibilityCheckKey = 'profile_parse' | 'subscription_import' | 'subscription_refresh' | 'mode_switch' | 'tcp_connect' | 'disconnect' | 'expiry_revoke' | 'dns' | 'udp';
+type CompatibilityRun = { id: string; client_version: string; core_name: string; core_version: string; os_version: string; profile_format: string; network_type: string; udp_supported: boolean; checks: Partial<Record<CompatibilityCheckKey, boolean>>; result: 'passed' | 'failed' | 'stale'; matches_current_version: boolean; evidence_reference: string; notes: string | null; tested_at: string; tester_name: string };
+type CompatibilityRunForm = { client_version: string; core_name: string; core_version: string; os_version: string; profile_format: 'clash' | 'mihomo'; network_type: 'wifi' | 'ethernet' | 'cellular' | 'other'; udp_supported: boolean; checks: Record<CompatibilityCheckKey, boolean>; evidence_reference: string; tested_at: string; notes: string };
 type Commission = { id: string; partner_name: string; amount_cents: number; status: string; order_id: string; created_at: string };
 type TicketStatus = 'open' | 'in_progress' | 'resolved';
 type TicketSummary = { id: string; category: string; subject: string; status: TicketStatus; created_at: string; updated_at: string; user_name: string };
 type TicketEvent = { id: string; kind: 'message' | 'status_changed'; body: string | null; from_status: TicketStatus | null; to_status: TicketStatus | null; created_at: string; actor_name: string; actor_role: User['role'] };
 type TicketDetail = TicketSummary & { events: TicketEvent[]; resolved_at: string | null };
 type OrderSummary = { id: string; plan_name: string; total_cents: number; status: string; created_at: string; expires_at: string | null; user_name: string };
-type OrderDetail = OrderSummary & { plan_snapshot: Plan & { version: number }; user_email: string; is_test: boolean; payment: null | { id: string; transaction_id: string; amount_cents: number; currency: string; status: string; review_reason: string | null; created_at: string }; entitlement_grant: null | { id: string; entitlement_id: string; status: string; starts_at: string; ends_at: string }; events: Array<{ id: string; from_status: string | null; to_status: string; created_at: string; actor_name: string | null }> };
-const orderStatusText: Record<string, string> = { pending_test: '待支付 · 测试', cancelled_test: '已取消 · 测试', expired_test: '已超时 · 测试', paid_test: '已完成 · 测试' };
-const orderTone = (status: string): 'green' | 'amber' | 'gray' => status === 'paid_test' ? 'green' : status === 'pending_test' ? 'amber' : 'gray';
+type OrderDetail = OrderSummary & { plan_snapshot: Plan & { version: number }; user_email: string; is_test: boolean; payment: null | { id: string; transaction_id: string; amount_cents: number; currency: string; status: string; review_reason: string | null; created_at: string }; refund: null | { id: string; amount_cents: number; currency: string; status: string; reason: string; created_at: string; processor_name: string | null }; entitlement_grant: null | { id: string; entitlement_id: string; status: string; starts_at: string; ends_at: string }; events: Array<{ id: string; from_status: string | null; to_status: string; created_at: string; actor_name: string | null }> };
+const orderStatusText: Record<string, string> = { pending_test: '待支付 · 测试', cancelled_test: '已取消 · 测试', expired_test: '已超时 · 测试', paid_test: '已完成 · 测试', refunded_test: '已退款 · 测试' };
+const orderTone = (status: string): string => status === 'paid_test' ? 'green' : status === 'pending_test' ? 'amber' : status === 'refunded_test' ? 'red' : 'gray';
 const dateTime = (value: string | null) => value ? new Date(value).toLocaleString('zh-CN') : '—';
 type PageMeta = { total: number; page: number; per_page: number; total_pages: number };
 
@@ -83,6 +86,17 @@ const clientPlatforms: Array<{ id: ClientPlatform; label: string; icon: typeof S
   { id: 'macos', label: 'macOS 苹果电脑', icon: Monitor },
   { id: 'linux', label: 'Linux / 路由器', icon: Network },
   { id: 'browser', label: '浏览器扩展', icon: Puzzle },
+];
+const compatibilityCheckCases: Array<{ id: CompatibilityCheckKey; label: string }> = [
+  { id: 'profile_parse', label: '配置解析' },
+  { id: 'subscription_import', label: '订阅导入' },
+  { id: 'subscription_refresh', label: '订阅刷新' },
+  { id: 'mode_switch', label: '模式切换' },
+  { id: 'tcp_connect', label: 'TCP 连接' },
+  { id: 'disconnect', label: '断开与重连' },
+  { id: 'expiry_revoke', label: '到期 / 撤权' },
+  { id: 'dns', label: 'DNS 解析' },
+  { id: 'udp', label: 'UDP 流量' },
 ];
 const adminNav = [
   { id: 'admin-plans', label: '套餐管理', icon: CreditCard },
@@ -639,6 +653,8 @@ function OrderDialog({ id, role, onClose, onChange, notify }: { id: string; role
   const [busy, setBusy] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmPayment, setConfirmPayment] = useState(false);
+  const [confirmRefund, setConfirmRefund] = useState(false);
+  const [refundReason, setRefundReason] = useState('');
   const [subscriptionUrl, setSubscriptionUrl] = useState('');
   const sequence = useRef(0);
   const base = '/api/v1/' + (role === 'admin' ? 'admin' : 'me') + '/orders/';
@@ -687,6 +703,25 @@ function OrderDialog({ id, role, onClose, onChange, notify }: { id: string; role
     }
     finally { setBusy(false); }
   };
+  const simulateRefund = async () => {
+    if (busy || !refundReason.trim()) return;
+    setBusy(true); setError(''); ++sequence.current;
+    try {
+      await api<{ order_id: string }>('/api/v1/admin/orders/' + id + '/sandbox-refund', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': window.crypto.randomUUID() },
+        body: JSON.stringify({ reason: refundReason.trim() }),
+      });
+      setDetail(await api<OrderDetail>(base + id));
+      setConfirmRefund(false);
+      onChange();
+      notify('本地沙箱退款已记录，对应订单权益已撤销');
+    } catch (error) {
+      setError((error as Error).message);
+      try { setDetail(await api<OrderDetail>(base + id)); } catch { /* Keep the last visible order state if refresh also fails. */ }
+    }
+    finally { setBusy(false); }
+  };
   return <Modal title="订单详情" detail="套餐快照与状态记录" onClose={() => { if (!busy) onClose(); }} wide>
     {error && <p className="order-error" role="alert">{error}</p>}
     {!detail ? (error ? <Empty title="无法读取订单" detail="请关闭弹框后重试。" /> : <LoadingBlock />) : <>
@@ -694,11 +729,14 @@ function OrderDialog({ id, role, onClose, onChange, notify }: { id: string; role
       <div className="notice notice-neutral"><CreditCard size={16} /><span>{detail.payment?.status === 'accepted_test' ? '本地沙箱模拟事件已记录，不代表真实渠道付款。此测试权益不产生真实服务或佣金。' : detail.status === 'paid_test' ? '这是预置的已支付样例，并未通过支付渠道扣款。' : '真实支付尚未接入；本地沙箱模拟不会扣款或生成佣金。'}</span></div>
       {role === 'member' && subscriptionUrl && detail.payment?.status === 'accepted_test' && <div className="subscription-qr-layout order-subscription-access"><div className="subscription-qr"><QRCodeSVG value={absoluteSubscriptionUrl(subscriptionUrl)} size={164} level="M" title="Clash 客户端订阅二维码" /><b>手机客户端扫码导入</b><span>{subscriptionQrNote()}</span></div><div className="secret-result"><div><span className="eyebrow">固定订阅链接 · 续费沿用</span><code>{absoluteSubscriptionUrl(subscriptionUrl)}</code></div><div className="subscription-import-actions"><button className="secondary-button" onClick={() => void copySubscription()}><Clipboard size={15} /> 复制链接</button><a className="secondary-button" href={clashVergeImportUrl(subscriptionUrl)}><ArrowUpRight size={15} /> 导入 Clash Verge Rev</a></div></div></div>}
       {detail.payment && <dl className="detail-grid order-payment"><div><dt>沙箱事件</dt><dd>{detail.payment.status === 'accepted_test' ? '已模拟接受' : '待核验'}</dd></div><div><dt>记录金额</dt><dd>{money(detail.payment.amount_cents)} {detail.payment.currency}</dd></div><div className="order-full"><dt>事件编号</dt><dd><code>{detail.payment.id}</code></dd></div></dl>}
-      {detail.entitlement_grant && <div className="order-grant"><BadgeCheck size={16} /><span>本地测试权益：{dateTime(detail.entitlement_grant.starts_at)} 至 {dateTime(detail.entitlement_grant.ends_at)}</span></div>}
+      {detail.entitlement_grant && <div className="order-grant"><BadgeCheck size={16} /><span>本地测试权益：{dateTime(detail.entitlement_grant.starts_at)} 至 {dateTime(detail.entitlement_grant.ends_at)} · {detail.entitlement_grant.status === 'revoked_test' ? '已撤销' : '有效记录'}</span></div>}
+      {detail.refund && <dl className="detail-grid order-payment"><div><dt>沙箱退款</dt><dd>{money(detail.refund.amount_cents)} {detail.refund.currency} · 已记录</dd></div><div><dt>处理人</dt><dd>{detail.refund.processor_name ?? '管理员'}</dd></div><div className="order-full"><dt>退款原因</dt><dd>{detail.refund.reason}</dd></div><div className="order-full"><dt>退款时间</dt><dd>{dateTime(detail.refund.created_at)}</dd></div></dl>}
       <section className="order-history"><h3>状态记录</h3>{detail.events.length ? <ol>{detail.events.map(event => <li key={event.id}><span><b>{event.from_status ? (orderStatusText[event.from_status] ?? event.from_status) + ' → ' : ''}{orderStatusText[event.to_status] ?? event.to_status}</b><small>{event.actor_name ?? '系统'} · {dateTime(event.created_at)}</small></span></li>)}</ol> : <p>历史样例暂无事件记录。</p>}{detail.status === 'expired_test' && detail.events.at(-1)?.to_status === 'pending_test' && <p>支付期限已到，超时事件将在到期任务运行后记录。</p>}</section>
       {role === 'member' && detail.is_test && detail.status === 'pending_test' && <div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setConfirmCancel(value => !value)}>取消测试订单</button><button className="primary-button" disabled={busy} onClick={() => setConfirmPayment(value => !value)}>模拟沙箱付款</button></div>}
+      {role === 'admin' && detail.is_test && detail.status === 'paid_test' && detail.payment?.status === 'accepted_test' && detail.entitlement_grant?.status === 'granted_test' && <div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setRefundReason(''); setConfirmRefund(value => !value); }}>登记全额沙箱退款</button></div>}
       {confirmCancel && <div className="order-cancel-confirm"><p>确认取消此测试订单？取消后可重新选择套餐下单。</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setConfirmCancel(false)}>保留订单</button><button className="primary-button" disabled={busy} onClick={() => void cancel()}>{busy ? '处理中…' : '确认取消订单'}</button></div></div>}
       {confirmPayment && <div className="order-payment-confirm"><p>只在本机写入模拟付款事件与测试权益。不会向支付渠道请求、不会扣款，也不代表真实支付完成。</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setConfirmPayment(false)}>返回</button><button className="primary-button" disabled={busy} onClick={() => void simulatePayment()}>{busy ? '处理中…' : '确认模拟付款'}</button></div></div>}
+      {confirmRefund && <div className="order-payment-confirm"><p>仅本地沙箱操作，不会调用支付渠道或退回真实资金。确认后会在同一事务中登记全额退款、撤销此订单权益，并在用户没有其他有效权益时撤销订阅凭证。</p><label>处理原因<textarea required minLength={3} maxLength={500} rows={3} value={refundReason} onChange={event => setRefundReason(event.target.value)} placeholder="记录客户申请或审核依据" /></label><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setConfirmRefund(false)}>返回</button><button className="primary-button" disabled={busy || refundReason.trim().length < 3} onClick={() => void simulateRefund()}>{busy ? '处理中…' : '确认并撤销对应权益'}</button></div></div>}
     </>}
   </Modal>;
 }
@@ -801,11 +839,34 @@ function SupportPage({ role, refresh, notify }: { role: User['role']; refresh: n
 
 function AdminClientsPage({ notify }: { notify: (value: string) => void }) {
   const blank = (): ClientForm => ({ platform: 'android', name: '', version: '', description: '', download_url: '', qr_code_url: '', tutorial_url: '', compatibility_status: 'pending', sort_order: '100', is_active: true });
+  const blankVerification = (row?: ManagedClient): CompatibilityRunForm => {
+    const now = new Date();
+    const localDateTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    return {
+      client_version: row?.version ?? '', core_name: '', core_version: '', os_version: '', profile_format: 'clash', network_type: 'wifi',
+      udp_supported: false,
+      checks: { profile_parse: false, subscription_import: false, subscription_refresh: false, mode_switch: false, tcp_connect: false, disconnect: false, expiry_revoke: false, dns: false, udp: false },
+      evidence_reference: '', tested_at: localDateTime, notes: '',
+    };
+  };
   const [rows, setRows] = useState<ManagedClient[] | null>(null);
   const [modal, setModal] = useState<{ mode: 'create' } | { mode: 'edit' | 'detail'; row: ManagedClient } | null>(null);
   const [form, setForm] = useState<ClientForm>(blank);
+  const [verificationClient, setVerificationClient] = useState<ManagedClient | null>(null);
+  const [verificationRuns, setVerificationRuns] = useState<CompatibilityRun[] | null>(null);
+  const [verificationForm, setVerificationForm] = useState<CompatibilityRunForm>(() => blankVerification());
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => api<ManagedClient[]>('/api/v1/admin/clients').then(setRows).catch(error => notify((error as Error).message)), [notify]);
+  const [verificationBusy, setVerificationBusy] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      const items = await api<ManagedClient[]>('/api/v1/admin/clients');
+      setRows(items);
+      return items;
+    } catch (error) {
+      notify((error as Error).message);
+      return null;
+    }
+  }, [notify]);
   useEffect(() => { void load(); }, [load]);
 
   const edit = (row: ManagedClient) => {
@@ -861,6 +922,55 @@ function AdminClientsPage({ notify }: { notify: (value: string) => void }) {
       notify((error as Error).message);
     }
   };
+  const openVerification = async (row: ManagedClient) => {
+    setVerificationClient(row);
+    setVerificationRuns(null);
+    setVerificationForm(blankVerification(row));
+    try {
+      setVerificationRuns(await api<CompatibilityRun[]>('/api/v1/admin/clients/' + encodeURIComponent(row.id) + '/compatibility-runs'));
+    } catch (error) {
+      setVerificationRuns([]);
+      notify((error as Error).message);
+    }
+  };
+  const saveVerification = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!verificationClient) return;
+    setVerificationBusy(true);
+    try {
+      const result = await api<Pick<CompatibilityRun, 'result' | 'matches_current_version'>>(
+        '/api/v1/admin/clients/' + encodeURIComponent(verificationClient.id) + '/compatibility-runs',
+        { method: 'POST', body: JSON.stringify({ ...verificationForm, tested_at: new Date(verificationForm.tested_at).toISOString() }) },
+      );
+      setVerificationRuns(await api<CompatibilityRun[]>('/api/v1/admin/clients/' + encodeURIComponent(verificationClient.id) + '/compatibility-runs'));
+      const updatedRows = await load();
+      const updatedClient = updatedRows?.find(row => row.id === verificationClient.id);
+      if (updatedClient) setVerificationClient(updatedClient);
+      setVerificationForm(blankVerification(updatedClient ?? verificationClient));
+      notify(result.result === 'passed' && result.matches_current_version ? '验收记录通过，请复核后单独批准客户端状态' : result.result === 'stale' ? '记录已保存，但该版本已不是目录当前版本' : '未通过的验收记录已保存');
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setVerificationBusy(false);
+    }
+  };
+  const approveVerification = async () => {
+    if (!verificationClient) return;
+    setVerificationBusy(true);
+    try {
+      const result = await api<{ id: string; compatibility_status: ClientCompatibility }>(
+        '/api/v1/admin/clients/' + encodeURIComponent(verificationClient.id) + '/compatibility-status',
+        { method: 'PATCH', body: JSON.stringify({ status: 'verified' }) },
+      );
+      setVerificationClient({ ...verificationClient, compatibility_status: result.compatibility_status });
+      await load();
+      notify('当前版本已批准为已验证');
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setVerificationBusy(false);
+    }
+  };
   const platformLabel = (value: ClientPlatform) => clientPlatforms.find(item => item.id === value)?.label ?? value;
   const compatibility = (value: ClientCompatibility) => ({
     pending: { label: '待验证', tone: 'amber' },
@@ -870,6 +980,15 @@ function AdminClientsPage({ notify }: { notify: (value: string) => void }) {
   } as const)[value];
   const publishedCount = rows?.filter(row => row.is_active).length ?? 0;
   const unpublishedCount = rows ? rows.length - publishedCount : 0;
+  const latestVerification = verificationRuns?.[0];
+  const canApproveVerification = Boolean(
+    verificationClient
+    && verificationClient.compatibility_status !== 'verified'
+    && verificationClient.version
+    && latestVerification?.result === 'passed'
+    && latestVerification.matches_current_version
+    && latestVerification.client_version === verificationClient.version,
+  );
 
   return <div className="page-stack">
     <PageHeading eyebrow="运营管理" title="客户端目录" subtitle="维护各平台客户端、版本、下载来源与兼容验证状态。" action={<button className="primary-button" onClick={create}><Monitor size={15} /> 添加客户端</button>} />
@@ -879,7 +998,7 @@ function AdminClientsPage({ notify }: { notify: (value: string) => void }) {
       {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="暂无客户端" detail="点击右上角添加客户端目录项。" /> : <div className="table-wrap"><table><thead><tr><th>平台</th><th>客户端 / 版本</th><th>兼容状态</th><th>下载与教程</th><th>目录状态</th><th>操作</th></tr></thead><tbody>{rows.map(row => {
         const status = compatibility(row.compatibility_status);
         const configuredLinks = [row.download_url, row.qr_code_url, row.tutorial_url].filter(Boolean).length;
-        return <tr key={row.id}><td>{platformLabel(row.platform)}</td><td><b>{row.name}</b><small className="table-sub">{row.version ? '版本 ' + row.version : '版本未维护'}</small></td><td><StatusPill status={status.label} tone={status.tone} /></td><td>{configuredLinks} 项已配置</td><td><StatusPill status={row.is_active ? '已上架' : '已下架'} tone={row.is_active ? 'green' : 'gray'} className={row.is_active ? 'catalog-published' : 'catalog-unpublished'} /></td><td><div className="row-actions"><button className="text-button" onClick={() => setModal({ mode: 'detail', row })}>详情</button><button className="text-button" onClick={() => edit(row)}>编辑</button><button className={'text-button catalog-status-action ' + (row.is_active ? 'unpublish' : 'publish')} onClick={() => void changeStatus(row)}>{row.is_active ? <><EyeOff size={14} />下架</> : <><Eye size={14} />上架</>}</button></div></td></tr>;
+        return <tr key={row.id}><td>{platformLabel(row.platform)}</td><td><b>{row.name}</b><small className="table-sub">{row.version ? '版本 ' + row.version : '版本未维护'}</small></td><td><StatusPill status={status.label} tone={status.tone} /></td><td>{configuredLinks} 项已配置</td><td><StatusPill status={row.is_active ? '已上架' : '已下架'} tone={row.is_active ? 'green' : 'gray'} className={row.is_active ? 'catalog-published' : 'catalog-unpublished'} /></td><td><div className="row-actions"><button className="text-button" onClick={() => setModal({ mode: 'detail', row })}>详情</button><button className="text-button" onClick={() => edit(row)}>编辑</button><button className="text-button compatibility-action" onClick={() => void openVerification(row)}><ShieldCheck size={14} />验收</button><button className={'text-button catalog-status-action ' + (row.is_active ? 'unpublish' : 'publish')} onClick={() => void changeStatus(row)}>{row.is_active ? <><EyeOff size={14} />下架</> : <><Eye size={14} />上架</>}</button></div></td></tr>;
       })}</tbody></table></div>}
     </section>
     {modal && <Modal title={modal.mode === 'create' ? '添加客户端' : modal.mode === 'edit' ? '编辑客户端' : '客户端详情'} detail={modal.mode === 'detail' ? '客户端目录配置与发布状态' : '验证后再配置公开下载来源'} onClose={() => { if (!busy) setModal(null); }} wide={modal.mode !== 'detail'}>
@@ -896,7 +1015,7 @@ function AdminClientsPage({ notify }: { notify: (value: string) => void }) {
         <label>设备平台<select value={form.platform} onChange={event => setForm({ ...form, platform: event.target.value as ClientPlatform })}>{clientPlatforms.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
         <label>客户端名称<input required minLength={2} maxLength={80} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
         <label>版本号<input maxLength={40} value={form.version} onChange={event => setForm({ ...form, version: event.target.value })} placeholder="例如 1.2.3" /><small className="client-field-hint">手工维护目录显示版本；自有软件发布后填写，第三方客户端按官方版本更新，不会从用户设备自动读取。</small></label>
-        <label>兼容状态<select value={form.compatibility_status} onChange={event => setForm({ ...form, compatibility_status: event.target.value as ClientCompatibility })}><option value="pending">待验证</option><option value="verified">已验证</option><option value="maintenance">维护中</option><option value="unsupported">暂不支持</option></select></label>
+        <label>兼容状态<select value={form.compatibility_status} onChange={event => setForm({ ...form, compatibility_status: event.target.value as ClientCompatibility })}><option value="pending">待验证</option>{modal.mode === 'edit' && modal.row.compatibility_status === 'verified' && <option value="verified" disabled>已验证（单独验收审批）</option>}<option value="maintenance">维护中</option><option value="unsupported">暂不支持</option></select><small className="client-field-hint">新版号会自动重置为待验证；新标记“已验证”须通过当前版本验收后单独批准。</small></label>
         <label>排序值<input required type="number" min="0" max="100000" step="1" value={form.sort_order} onChange={event => setForm({ ...form, sort_order: event.target.value })} /></label>
         <label className="client-active-toggle"><input type="checkbox" checked={form.is_active} onChange={event => setForm({ ...form, is_active: event.target.checked })} /> 上架显示</label>
         <label className="client-editor-wide">客户端说明<textarea maxLength={1000} rows={3} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></label>
@@ -905,6 +1024,43 @@ function AdminClientsPage({ notify }: { notify: (value: string) => void }) {
         <label className="client-editor-wide">HTTPS 使用教程地址<input type="url" value={form.tutorial_url} onChange={event => setForm({ ...form, tutorial_url: event.target.value })} placeholder="https://..." /></label>
         <div className="plan-editor-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setModal(null)}>取消</button><button className="primary-button" disabled={busy}>{modal.mode === 'edit' ? '保存修改' : '创建客户端'}</button></div>
       </form>}
+    </Modal>}
+    {verificationClient && <Modal title="客户端兼容验收" detail={`${verificationClient.name} · 当前目录版本 ${verificationClient.version ?? '未配置'}`} onClose={() => { if (!verificationBusy) { setVerificationClient(null); setVerificationRuns(null); } }} wide>
+      <div className="verification-stack">
+        <div className="notice notice-neutral"><ShieldCheck size={16} /><span><b>人工验收记录</b> 结果由管理员根据真实设备填写，本页面不会自动连接客户端或节点。证据编号请指向脱敏日志、截图或测试单，不要粘贴订阅地址、令牌和密钥。</span></div>
+        {!verificationClient.version && <div className="notice notice-warning"><Activity size={16} /><span>请先在客户端目录维护当前版本号，再进行验收；没有目录版本的记录不能批准为已验证。</span></div>}
+        <section className="verification-history">
+          <div className="verification-section-heading"><div><h3>最近验收记录</h3><span>{verificationRuns ? `${verificationRuns.length} 条记录` : '读取中'}</span></div>{canApproveVerification && <button className="primary-button" type="button" disabled={verificationBusy} onClick={() => void approveVerification()}><BadgeCheck size={15} />批准当前版本</button>}</div>
+          {verificationRuns === null ? <LoadingBlock /> : verificationRuns.length === 0 ? <div className="verification-empty">尚无验收记录。完成下方实机检查后，先保存记录，再单独批准状态。</div> : <div className="verification-run-list">{verificationRuns.map(run => {
+            const result = run.result === 'passed' ? { label: '通过', tone: 'green' } : run.result === 'failed' ? { label: '失败', tone: 'red' } : { label: '版本不匹配', tone: 'amber' };
+            return <article className="verification-run" key={run.id}>
+              <div className="verification-run-heading"><div><StatusPill status={result.label} tone={result.tone} /><b>客户端 {run.client_version}</b>{!run.matches_current_version && <span className="verification-stale">非当前版本</span>}</div><time>{dateTime(run.tested_at)}</time></div>
+              <div className="verification-run-meta"><span>{run.os_version}</span><span>{run.core_name} {run.core_version}</span><span>{run.profile_format.toUpperCase()} · {({ wifi: 'Wi-Fi', ethernet: '有线网络', cellular: '移动网络', other: '其他网络' } as Record<string, string>)[run.network_type] ?? run.network_type}</span><span>测试人：{run.tester_name}</span></div>
+              <div className="verification-check-results">{compatibilityCheckCases.filter(check => check.id !== 'udp' || run.udp_supported).map(check => <span className={run.checks[check.id] ? 'passed' : 'failed'} key={check.id}>{check.label}：{run.checks[check.id] ? '通过' : '失败'}</span>)}</div>
+              <div className="verification-evidence">证据编号 <code>{run.evidence_reference}</code>{run.notes && <p>{run.notes}</p>}</div>
+            </article>;
+          })}</div>}
+          {verificationClient.compatibility_status === 'verified' && <div className="verification-approved"><BadgeCheck size={16} />当前目录版本已批准为已验证。</div>}
+          {latestVerification?.result === 'passed' && !canApproveVerification && verificationClient.compatibility_status !== 'verified' && <p className="verification-help">当前记录尚不能批准，请确认测试版本与目录版本一致，并在客户端目录版本更新后重新验收。</p>}
+        </section>
+        <form className="verification-form" onSubmit={saveVerification}>
+          <div className="verification-section-heading"><div><h3>新增验收记录</h3><span>填写真实设备、核心和网络环境结果</span></div></div>
+          <div className="verification-fields">
+            <label>客户端版本<input required maxLength={40} value={verificationForm.client_version} onChange={event => setVerificationForm({ ...verificationForm, client_version: event.target.value })} placeholder="例如 2.5.10" /></label>
+            <label>系统版本<input required maxLength={100} value={verificationForm.os_version} onChange={event => setVerificationForm({ ...verificationForm, os_version: event.target.value })} placeholder="例如 Windows 11 24H2" /></label>
+            <label>代理内核<input required maxLength={80} value={verificationForm.core_name} onChange={event => setVerificationForm({ ...verificationForm, core_name: event.target.value })} placeholder="例如 Mihomo Meta" /></label>
+            <label>内核版本<input required maxLength={40} value={verificationForm.core_version} onChange={event => setVerificationForm({ ...verificationForm, core_version: event.target.value })} placeholder="例如 1.19.33" /></label>
+            <label>配置格式<select value={verificationForm.profile_format} onChange={event => setVerificationForm({ ...verificationForm, profile_format: event.target.value as CompatibilityRunForm['profile_format'] })}><option value="clash">Clash</option><option value="mihomo">Mihomo</option></select></label>
+            <label>网络类型<select value={verificationForm.network_type} onChange={event => setVerificationForm({ ...verificationForm, network_type: event.target.value as CompatibilityRunForm['network_type'] })}><option value="wifi">Wi-Fi</option><option value="ethernet">有线网络</option><option value="cellular">移动网络</option><option value="other">其他网络</option></select></label>
+            <label>测试时间<input required type="datetime-local" value={verificationForm.tested_at} onChange={event => setVerificationForm({ ...verificationForm, tested_at: event.target.value })} /></label>
+            <label>验收证据编号<input required minLength={3} maxLength={80} pattern="[A-Za-z0-9][A-Za-z0-9._:-]{2,79}" value={verificationForm.evidence_reference} onChange={event => setVerificationForm({ ...verificationForm, evidence_reference: event.target.value })} placeholder="例如 QA-2026-014" /><small>使用测试单编号或脱敏证据索引</small></label>
+          </div>
+          <label className="verification-udp-toggle"><input type="checkbox" checked={verificationForm.udp_supported} onChange={event => setVerificationForm({ ...verificationForm, udp_supported: event.target.checked, checks: { ...verificationForm.checks, udp: event.target.checked ? verificationForm.checks.udp : false } })} />此客户端版本声明支持 UDP，并需纳入验收</label>
+          <div className="verification-check-grid">{compatibilityCheckCases.filter(check => check.id !== 'udp' || verificationForm.udp_supported).map(check => <label className="verification-check" key={check.id}><input type="checkbox" checked={verificationForm.checks[check.id]} onChange={event => setVerificationForm({ ...verificationForm, checks: { ...verificationForm.checks, [check.id]: event.target.checked } })} /><span>{check.label}</span></label>)}</div>
+          <label className="verification-notes">备注<textarea maxLength={1000} rows={3} value={verificationForm.notes} onChange={event => setVerificationForm({ ...verificationForm, notes: event.target.value })} placeholder="记录脱敏错误码或测试限制，不要填写凭证或密钥" /></label>
+          <div className="modal-actions"><button type="button" className="secondary-button" disabled={verificationBusy} onClick={() => setVerificationClient(null)}>关闭</button><button className="primary-button" disabled={verificationBusy || !verificationClient.version}><Activity size={15} />保存验收结果</button></div>
+        </form>
+      </div>
     </Modal>}
   </div>;
 }

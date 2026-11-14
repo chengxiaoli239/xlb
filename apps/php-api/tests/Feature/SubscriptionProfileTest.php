@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\Process\Process;
 use Symfony\Component\Yaml\Yaml;
 use Tests\TestCase;
 
@@ -95,6 +96,38 @@ class SubscriptionProfileTest extends TestCase
         $this->assertSame($name, $config['proxy-groups'][0]['proxies'][0]);
         $this->assertSame('rule', $config['mode']);
         $this->assertNotSame($version, $response->headers->get('X-XLB-Config-Version'));
+    }
+
+    public function test_generated_profiles_are_accepted_by_the_configured_mihomo_core(): void
+    {
+        $binary = getenv('XLB_MIHOMO_BINARY');
+        if (! is_string($binary) || $binary === '') {
+            $this->markTestSkipped('Set XLB_MIHOMO_BINARY to run the optional Mihomo parser check.');
+        }
+        $this->assertFileExists($binary);
+
+        $url = $this->profileUrl();
+        foreach (['clash', 'mihomo'] as $format) {
+            foreach (['rule', 'global', 'direct'] as $mode) {
+                $response = $this->get($url.'?format='.$format.'&mode='.$mode)->assertOk();
+                $profilePath = tempnam(sys_get_temp_dir(), 'xlb-profile-');
+                if ($profilePath === false) {
+                    $this->fail('Unable to allocate a temporary profile file.');
+                }
+
+                try {
+                    $this->assertNotFalse(file_put_contents($profilePath, $response->getContent()));
+                    $process = new Process([$binary, '-t', '-f', $profilePath]);
+                    $process->setTimeout(10);
+                    $exitCode = $process->run();
+                    $this->assertSame(0, $exitCode, $process->getErrorOutput().$process->getOutput());
+                } finally {
+                    if (is_file($profilePath)) {
+                        unlink($profilePath);
+                    }
+                }
+            }
+        }
     }
 
     public function test_rotation_and_revocation_apply_to_every_format_and_mode(): void

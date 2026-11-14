@@ -9,7 +9,7 @@ use stdClass;
 
 class TestOrderLifecycle
 {
-    public const STATUSES = ['pending_test', 'cancelled_test', 'expired_test', 'paid_test'];
+    public const STATUSES = ['pending_test', 'cancelled_test', 'expired_test', 'paid_test', 'refunded_test'];
 
     public static function effectiveStatus(stdClass $order): string
     {
