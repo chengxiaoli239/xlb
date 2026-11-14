@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\SubscriptionCredentialService;
+use App\Services\SubscriptionProfileService;
 use App\Services\TestOrderLifecycle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -365,42 +366,9 @@ class PlatformController extends Controller
         return response()->noContent();
     }
 
-    public function subscriptionProfile(string $token): Response
+    public function subscriptionProfile(Request $request, string $token, SubscriptionProfileService $profiles): Response
     {
-        $record = DB::table('subscriptions')->where('token_hash', hash('sha256', $token))->first(['id', 'user_id', 'status', 'expires_at']);
-        $now = now()->toIso8601String();
-        $entitlement = $record ? DB::table('entitlements')->where('user_id', $record->user_id)->where('status', 'active')->where('starts_at', '<=', $now)->where('ends_at', '>', $now)->exists() : false;
-        $node = DB::table('nodes')->where('status', 'available')->where('is_test', true)
-            ->whereNotIn('id', DB::table('node_deployments')->select('node_id'))->first(['name', 'endpoint_host', 'endpoint_port']);
-        if (! $record || $record->status !== 'active' || ! $entitlement || ! $node) {
-            return response('Subscription unavailable', 404)->header('Content-Type', 'text/plain')->header('Cache-Control', 'no-store');
-        }
-
-        DB::table('subscriptions')->where('id', $record->id)->update(['last_used_at' => $now]);
-        $name = json_encode($node->name, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $yaml = implode("\n", [
-            '# 迅连宝本地开发配置，不包含真实节点或可用凭证。',
-            '# 仅用于验证 Mihomo 订阅格式和导入流程。',
-            'mixed-port: 7890',
-            'allow-lan: false',
-            'mode: rule',
-            'log-level: warning',
-            'proxies:',
-            '  - name: '.$name,
-            '    type: socks5',
-            '    server: '.$node->endpoint_host,
-            '    port: '.$node->endpoint_port,
-            '    udp: false',
-            'proxy-groups:',
-            '  - name: 迅连宝测试',
-            '    type: select',
-            '    proxies: ['.$name.', DIRECT]',
-            'rules:',
-            '  - MATCH,迅连宝测试',
-            '',
-        ]);
-
-        return response($yaml, 200)->header('Content-Type', 'text/yaml; charset=utf-8')->header('Cache-Control', 'no-store');
+        return $profiles->respond($request, $token);
     }
 
     /** @return array<string, bool|int|string|array<string>|null> */

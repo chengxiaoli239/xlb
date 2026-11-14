@@ -102,7 +102,7 @@ export default function App() {
     catch { return 'dark'; }
   });
   const [user, setUser] = useState<User | null>(null);
-  const [view, setView] = useState(initialView);
+  const [view, setViewState] = useState(initialView);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [loginEmail, setLoginEmail] = useState(portalRole === 'member' ? 'member@xlb.local' : 'admin@xlb.local');
@@ -110,10 +110,30 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => setNonce(value => value + 1), []);
+  const setView = useCallback((nextView: string) => {
+    setViewState(nextView);
+    if (portalRole !== 'member' || !memberNav.some(item => item.id === nextView)) return;
+
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('view') === nextView) return;
+    url.searchParams.set('view', nextView);
+    window.history.pushState(window.history.state, '', url);
+  }, [portalRole]);
   const notify = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(''), 2600);
   }, []);
+
+  useEffect(() => {
+    if (portalRole !== 'member') return;
+
+    const syncViewFromUrl = () => {
+      const requested = new URLSearchParams(window.location.search).get('view');
+      setViewState(memberNav.find(item => item.id === requested)?.id ?? 'overview');
+    };
+    window.addEventListener('popstate', syncViewFromUrl);
+    return () => window.removeEventListener('popstate', syncViewFromUrl);
+  }, [portalRole]);
 
   useEffect(() => {
     try { window.localStorage.setItem('xlb-console-theme', theme); }
@@ -445,7 +465,7 @@ function ClientDownloadPage({ refresh, setView, notify }: { refresh: number; set
 
   return <div className="page-stack client-guide">
     <PageHeading eyebrow="设备接入" title="客户端下载" subtitle="按设备选择客户端，并按照步骤导入迅连宝订阅。" action={<button className="primary-button" onClick={() => setView('subscriptions')}><QrCode size={15} /> 扫码导入</button>} />
-    <div className="notice notice-neutral"><ShieldCheck size={16} /><span><b>本地开发预览</b> 当前订阅接口仅生成 Mihomo / Clash YAML 示例；节点仍为保留地址，不能建立真实连接。其他客户端格式需逐版本适配与验证。</span></div>
+    <div className="notice notice-neutral"><ShieldCheck size={16} /><span><b>本地开发预览</b> 当前订阅接口仅生成 Mihomo / Clash YAML 示例，节点不能建立真实连接。目录尚未发布安装包；第三方客户端请从官方渠道获取，“已验证”需后台完成实机验收后维护。</span></div>
     <div className="client-platform-tabs" role="tablist" aria-label="选择设备平台">
       {clientPlatforms.map(item => {
         const Icon = item.icon;
@@ -458,12 +478,12 @@ function ClientDownloadPage({ refresh, setView, notify }: { refresh: number; set
         {!clients ? <LoadingBlock /> : !platformClients.length ? <Empty title="暂无上架客户端" detail="管理员配置并上架后会显示在这里。" /> : platformClients.map(client => {
           const status = compatibility(client.compatibility_status);
           return <article className="client-download-card" key={client.id}>
-            <div className="client-download-head"><span className="client-icon"><PlatformIcon size={18} /></span><div><h3>{client.name}</h3><p>{client.version ? '版本 ' + client.version : '版本待配置'}</p></div><StatusPill status={status.label} tone={status.tone} /></div>
+            <div className="client-download-head"><span className="client-icon"><PlatformIcon size={18} /></span><div><h3>{client.name}</h3><p>{client.version ? '版本 ' + client.version : '版本待验证'}</p></div><StatusPill status={status.label} tone={status.tone} /></div>
             <p className="client-download-detail">{client.description || '暂无说明。'}</p>
             <div className="client-format-label">{['Clash Mi', 'Clash Verge Rev', 'FlClash', 'Mihomo'].includes(client.name) ? '订阅格式：Clash / Mihomo YAML · 真实连接待验证' : '订阅格式：待适配验证'}</div>
             {client.qr_code_url && <a className="client-qr-link" href={client.qr_code_url} target="_blank" rel="noopener noreferrer"><img src={client.qr_code_url} alt={client.name + ' 下载二维码'} loading="lazy" />查看下载二维码</a>}
             <div className="client-entry-links">
-              {client.download_url ? <a className="secondary-button" href={client.download_url} target="_blank" rel="noopener noreferrer"><ArrowDownToLine size={15} />下载客户端</a> : <button className="secondary-button" type="button" disabled title="下载地址尚未配置"><ArrowDownToLine size={15} />下载地址待配置</button>}
+              {client.download_url ? <a className="secondary-button" href={client.download_url} target="_blank" rel="noopener noreferrer"><ArrowDownToLine size={15} />下载客户端</a> : <button className="secondary-button" type="button" disabled title="安装包尚未发布，或下载来源尚未审核"><ArrowDownToLine size={15} />暂未开放下载</button>}
               {client.tutorial_url && <a className="text-button" href={client.tutorial_url} target="_blank" rel="noopener noreferrer">查看教程 <ArrowUpRight size={14} /></a>}
             </div>
           </article>;

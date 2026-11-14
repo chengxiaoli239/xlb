@@ -3,32 +3,34 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>迅连宝</title>
+    <meta name="referrer" content="no-referrer" />
+    <title>迅连宝 · 连接助手</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <header class="popup-header">
-      <div class="brand"><span class="brand-mark">X</span><span><b>迅连宝</b><small>连接助手</small></span></div>
-      <span class="preview-tag">本地预览</span>
+      <div class="brand"><span class="brand-mark"><img src="assets/popup-logo.svg" width="28" height="28" alt="" /></span><span><b>迅连宝</b><small id="account-name">正在同步账户…</small></span></div>
+      <button type="button" class="vip-button" data-page="plans">VIP 购买</button>
     </header>
-    <nav class="popup-tabs" aria-label="连接与线路">
-      <button type="button" data-tab="connection" aria-selected="true">连接</button>
-      <button type="button" data-tab="locations" aria-selected="false">线路</button>
-    </nav>
-    <main id="connection" class="popup-panel">
-      <div class="connection-state"><span class="state-indicator"></span><b>未连接</b><span>本地版本尚未接入真实线路</span></div>
-      <button class="connect-button" type="button" disabled title="真实节点尚未接入">连接</button>
-      <p class="panel-note">接入隔离测试节点并完成连接验证后，才会开放连接控制。</p>
+    <main>
+      <section id="signed-out" class="signed-out" hidden><h1>登录你的会员账户</h1><p>沿用会员中心的登录状态，自动同步到期时间和固定订阅。</p><button type="button" class="primary" data-page="login">打开会员登录</button></section>
+      <section id="member" hidden>
+        <div class="usage-heading"><span>套餐周期累计流量</span><button type="button" id="refresh" aria-label="刷新会员状态">刷新</button></div>
+        <div class="usage-values"><b id="usage">—</b><span id="plan-name">—</span></div>
+        <progress id="usage-progress" max="100" value="0" aria-label="套餐流量用量"></progress>
+        <p id="expiry" class="expiry">—</p>
+        <div class="section-heading"><h1>固定订阅</h1><span>续费沿用</span></div>
+        <div class="subscription-address"><code id="subscription-address">尚未准备凭证</code><button type="button" id="copy" disabled aria-label="复制订阅链接"><img src="assets/clipboard.svg" width="21" height="21" alt="" /></button></div>
+        <div class="formats" role="group" aria-label="订阅格式"><button type="button" data-format="auto" aria-pressed="true">自动识别</button><button type="button" data-format="clash" aria-pressed="false">Clash</button><button type="button" data-format="mihomo" aria-pressed="false">Mihomo</button><button type="button" disabled title="JSON 格式尚未开放">Sing-box</button></div>
+        <button type="button" class="action-row qr-row" data-page="qr"><span class="action-icon"><img src="assets/qr.svg" width="23" height="23" alt="" /></span><span><b>扫码导入客户端</b><small>Clash / Mihomo 订阅配置</small></span><span class="action-next">打开 ›</span></button>
+        <button type="button" class="action-row" data-page="clients"><span><b>客户端下载</b><small>Windows · macOS · Android</small></span><span class="action-next">打开 ›</span></button>
+        <button type="button" class="action-row" data-page="compatibility"><span><b>模式与配置检查</b><small>规则 / 全局 / 直连 · 导入前检查</small></span><span class="action-next">查看 ›</span></button>
+        <div class="security-note"><img src="assets/help.svg" width="24" height="24" alt="" /><span><b>订阅地址等同连接凭证</b><small>不要公开分享；轮换后旧地址失效。当前为本地测试配置，未接入代理连接。</small></span></div>
+      </section>
+      <p id="message" class="popup-message" role="status">正在读取本地会员服务…</p>
+      <button type="button" id="retry" class="retry" hidden>重新同步</button>
     </main>
-    <main id="locations" class="popup-panel" hidden>
-      <div class="empty-lines"><b>暂无可连接线路</b><span>线路目录和节点健康检查尚未接入。</span></div>
-    </main>
-    <section class="account-actions" aria-label="账户与订阅">
-      <button class="action-row" type="button" data-page="plans"><span class="action-icon vip-icon">VIP</span><span class="action-copy"><b>VIP 会员与续费</b><small>打开本机会员页，自动识别已登录账号</small></span><span class="chevron" aria-hidden="true">›</span></button>
-      <button class="action-row" type="button" data-page="subscriptions"><span class="action-icon">订</span><span class="action-copy"><b>客户端与订阅码</b><small>管理固定链接并展示扫码导入</small></span><span class="chevron" aria-hidden="true">›</span></button>
-      <div class="mode-row"><span>加速模式</span><b>智能模式</b><small>线路验证后开放</small></div>
-    </section>
-    <footer>本地预览 · 会员续费在账号页完成，连接尚未接入</footer>
+    <footer id="sync-state">仅连接本机会员服务 · 不读取网页内容</footer>
     <script src="popup.js"></script>
   </body>
 </html>

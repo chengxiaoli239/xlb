@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "迅连宝",
-  "version": "0.1.0",
-  "description": "迅连宝账户、线路与订阅入口的本地开发版。",
+  "version": "0.2.0",
+  "description": "迅连宝会员权益、固定订阅与客户端导入助手（本地开发版，不提供代理连接）。",
+  "host_permissions": ["http://127.0.0.1:5174/*"],
   "action": {
     "default_title": "迅连宝",
     "default_popup": "popup.html"
