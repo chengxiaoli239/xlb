@@ -66,6 +66,9 @@ class ManagerTest(unittest.TestCase):
             result = getattr(manager, 'profile')()
             profile = json.loads(result['profile'])
             self.assertEqual(profile['proxy-groups'][0]['proxies'], ['test'])
+            global_group = next(group for group in profile['proxy-groups'] if group['name'] == 'GLOBAL')
+            self.assertEqual(global_group['type'], 'select')
+            self.assertEqual(global_group['proxies'], ['XLB-TEST'])
             self.assertNotIn('DIRECT', json.dumps(profile))
 
     def test_workload_role_ignores_static_profile_secrets_and_endpoint_overrides(self):

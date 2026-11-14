@@ -264,7 +264,7 @@ class Manager:
 
     def profile(self):
         proxy = self.credentials()
-        return {'profile': json.dumps({'mixed-port': 7890, 'allow-lan': False, 'mode': 'rule', 'log-level': 'error', 'proxies': [proxy], 'proxy-groups': [{'name': 'XLB-TEST', 'type': 'select', 'proxies': [proxy['name']]}], 'rules': ['MATCH,XLB-TEST']}, ensure_ascii=False)}
+        return {'profile': json.dumps({'mixed-port': 7890, 'allow-lan': False, 'mode': 'rule', 'log-level': 'error', 'proxies': [proxy], 'proxy-groups': [{'name': 'XLB-TEST', 'type': 'select', 'proxies': [proxy['name']]}, {'name': 'GLOBAL', 'type': 'select', 'proxies': ['XLB-TEST']}], 'rules': ['MATCH,XLB-TEST']}, ensure_ascii=False)}
 
     def probe(self):
         proxy = self.credentials()

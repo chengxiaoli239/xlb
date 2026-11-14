@@ -54,23 +54,33 @@ class SubscriptionProfileService
             return $this->unavailable();
         }
 
+        $nodeName = in_array($node->name, ['GLOBAL', 'DIRECT', 'REJECT', '迅连宝测试'], true)
+            ? $node->name.' · 节点'
+            : $node->name;
         $profile = [
             'mixed-port' => 7890,
             'allow-lan' => false,
             'mode' => $mode,
             'log-level' => 'warning',
             'proxies' => [[
-                'name' => $node->name,
+                'name' => $nodeName,
                 'type' => 'socks5',
                 'server' => $node->endpoint_host,
                 'port' => (int) $node->endpoint_port,
                 'udp' => false,
             ]],
-            'proxy-groups' => [[
-                'name' => '迅连宝测试',
-                'type' => 'select',
-                'proxies' => [$node->name, 'DIRECT'],
-            ]],
+            'proxy-groups' => [
+                [
+                    'name' => '迅连宝测试',
+                    'type' => 'select',
+                    'proxies' => [$nodeName, 'DIRECT'],
+                ],
+                [
+                    'name' => 'GLOBAL',
+                    'type' => 'select',
+                    'proxies' => ['迅连宝测试'],
+                ],
+            ],
             'rules' => ['MATCH,迅连宝测试'],
         ];
         $yaml = "# 迅连宝本地开发配置，不包含真实节点或可用凭证。\n# 仅用于验证 Clash / Mihomo 订阅格式和导入流程。\n".Yaml::dump($profile, 6, 2);

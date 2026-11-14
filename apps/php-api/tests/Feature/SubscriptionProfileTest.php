@@ -35,6 +35,9 @@ class SubscriptionProfileTest extends TestCase
                 $result = $this->get($url.'?format='.$format.'&mode='.$mode)->assertOk()->assertHeader('X-XLB-Profile-Format', $format);
                 $config = Yaml::parse($result->getContent());
                 $this->assertSame($mode, $config['mode']);
+                $global = collect($config['proxy-groups'])->firstWhere('name', 'GLOBAL');
+                $this->assertSame('select', $global['type']);
+                $this->assertSame(['迅连宝测试'], $global['proxies']);
                 $this->assertSame('198.51.100.10', $config['proxies'][0]['server']);
                 $this->assertFalse($config['allow-lan']);
                 $this->assertArrayNotHasKey('external-controller', $config);
@@ -107,6 +110,7 @@ class SubscriptionProfileTest extends TestCase
         $this->assertFileExists($binary);
 
         $url = $this->profileUrl();
+        DB::table('nodes')->where('id', 'node-test-1')->update(['name' => 'GLOBAL']);
         foreach (['clash', 'mihomo'] as $format) {
             foreach (['rule', 'global', 'direct'] as $mode) {
                 $response = $this->get($url.'?format='.$format.'&mode='.$mode)->assertOk();
@@ -127,6 +131,20 @@ class SubscriptionProfileTest extends TestCase
                     }
                 }
             }
+        }
+    }
+
+    public function test_reserved_node_names_do_not_collide_with_policy_groups(): void
+    {
+        $url = $this->profileUrl();
+        foreach (['GLOBAL', 'DIRECT', 'REJECT', '迅连宝测试'] as $name) {
+            DB::table('nodes')->where('id', 'node-test-1')->update(['name' => $name]);
+            $response = $this->get($url.'?mode=global')->assertOk();
+            $config = Yaml::parse($response->getContent());
+            $nodeName = $config['proxies'][0]['name'];
+            $this->assertNotContains($nodeName, array_column($config['proxy-groups'], 'name'));
+            $this->assertNotContains($nodeName, ['DIRECT', 'REJECT']);
+            $this->assertSame($nodeName, $config['proxy-groups'][0]['proxies'][0]);
         }
     }
 
