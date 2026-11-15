@@ -146,6 +146,7 @@ class SubscriptionRouteService
         $healthyStatuses = $scope === 'production' ? ['healthy'] : ['verified_test', 'healthy'];
         $nodes = DB::table('nodes as n')->join('subscription_route_nodes as rn', 'rn.node_id', '=', 'n.id')
             ->where('rn.route_version_id', $selected->id)->where('n.status', 'available')->whereIn('n.health_status', $healthyStatuses)
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('node_deployments as d')->whereColumn('d.node_id', 'n.id'))
             ->orderByDesc('rn.weight')->orderBy('n.id')
             ->get(['n.id', 'n.name', 'n.endpoint_host', 'n.endpoint_port', 'n.last_health_check_at'])
             ->filter(fn (object $node): bool => $this->hasFreshHealthCheck($node->last_health_check_at));
@@ -190,6 +191,9 @@ class SubscriptionRouteService
         $rows = collect($nodes);
         if ($rows->count() !== count($nodeIds)) {
             throw new RuntimeException('线路包含不存在的节点', 422);
+        }
+        if (DB::table('node_deployments')->whereIn('node_id', $nodeIds)->exists()) {
+            throw new RuntimeException('管理员临时云测试节点不能加入订阅线路', 422);
         }
         foreach ($rows as $node) {
             $healthyStatuses = $scope === 'production' ? ['healthy'] : ['verified_test', 'healthy'];

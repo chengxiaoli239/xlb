@@ -67,6 +67,14 @@ class NodeAutomationTest extends TestCase
         ]);
     }
 
+    private function attachNodeToPublishedTestRoute(string $nodeId): void
+    {
+        DB::table('subscription_route_nodes')->insert([
+            'id' => (string) Str::uuid(), 'route_version_id' => 'route-test-v1', 'node_id' => $nodeId,
+            'weight' => 100, 'created_at' => now()->toIso8601String(),
+        ]);
+    }
+
     private function mockAwsProvider(): MockInterface
     {
         $provider = $this->mock(AwsNodeProvider::class);
@@ -308,8 +316,8 @@ class NodeAutomationTest extends TestCase
     {
         $row = $this->createDeployment();
         $this->markDeploymentNodeAvailable($row);
+        $this->attachNodeToPublishedTestRoute($row->node_id);
         $this->admin();
-        $this->publishTestRoute($row->node_id);
 
         $this->postJson('/api/v1/admin/node-deployments/'.$row->id.'/retire', ['confirmation' => '永久下架并释放'])
             ->assertStatus(409)
@@ -324,8 +332,9 @@ class NodeAutomationTest extends TestCase
         config(['node_automation.drain_seconds' => 60, 'subscription_routes.drain_seconds' => 60]);
         $row = $this->createDeployment();
         $this->markDeploymentNodeAvailable($row);
+        $this->attachNodeToPublishedTestRoute($row->node_id);
         $this->admin();
-        $oldRouteId = $this->publishTestRoute($row->node_id);
+        $oldRouteId = 'route-test-v1';
         $this->publishTestRoute('node-test-1');
         $this->postJson('/api/v1/admin/node-deployments/'.$row->id.'/retire', ['confirmation' => '永久下架并释放'])
             ->assertStatus(202)->assertJsonPath('data.phase', 'draining');
@@ -344,6 +353,30 @@ class NodeAutomationTest extends TestCase
         $this->mockAwsProvider()->shouldReceive('release')->once()->with(\Mockery::any())->andReturn(['state' => 'released']);
         app(NodeAutomation::class)->reconcile();
         $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'released']);
+    }
+
+    public function test_temporary_cloud_test_nodes_cannot_be_added_to_subscription_routes(): void
+    {
+        $row = $this->createDeployment();
+        $this->markDeploymentNodeAvailable($row);
+
+        $this->admin()->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'test', 'node_ids' => [$row->node_id],
+        ])->assertStatus(422)->assertJsonPath('error.code', 'route_nodes_not_ready');
+
+        $this->assertDatabaseCount('subscription_route_versions', 1);
+    }
+
+    public function test_legacy_routes_do_not_return_temporary_cloud_test_nodes(): void
+    {
+        $row = $this->createDeployment();
+        $this->markDeploymentNodeAvailable($row);
+        $this->attachNodeToPublishedTestRoute($row->node_id);
+
+        $route = app(SubscriptionRouteService::class)->resolve('user-member', 'test');
+
+        $this->assertNotNull($route);
+        $this->assertSame(['node-test-1'], array_map(fn (object $node): string => $node->id, $route['nodes']));
     }
 
     public function test_expiry_reclaims_even_when_new_creation_disabled_and_retire_is_idempotent(): void
