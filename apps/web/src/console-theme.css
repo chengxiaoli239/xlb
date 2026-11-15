@@ -448,6 +448,11 @@
   --amber-text: #805c1c;
   --amber-border: #e6cf9e;
   --gray-bg: #eaf0ed;
+  --field-bg: #ffffff;
+  --field-border: #b5c9bd;
+  --red-bg: #fff0ed;
+  --red-text: #a33b32;
+  --red-border: #edc3bb;
   --button-bg: #ffffff;
   --button-border: #becfc5;
   --button-hover: #e8f1ec;
@@ -476,6 +481,11 @@
   --amber-text: #f2d18c;
   --amber-border: #5c5035;
   --gray-bg: #303e53;
+  --field-bg: #182436;
+  --field-border: #4a5c75;
+  --red-bg: #55363e;
+  --red-text: #ffc0bc;
+  --red-border: #77525b;
   --button-bg: #2a384f;
   --button-border: #465771;
   --button-hover: #344660;
@@ -566,6 +576,8 @@
 .member-portal .row-actions .text-button { min-height: 38px; gap: 5px; font-size: 15px; }
 .member-portal .text-button { color: var(--green); }
 .member-portal .text-button:hover { color: var(--green-dark); }
+.member-portal .row-actions .danger-text { color: var(--red-text); }
+.member-portal .row-actions .danger-text:hover { color: var(--red-text); filter: brightness(1.08); }
 .member-portal select { border-color: var(--button-border); background: var(--surface); color: var(--ink); font-size: 14px; }
 .member-portal .member-empty { border-color: var(--line); background: var(--surface); color: var(--accent-text); }
 .member-portal .member-empty b { color: var(--ink); font-size: 15px; }
@@ -585,6 +597,15 @@
 .member-portal .secondary-button { border-color: var(--line); background: var(--surface); color: var(--ink); }
 .member-portal .secondary-button:hover { background: var(--subtle-bg); }
 .member-portal .subscription-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.member-portal .device-quota { min-height: 56px; margin: 0 22px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+.member-portal .device-quota b { margin-left: 6px; color: var(--ink); font-size: 17px; }
+.member-portal .device-registration-form { display: grid; gap: 16px; }
+.member-portal .device-registration-form label { display: grid; gap: 7px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.member-portal .device-registration-form input, .member-portal .device-registration-form select { width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid var(--field-border); border-radius: 7px; background: var(--field-bg); color: var(--ink); font: inherit; }
+.member-portal .device-registration-form input:focus-visible, .member-portal .device-registration-form select:focus-visible { outline: 3px solid var(--green); outline-offset: 2px; }
+.member-portal .danger-button { min-height: 40px; padding: 0 13px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--red-border); border-radius: 7px; background: var(--red-bg); color: var(--red-text); font: inherit; cursor: pointer; }
+.member-portal .danger-button:hover { filter: brightness(.97); }
+.member-portal .danger-button:disabled { opacity: .55; cursor: not-allowed; }
 .member-portal .subscription-qr-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: center; gap: 22px; }
 .member-portal .subscription-qr { display: grid; justify-items: center; gap: 9px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #263a32; text-align: center; }
 .member-portal .subscription-qr b { font-size: 14px; }
@@ -612,6 +633,12 @@
   .member-portal .plan-row { grid-template-columns: minmax(150px,1.2fr) repeat(2,minmax(75px,.7fr)) auto; }
   .member-portal .plan-row > div:nth-child(4) { display: none; }
   .member-footer { padding: 0 18px; }
+}
+@media (max-width: 760px) {
+  .member-portal .device-quota { min-height: 52px; margin: 0 14px 12px; font-size: 13px; }
+  .member-portal .device-quota b { font-size: 16px; }
+  .member-portal .device-registration-form .modal-actions { justify-content: stretch; }
+  .member-portal .device-registration-form .modal-actions > button { flex: 1; }
 }
 .member-portal .client-guide { gap: 22px; }
 .client-platform-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 0 0 6px; scrollbar-width: thin; }

@@ -23,6 +23,8 @@ type NodeDetail = Node & { changes: Array<{ id: string; from_status: NodeStatus;
 type RouteVersion = { id: string; scope: 'test' | 'production'; version: number; status: string; canary_percent: number; previous_version_id: string | null; note: string | null; drain_until: string | null; published_at: string | null; nodes: Array<{ id: string; name: string; region: string; status: string; is_test: boolean; health_status: string; weight: number }> };
 type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
 type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string | null; last_used_at: string | null; url: string | null };
+type MemberDevice = { id: string; installation_id: string; name: string; platform: ClientPlatform; status: 'registered'; created_at: string; revoked_at: string | null };
+type MemberDeviceSummary = { entitlement_active: boolean; max_devices: number; registered_count: number; available_slots: number; devices: MemberDevice[] };
 type ClientPlatform = 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'browser';
 type ClientCompatibility = 'pending' | 'verified' | 'maintenance' | 'unsupported';
 type ClientCatalogItem = { id: string; platform: ClientPlatform; name: string; version: string | null; description: string | null; download_url: string | null; qr_code_url: string | null; tutorial_url: string | null; compatibility_status: ClientCompatibility };
@@ -392,7 +394,7 @@ function Metric({ label, value, note, icon: Icon, tone }: { label: string; value
 function MemberEntitlement({ entitlement, setView }: { entitlement?: Overview['entitlement']; setView: (view: string) => void }) {
   if (!entitlement) return <section className="panel member-empty"><BadgeCheck size={22} /><div><b>当前没有有效会员权益</b><span>请从正式购买入口确认账户套餐。</span></div></section>;
   const used = percent(entitlement.data_used_gb, entitlement.traffic_gb);
-  return <section className="member-hero"><div className="member-main"><div className="member-tag"><BadgeCheck size={14} /> 当前有效会员</div><h2>{entitlement.plan_name}</h2><p>有效至 {shortDate(entitlement.ends_at)} · 最多 {entitlement.max_devices} 台设备</p><button className="member-link" onClick={() => setView('plans')}>查看会员权益 <ArrowUpRight size={14} /></button></div><div className="usage"><div className="usage-top"><span>套餐周期已用流量</span><b>{entitlement.data_used_gb.toFixed(1)} <small>/ {entitlement.traffic_gb} GB</small></b></div><div className="usage-bar"><span style={{ width: used + '%' }} /></div><div className="usage-foot"><span>剩余 {(entitlement.traffic_gb - entitlement.data_used_gb).toFixed(1)} GB</span><span>{used}% · 周期累计</span></div></div><div className="member-side"><span>当前连接</span><b><i /> 未连接</b><small>演示状态 · 无真实节点</small></div></section>;
+  return <section className="member-hero"><div className="member-main"><div className="member-tag"><BadgeCheck size={14} /> 当前有效会员</div><h2>{entitlement.plan_name}</h2><p>有效至 {shortDate(entitlement.ends_at)} · 最多登记 {entitlement.max_devices} 台设备</p><button className="member-link" onClick={() => setView('plans')}>查看会员权益 <ArrowUpRight size={14} /></button></div><div className="usage"><div className="usage-top"><span>套餐周期已用流量</span><b>{entitlement.data_used_gb.toFixed(1)} <small>/ {entitlement.traffic_gb} GB</small></b></div><div className="usage-bar"><span style={{ width: used + '%' }} /></div><div className="usage-foot"><span>剩余 {(entitlement.traffic_gb - entitlement.data_used_gb).toFixed(1)} GB</span><span>{used}% · 周期累计</span></div></div><div className="member-side"><span>当前连接</span><b><i /> 未连接</b><small>演示状态 · 无真实节点</small></div></section>;
 }
 function AuditList({ rows }: { rows?: AdminSummary['recentAudit'] }) {
   if (!rows) return <LoadingBlock />;
@@ -419,12 +421,54 @@ function ServiceItem({ label, status, icon: Icon }: { label: string; status: str
 
 function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (value: string) => void }) {
   const [rows, setRows] = useState<Subscription[] | null>(null);
+  const [deviceSummary, setDeviceSummary] = useState<MemberDeviceSummary | null>(null);
+  const [deviceModal, setDeviceModal] = useState(false);
+  const [deviceRemovalTarget, setDeviceRemovalTarget] = useState<MemberDevice | null>(null);
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  const [deviceForm, setDeviceForm] = useState<{ installation_id: string; name: string; platform: ClientPlatform }>({ installation_id: '', name: '', platform: 'android' });
   const [createdUrl, setCreatedUrl] = useState('');
   const [showSubscription, setShowSubscription] = useState(false);
   const [rotateTarget, setRotateTarget] = useState<Subscription | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => api<Subscription[]>('/api/v1/me/subscriptions').then(setRows).catch(error => notify((error as Error).message)), [notify]);
+  const load = useCallback(async () => {
+    await Promise.all([
+      api<Subscription[]>('/api/v1/me/subscriptions').then(setRows).catch(error => notify((error as Error).message)),
+      api<MemberDeviceSummary>('/api/v1/me/devices').then(setDeviceSummary).catch(error => notify((error as Error).message)),
+    ]);
+  }, [notify]);
   useEffect(() => { void load(); }, [load, refresh]);
+  const openDeviceModal = () => {
+    setDeviceForm({ installation_id: crypto.randomUUID(), name: '', platform: 'android' });
+    setDeviceModal(true);
+  };
+  const registerDevice = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setDeviceBusy(true);
+    try {
+      await api<MemberDevice>('/api/v1/me/devices', { method: 'POST', body: JSON.stringify(deviceForm) });
+      setDeviceModal(false);
+      notify('设备登记已保存；VPN 节点授权与连接状态尚未接入');
+      await load();
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+  const removeDevice = async () => {
+    if (!deviceRemovalTarget) return;
+    setDeviceBusy(true);
+    try {
+      await api('/api/v1/me/devices/' + deviceRemovalTarget.id, { method: 'DELETE' });
+      setDeviceRemovalTarget(null);
+      notify('设备登记已移除；如关联节点凭证，需先完成节点撤权');
+      await load();
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
   const create = async () => {
     setBusy(true);
     try { const item = await api<Subscription>('/api/v1/me/subscriptions', { method: 'POST' }); setCreatedUrl(item.url ?? ''); setShowSubscription(true); notify('订阅链接已生成；会员权益生效后可获取线路配置'); await load(); }
@@ -455,6 +499,30 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
   return <div className="page-stack">
     <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="购买后自动准备固定订阅地址；后续续费继续使用同一地址。也可以在购买前获取。" action={<div className="subscription-actions"><button className="secondary-button" disabled={!current?.url} onClick={() => current?.url && void copy(current.url)}><Clipboard size={15} />复制链接</button><button className="primary-button" disabled={busy || !rows} onClick={() => { if (current?.url) showQr(current.url); else { setCreatedUrl(''); setRotateTarget(null); setShowSubscription(true); } }}><QrCode size={16} />{current ? '扫码导入' : '获取二维码'}</button></div>} />
     <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>权限说明</b> 订阅链接可预先创建；客户端仅会在当前会员权益有效且线路可用时取得配置。本地预览使用测试节点，不提供真实连接。</span></div>
+    <section className="panel">
+      <SectionTitle title="设备登记" detail={deviceSummary ? `${deviceSummary.registered_count} / ${deviceSummary.max_devices} 个名额` : '读取中'} action={<button className="primary-button" disabled={!deviceSummary?.entitlement_active || !deviceSummary.available_slots || deviceBusy} onClick={openDeviceModal}><Smartphone size={15} /> 登记设备</button>} />
+      {!deviceSummary ? <LoadingBlock /> : <>
+        <div className="device-quota"><span>剩余名额 <b>{deviceSummary.available_slots}</b></span><span>可登记设备上限 {deviceSummary.max_devices} 台</span></div>
+        <div className="notice notice-neutral"><ShieldCheck size={16} /><span>设备登记只占用会员名额，不代表 VPN 已连接或已分配真实节点凭证。Clash Verge Rev 等第三方客户端不会向本平台回报在线状态。</span></div>
+        {!deviceSummary.devices.length ? <Empty title="暂无登记设备" detail={deviceSummary.entitlement_active ? '登记常用设备后，可在此查看和移除。' : '购买有效套餐后即可登记设备。'} /> : <div className="table-wrap"><table><thead><tr><th>设备</th><th>平台</th><th>登记状态</th><th>登记时间</th><th>操作</th></tr></thead><tbody>{deviceSummary.devices.map(device => {
+          const platform = clientPlatforms.find(item => item.id === device.platform);
+          const Icon = platform?.icon ?? Monitor;
+          return <tr key={device.id}><td><span className="table-main"><Icon size={16} />{device.name}</span></td><td>{platform?.label ?? device.platform}</td><td><StatusPill status="已登记" tone="green" /></td><td>{dateTime(device.created_at)}</td><td><button className="text-button danger-text" onClick={() => setDeviceRemovalTarget(device)}><X size={14} /> 移除</button></td></tr>;
+        })}</tbody></table></div>}
+      </>}
+    </section>
+    {deviceModal && <Modal title="登记设备" detail="登记会占用套餐设备名额" onClose={() => { if (!deviceBusy) setDeviceModal(false); }}>
+      <form className="device-registration-form" onSubmit={event => void registerDevice(event)}>
+        <label>设备名称<input required maxLength={80} value={deviceForm.name} onChange={event => setDeviceForm({ ...deviceForm, name: event.target.value })} placeholder="例如：我的 Android 手机" /></label>
+        <label>设备平台<select value={deviceForm.platform} onChange={event => setDeviceForm({ ...deviceForm, platform: event.target.value as ClientPlatform })}>{clientPlatforms.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+        <div className="notice notice-warning"><ShieldCheck size={16} /><span>此操作只创建账户登记记录，不会自动连接 VPN、创建节点 peer 或验证客户端。</span></div>
+        <div className="modal-actions"><button type="button" className="secondary-button" disabled={deviceBusy} onClick={() => setDeviceModal(false)}>取消</button><button type="submit" className="primary-button" disabled={deviceBusy || !deviceForm.name.trim()}><Smartphone size={15} /> 确认登记</button></div>
+      </form>
+    </Modal>}
+    {deviceRemovalTarget && <Modal title="移除设备" detail={deviceRemovalTarget.name} onClose={() => { if (!deviceBusy) setDeviceRemovalTarget(null); }}>
+      <p className="modal-copy">移除会释放一个套餐设备名额。若服务端仍有关联的未撤权节点凭证，系统会阻止移除；此页面不会把登记状态当作连接状态。</p>
+      <div className="modal-actions"><button className="secondary-button" disabled={deviceBusy} onClick={() => setDeviceRemovalTarget(null)}>取消</button><button className="danger-button" disabled={deviceBusy} onClick={() => void removeDevice()}><X size={15} /> 确认移除</button></div>
+    </Modal>}
     {showSubscription && <Modal title={createdUrl ? '固定订阅链接' : rotateTarget ? '轮换订阅链接' : '获取固定订阅链接'} detail={createdUrl ? '可随时在此页面重新复制；请勿公开分享' : rotateTarget ? '旧链接将立即失效' : '同一账户重复获取时会返回现有链接'} onClose={() => { if (busy) return; setShowSubscription(false); setCreatedUrl(''); setRotateTarget(null); }}>
       {createdUrl ? <div className="subscription-qr-layout"><div className="subscription-qr"><QRCodeSVG value={absoluteSubscriptionUrl(createdUrl)} size={196} level="M" title="固定订阅二维码" /><b>用手机客户端扫描导入</b><span>{subscriptionQrNote()}</span></div><div className="secret-result"><div><span className="eyebrow">固定订阅 · 续费沿用</span><code>{absoluteSubscriptionUrl(createdUrl)}</code></div><div className="subscription-import-actions"><button className="secondary-button" onClick={() => void copy(createdUrl)}><Clipboard size={15} /> 复制链接</button><a className="secondary-button" href={clashVergeImportUrl(createdUrl)}><ArrowUpRight size={15} /> 导入 Clash Verge Rev</a></div></div></div> : <><p className="modal-copy">{rotateTarget ? '确认轮换后，当前订阅链接立即失效。请更新已连接的客户端。' : '订阅链接可以提前获取；会员权益生效且有可用线路后，兼容客户端即可从此地址获取配置。'}</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowSubscription(false); setRotateTarget(null); }}>取消</button><button className="primary-button" disabled={busy} onClick={() => void (rotateTarget ? rotate(rotateTarget) : create())}>{rotateTarget ? '确认轮换' : '获取链接'}</button></div></>}
     </Modal>}
@@ -552,7 +620,7 @@ function PlansPage({ role, refresh, notify, onDataChange }: { role: User['role']
     finally { setBusy(false); }
   };
   return <div className="page-stack"><PageHeading eyebrow="套餐中心" title="套餐权益" subtitle="查看套餐期限、流量和设备数量。" />{role === 'member' && <section className="vip-account-summary" aria-label="当前会员账户"><div><span>当前账号</span><b>{account?.user.email ?? '读取中'}</b></div><div><span>会员等级</span><b>{account?.entitlement?.plan_name ?? '尚未开通'}</b></div><div><span>到期时间</span><b>{account?.entitlement ? dateTime(account.entitlement.ends_at) : '—'}</b></div><button className="text-button" onClick={onDataChange}><RefreshCw size={14} />刷新状态</button></section>}<div className="notice notice-neutral"><CreditCard size={16} /><span>本地沙箱演示：确认套餐后可模拟付款，系统会自动准备固定订阅并刷新会员到期时间；不会产生真实扣款。</span></div>
-    <section className="panel"><SectionTitle title="可选套餐" detail={plans ? plans.length + ' 种方案' : '载入中'} />{!plans ? <LoadingBlock /> : !plans.length ? <Empty title="暂无上架套餐" detail="套餐上架后会显示在这里。" /> : <div className="plan-grid">{plans.map(plan => <div className="plan-row" key={plan.id}><div className="plan-period"><span className="plan-icon"><BadgeCheck size={17} /></span><span><b>{plan.name}</b><small>{plan.period_label}有效</small></span></div><div><b>{money(plan.price_cents)}</b><small>套餐价格</small></div><div><b>{plan.traffic_gb} GB</b><small>套餐流量</small></div><div><b>{plan.max_devices} 台</b><small>同时在线</small></div>{role === 'member' ? <button className="secondary-button" onClick={() => { setError(''); setSelection({ plan, key: crypto.randomUUID() }); }}>选择套餐</button> : <StatusPill status="会员端可测试下单" tone="gray" />}</div>)}</div>}</section>
+    <section className="panel"><SectionTitle title="可选套餐" detail={plans ? plans.length + ' 种方案' : '载入中'} />{!plans ? <LoadingBlock /> : !plans.length ? <Empty title="暂无上架套餐" detail="套餐上架后会显示在这里。" /> : <div className="plan-grid">{plans.map(plan => <div className="plan-row" key={plan.id}><div className="plan-period"><span className="plan-icon"><BadgeCheck size={17} /></span><span><b>{plan.name}</b><small>{plan.period_label}有效</small></span></div><div><b>{money(plan.price_cents)}</b><small>套餐价格</small></div><div><b>{plan.traffic_gb} GB</b><small>套餐流量</small></div><div><b>{plan.max_devices} 台</b><small>可登记设备</small></div>{role === 'member' ? <button className="secondary-button" onClick={() => { setError(''); setSelection({ plan, key: crypto.randomUUID() }); }}>选择套餐</button> : <StatusPill status="会员端可测试下单" tone="gray" />}</div>)}</div>}</section>
     <section className="panel"><SectionTitle title="权益一致性" detail="唯一事实源设计" /><div className="service-strip"><ServiceItem label="官网展示" status="共用套餐 API" icon={Globe2} /><ServiceItem label="自有 App" status="共用账户权益" icon={Smartphone} /><ServiceItem label="Clash 订阅" status="服务端校验" icon={Link2} /><ServiceItem label="运营后台" status="审计可查" icon={ShieldCheck} /></div></section>
     {selection && <Modal title="确认套餐" detail="确认所选套餐并继续付款" onClose={() => { if (!busy) setSelection(null); }}>
       <dl className="detail-grid"><div><dt>套餐</dt><dd>{selection.plan.name}</dd></div><div><dt>金额</dt><dd>{money(selection.plan.price_cents)}</dd></div><div><dt>有效期</dt><dd>{selection.plan.duration_days} 天</dd></div><div><dt>套餐流量</dt><dd>{selection.plan.traffic_gb} GB</dd></div></dl>
@@ -600,14 +668,14 @@ function AdminPlansPage({ notify }: { notify: (value: string) => void }) {
   };
   return <div className="page-stack"><PageHeading eyebrow="运营管理" title="套餐管理" subtitle="设置价格、期限、流量和设备数；修改套餐会创建新版本，已有订单和会员权益仍引用旧版本。" action={<button className="primary-button" onClick={createPlan}><CreditCard size={15} /> 创建套餐</button>} />
     <section className="panel"><SectionTitle title="套餐列表" detail={rows ? rows.length + ' 种套餐' : '读取中'} />
-      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="暂无套餐" detail="点击右上角创建第一个套餐。" /> : <div className="table-wrap"><table><thead><tr><th>套餐</th><th>版本</th><th>价格</th><th>期限</th><th>流量</th><th>设备数</th><th>状态</th><th>操作</th></tr></thead><tbody>{rows.map(row => <tr key={row.family_id}><td>{row.name}</td><td>v{row.version}</td><td>{money(row.price_cents)}</td><td>{row.duration_days} 天</td><td>{row.traffic_gb} GB</td><td>{row.max_devices} 台</td><td><StatusPill status={row.active ? '已上架' : '已下架'} tone={row.active ? 'green' : 'gray'} /></td><td><div className="row-actions"><button className="text-button" onClick={() => setPlanModal({ mode: 'detail', row })}>详情</button><button className="text-button" onClick={() => edit(row)}>编辑</button><button className="text-button" onClick={() => void changeStatus(row)}>{row.active ? '下架' : '上架'}</button></div></td></tr>)}</tbody></table></div>}
+      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="暂无套餐" detail="点击右上角创建第一个套餐。" /> : <div className="table-wrap"><table><thead><tr><th>套餐</th><th>版本</th><th>价格</th><th>期限</th><th>流量</th><th>可登记设备</th><th>状态</th><th>操作</th></tr></thead><tbody>{rows.map(row => <tr key={row.family_id}><td>{row.name}</td><td>v{row.version}</td><td>{money(row.price_cents)}</td><td>{row.duration_days} 天</td><td>{row.traffic_gb} GB</td><td>{row.max_devices} 台</td><td><StatusPill status={row.active ? '已上架' : '已下架'} tone={row.active ? 'green' : 'gray'} /></td><td><div className="row-actions"><button className="text-button" onClick={() => setPlanModal({ mode: 'detail', row })}>详情</button><button className="text-button" onClick={() => edit(row)}>编辑</button><button className="text-button" onClick={() => void changeStatus(row)}>{row.active ? '下架' : '上架'}</button></div></td></tr>)}</tbody></table></div>}
     </section>
     {planModal && <Modal title={planModal.mode === 'create' ? '创建套餐' : planModal.mode === 'edit' ? '编辑套餐 · 发布新版本' : '套餐详情'} detail={planModal.mode === 'detail' ? '当前版本与权益配置' : '仅影响本地演示目录'} onClose={() => setPlanModal(null)} wide={planModal.mode !== 'detail'}>
       {planModal.mode === 'detail' ? <><dl className="detail-grid">
         <div><dt>套餐名称</dt><dd>{planModal.row.name}</dd></div><div><dt>周期说明</dt><dd>{planModal.row.period_label}</dd></div>
         <div><dt>当前版本</dt><dd>v{planModal.row.version}</dd></div><div><dt>上架状态</dt><dd>{planModal.row.active ? '已上架' : '已下架'}</dd></div>
         <div><dt>有效期限</dt><dd>{planModal.row.duration_days} 天</dd></div><div><dt>价格</dt><dd>{money(planModal.row.price_cents)}</dd></div>
-        <div><dt>套餐流量</dt><dd>{planModal.row.traffic_gb} GB</dd></div><div><dt>同时在线设备</dt><dd>{planModal.row.max_devices} 台</dd></div>
+        <div><dt>套餐流量</dt><dd>{planModal.row.traffic_gb} GB</dd></div><div><dt>可登记设备上限</dt><dd>{planModal.row.max_devices} 台</dd></div>
       </dl><div className="modal-actions"><button className="secondary-button" onClick={() => setPlanModal(null)}>关闭</button><button className="primary-button" onClick={() => edit(planModal.row)}>编辑套餐</button></div></> :
       <form className="plan-editor" onSubmit={save}>
         <label>套餐名称<input required maxLength={60} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
@@ -615,7 +683,7 @@ function AdminPlansPage({ notify }: { notify: (value: string) => void }) {
         <label>有效天数<input required type="number" min="1" max="3650" step="1" value={form.duration_days} onChange={event => setForm({ ...form, duration_days: event.target.value })} /></label>
         <label>价格（元）<input required type="number" min="0" max="999999" step="0.01" value={form.price_yuan} onChange={event => setForm({ ...form, price_yuan: event.target.value })} /></label>
         <label>流量（GB）<input required type="number" min="1" max="100000" step="0.1" value={form.traffic_gb} onChange={event => setForm({ ...form, traffic_gb: event.target.value })} /></label>
-        <label>同时在线设备<input required type="number" min="1" max="100" step="1" value={form.max_devices} onChange={event => setForm({ ...form, max_devices: event.target.value })} /></label>
+        <label>可登记设备上限<input required type="number" min="1" max="100" step="1" value={form.max_devices} onChange={event => setForm({ ...form, max_devices: event.target.value })} /></label>
         <div className="plan-editor-actions"><button type="button" className="secondary-button" onClick={() => setPlanModal(null)}>取消</button><button className="primary-button" disabled={busy}>{planModal.mode === 'edit' ? '发布新版本' : '创建套餐'}</button></div>
       </form>}
     </Modal>}

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ClientCatalogController;
+use App\Http\Controllers\MemberDeviceController;
 use App\Http\Controllers\NodeAutomationController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PlatformController;
@@ -25,6 +26,9 @@ Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
     Route::post('/orders', [OrderController::class, 'create'])->middleware('throttle:20,1');
     Route::post('/orders/{id}/cancel', [OrderController::class, 'cancel']);
     Route::post('/orders/{id}/sandbox-payment', [SandboxPaymentController::class, 'simulate'])->middleware('throttle:10,1');
+    Route::get('/devices', [MemberDeviceController::class, 'index']);
+    Route::post('/devices', [MemberDeviceController::class, 'store'])->middleware('throttle:10,1');
+    Route::delete('/devices/{id}', [MemberDeviceController::class, 'destroy']);
     Route::get('/subscriptions', [PlatformController::class, 'subscriptions']);
     Route::post('/subscriptions', [PlatformController::class, 'createSubscription']);
     Route::post('/subscriptions/{id}/rotate', [PlatformController::class, 'rotateSubscription']);
