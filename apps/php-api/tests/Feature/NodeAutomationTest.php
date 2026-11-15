@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\NodeAutomation;
 use App\Services\NodeProviderRegistry;
 use App\Services\NodeProviders\AwsNodeProvider;
+use App\Services\SubscriptionRouteService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -44,6 +45,26 @@ class NodeAutomationTest extends TestCase
     private function createDeployment(): object
     {
         return app(NodeAutomation::class)->create($this->input(), 'user-admin');
+    }
+
+    private function publishTestRoute(string $nodeId): string
+    {
+        $id = $this->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'test', 'node_ids' => [$nodeId],
+        ])->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/admin/subscription-routes/'.$id.'/canary', ['percent' => 100])->assertOk();
+        $this->postJson('/api/v1/admin/subscription-routes/'.$id.'/publish')->assertOk();
+
+        return $id;
+    }
+
+    private function markDeploymentNodeAvailable(object $deployment): void
+    {
+        DB::table('node_deployments')->where('id', $deployment->id)->update(['phase' => 'available']);
+        DB::table('nodes')->where('id', $deployment->node_id)->update([
+            'status' => 'available', 'health_status' => 'verified_test',
+            'last_health_check_at' => now()->toIso8601String(),
+        ]);
     }
 
     private function mockAwsProvider(): MockInterface
@@ -281,6 +302,48 @@ class NodeAutomationTest extends TestCase
         $service->reconcile();
         $service->reconcile();
         $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'releasing', 'released_at' => null]);
+    }
+
+    public function test_node_in_an_active_route_must_be_replaced_before_retirement(): void
+    {
+        $row = $this->createDeployment();
+        $this->markDeploymentNodeAvailable($row);
+        $this->admin();
+        $this->publishTestRoute($row->node_id);
+
+        $this->postJson('/api/v1/admin/node-deployments/'.$row->id.'/retire', ['confirmation' => '永久下架并释放'])
+            ->assertStatus(409)
+            ->assertJsonPath('message', '当前已发布或灰度线路仍引用此节点，请先发布不包含该节点的新线路');
+
+        $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'available', 'release_requested_at' => null]);
+        $this->assertDatabaseHas('nodes', ['id' => $row->node_id, 'status' => 'available']);
+    }
+
+    public function test_node_release_waits_for_the_replaced_route_drain_to_retire(): void
+    {
+        config(['node_automation.drain_seconds' => 60, 'subscription_routes.drain_seconds' => 60]);
+        $row = $this->createDeployment();
+        $this->markDeploymentNodeAvailable($row);
+        $this->admin();
+        $oldRouteId = $this->publishTestRoute($row->node_id);
+        $this->publishTestRoute('node-test-1');
+        $this->postJson('/api/v1/admin/node-deployments/'.$row->id.'/retire', ['confirmation' => '永久下架并释放'])
+            ->assertStatus(202)->assertJsonPath('data.phase', 'draining');
+
+        $this->travel(61)->seconds();
+        app(NodeAutomation::class)->reconcile();
+
+        $this->assertDatabaseHas('subscription_route_versions', ['id' => $oldRouteId, 'status' => 'draining']);
+        $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'draining']);
+
+        $this->assertGreaterThanOrEqual(1, app(SubscriptionRouteService::class)->reconcile());
+        $this->travel(61)->seconds();
+        app(NodeAutomation::class)->reconcile();
+        $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'releasing']);
+
+        $this->mockAwsProvider()->shouldReceive('release')->once()->with(\Mockery::any())->andReturn(['state' => 'released']);
+        app(NodeAutomation::class)->reconcile();
+        $this->assertDatabaseHas('node_deployments', ['id' => $row->id, 'phase' => 'released']);
     }
 
     public function test_expiry_reclaims_even_when_new_creation_disabled_and_retire_is_idempotent(): void

@@ -69,6 +69,54 @@ class SubscriptionRouteTest extends TestCase
         ])->assertStatus(422)->assertJsonPath('error.code', 'route_nodes_not_ready');
     }
 
+    public function test_route_rejects_nodes_with_stale_health_checks(): void
+    {
+        $this->actingAs(User::findOrFail('user-admin'));
+        $staleAt = now()->subSeconds(301)->toIso8601String();
+        DB::table('nodes')->where('id', 'node-test-1')->update(['last_health_check_at' => $staleAt]);
+
+        $this->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'test', 'node_ids' => ['node-test-1'],
+        ])->assertStatus(422)->assertJsonPath('error.code', 'route_nodes_not_ready');
+    }
+
+    public function test_first_production_route_cannot_start_a_partial_canary(): void
+    {
+        $this->actingAs(User::findOrFail('user-admin'));
+        DB::table('nodes')->insert([
+            'id' => 'node-production-1', 'name' => '生产候选节点', 'region' => '测试区域', 'protocol' => 'SS2022',
+            'endpoint_host' => '198.51.100.12', 'endpoint_port' => 18443, 'status' => 'available', 'is_test' => false,
+            'max_sessions' => 100, 'active_sessions' => 0, 'latency_ms' => 42, 'health_status' => 'healthy',
+            'last_health_check_at' => now()->toIso8601String(), 'config_version' => 1, 'updated_at' => now()->toIso8601String(),
+        ]);
+
+        $id = $this->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'production', 'node_ids' => ['node-production-1'],
+        ])->assertCreated()->json('data.id');
+
+        $this->postJson('/api/v1/admin/subscription-routes/'.$id.'/canary', ['percent' => 25])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'route_transition_invalid');
+
+        $this->assertDatabaseHas('subscription_route_versions', ['id' => $id, 'status' => 'draft']);
+
+        DB::table('subscription_route_versions')->where('id', $id)->update([
+            'status' => 'canary', 'canary_percent' => 25,
+        ]);
+        $this->assertNull(app(SubscriptionRouteService::class)->resolve('user-member', 'production'));
+    }
+
+    public function test_subscription_omits_nodes_with_stale_health_checks(): void
+    {
+        $this->actingAs(User::findOrFail('user-member'));
+        $url = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data.url');
+        DB::table('nodes')->where('id', 'node-test-1')->update([
+            'last_health_check_at' => now()->subSeconds(301)->toIso8601String(),
+        ]);
+
+        $this->get($url)->assertNotFound();
+    }
+
     public function test_subscription_uses_published_route_and_not_a_free_floating_node(): void
     {
         $this->actingAs(User::findOrFail('user-member'));

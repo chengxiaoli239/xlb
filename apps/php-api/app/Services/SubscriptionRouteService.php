@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -67,6 +68,9 @@ class SubscriptionRouteService
             $nodes = $this->routeNodes($id, true);
             $this->assertNodesReady($nodes, $version->scope, $nodes->pluck('id')->all());
             $previous = DB::table('subscription_route_versions')->where('scope', $version->scope)->where('status', 'published')->orderByDesc('version')->first();
+            if (! $previous) {
+                throw new RuntimeException('当前范围没有已发布稳定线路，首次上线请使用全量发布，不能启动灰度', 409);
+            }
             $now = now()->toIso8601String();
             DB::table('subscription_route_versions')->where('id', $id)->update([
                 'status' => 'canary', 'canary_percent' => $percent, 'previous_version_id' => $version->previous_version_id ?: ($previous?->id),
@@ -133,7 +137,7 @@ class SubscriptionRouteService
         $published = DB::table('subscription_route_versions')->where('scope', $scope)->where('status', 'published')->orderByDesc('version')->first();
         $canary = DB::table('subscription_route_versions')->where('scope', $scope)->where('status', 'canary')->orderByDesc('version')->first();
         $selected = $published;
-        if ($canary && (! $published || $this->bucket($userId, $canary->id) < (int) $canary->canary_percent)) {
+        if ($canary && $published && $this->bucket($userId, $canary->id) < (int) $canary->canary_percent) {
             $selected = $canary;
         }
         if (! $selected) {
@@ -143,7 +147,8 @@ class SubscriptionRouteService
         $nodes = DB::table('nodes as n')->join('subscription_route_nodes as rn', 'rn.node_id', '=', 'n.id')
             ->where('rn.route_version_id', $selected->id)->where('n.status', 'available')->whereIn('n.health_status', $healthyStatuses)
             ->orderByDesc('rn.weight')->orderBy('n.id')
-            ->get(['n.id', 'n.name', 'n.endpoint_host', 'n.endpoint_port']);
+            ->get(['n.id', 'n.name', 'n.endpoint_host', 'n.endpoint_port', 'n.last_health_check_at'])
+            ->filter(fn (object $node): bool => $this->hasFreshHealthCheck($node->last_health_check_at));
 
         return $nodes->isEmpty() ? null : ['version' => $selected, 'nodes' => $nodes->all()];
     }
@@ -189,9 +194,25 @@ class SubscriptionRouteService
         foreach ($rows as $node) {
             $healthyStatuses = $scope === 'production' ? ['healthy'] : ['verified_test', 'healthy'];
             if ($node->status !== 'available' || ! in_array($node->health_status, $healthyStatuses, true)
+                || ! $this->hasFreshHealthCheck($node->last_health_check_at)
                 || ($scope === 'production' && (bool) $node->is_test) || ($scope === 'test' && ! (bool) $node->is_test)) {
                 throw new RuntimeException('线路节点尚未通过范围和健康校验', 422);
             }
+        }
+    }
+
+    private function hasFreshHealthCheck(?string $lastHealthCheckAt): bool
+    {
+        if (! $lastHealthCheckAt) {
+            return false;
+        }
+
+        try {
+            return Carbon::parse($lastHealthCheckAt)->greaterThanOrEqualTo(
+                now()->subSeconds(max(1, (int) config('subscription_routes.health_check_ttl_seconds', 300)))
+            );
+        } catch (\Throwable) {
+            return false;
         }
     }
 

@@ -74,8 +74,19 @@ class NodeAutomation
             if ($row->phase === 'released' || $row->release_requested_at) {
                 return $row;
             }
-            $this->requestRelease($row, '管理员申请永久下架；停止提供测试配置，等待排空后释放整栈');
-            $this->audit($id, $actor, 'node.release_requested');
+
+            DB::transaction(function () use ($row, $id, $actor): void {
+                $node = DB::table('nodes')->where('id', $row->node_id)->lockForUpdate()->first();
+                abort_unless($node, 404, '云节点对应的节点目录记录不存在');
+                abort_if(
+                    $this->hasRouteReferenceInStatuses($row->node_id, ['published', 'canary']),
+                    409,
+                    '当前已发布或灰度线路仍引用此节点，请先发布不包含该节点的新线路'
+                );
+
+                $this->requestRelease($row, '管理员申请永久下架；停止提供测试配置，等待排空后释放整栈');
+                $this->audit($id, $actor, 'node.release_requested');
+            });
 
             return $this->find($id);
         });
@@ -124,6 +135,14 @@ class NodeAutomation
     {
         if ($row->phase === 'draining') {
             if (now()->lessThan($row->release_not_before)) {
+                return;
+            }
+            if ($this->hasRouteReferenceInStatuses($row->node_id, ['published', 'canary', 'draining'])) {
+                if (! $row->next_attempt_at) {
+                    $this->event($row->id, 'draining', '等待引用此节点的订阅线路排空并退役后再释放云资源');
+                }
+                $this->update($row->id, ['next_attempt_at' => now()->addMinute()->toIso8601String()]);
+
                 return;
             }
             $this->transition($row, 'releasing', '开始释放服务器、磁盘、安全组、测试凭据及到期任务');
@@ -238,6 +257,14 @@ class NodeAutomation
     private function audit(string $id, string $actor, string $action): void
     {
         DB::table('audit_logs')->insert(['id' => (string) Str::uuid(), 'actor_user_id' => $actor, 'action' => $action, 'target_type' => 'node_deployment', 'target_id' => $id, 'created_at' => now()->toIso8601String()]);
+    }
+
+    /** @param array<int, string> $statuses */
+    private function hasRouteReferenceInStatuses(string $nodeId, array $statuses): bool
+    {
+        return DB::table('subscription_route_nodes as rn')
+            ->join('subscription_route_versions as v', 'v.id', '=', 'rn.route_version_id')
+            ->where('rn.node_id', $nodeId)->whereIn('v.status', $statuses)->exists();
     }
 
     public function find(string $id): object
