@@ -31,3 +31,11 @@ Release 构建的默认 API 地址是保留的 `https://api.xlb.invalid`，在�
 ## 验收边界
 
 本阶段只验收登录、Keystore 会话保存、稳定安装 ID、设备登记和心跳回报。账户回报成功不代表 VPN 已连接，也不代表节点握手、DNS、UDP、流量计量或退款撤权已经完成。下一阶段接入 `VpnService` 授权和 Mihomo Android 内核前，需要先固定订阅格式、节点鉴权和断线恢复契约。
+
+## 真机验收（2026-11-16）
+
+- 设备：Honor ALT-AN00；Debug 包 `com.xlb.vpn.debug`，应用版本 `0.1.0-debug`，API 回报版本 `0.1.0`。
+- 密码输入框经 UIAutomator 验证 `password=true`，无障碍文本为掩码；荣耀密码管理器的保存提示选择了取消。
+- 本地演示会员登录成功，设备名额显示 `1 / 5`，权益有效；本地 API 数据库记录平台 `android`、客户端版本 `0.1.0` 和 `last_seen_at`。
+- 强制停止并重新打开 App 后，会话仍有效，应用自动刷新设备心跳。
+- 本次只证明账户、设备登记和心跳链路可用；当前仍没有 `VpnService`、Mihomo 内核、逐设备节点凭证、真实隧道、DNS/UDP 或流量计量。
