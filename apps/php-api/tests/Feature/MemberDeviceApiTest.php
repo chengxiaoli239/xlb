@@ -170,4 +170,76 @@ class MemberDeviceApiTest extends TestCase
             'platform' => 'android',
         ])->assertUnauthorized();
     }
+
+    public function test_registered_client_can_report_version_and_last_seen_without_claiming_a_vpn_connection(): void
+    {
+        $this->actingAs(User::findOrFail('user-member'));
+        $installationId = '778f705a-c8cb-46cf-8c63-cb02aad93c3e';
+        $deviceId = $this->postJson('/api/v1/me/devices', [
+            'installation_id' => $installationId,
+            'name' => 'Android 手机',
+            'platform' => 'android',
+        ])->assertCreated()->json('data.id');
+
+        $this->postJson('/api/v1/client/heartbeat', [
+            'installation_id' => $installationId,
+            'client_version' => '1.2.3',
+        ])->assertOk()
+            ->assertJsonPath('data.device_id', $deviceId)
+            ->assertJsonPath('data.client_version', '1.2.3')
+            ->assertJsonMissingPath('data.connected')
+            ->assertJsonStructure(['data' => ['device_id', 'last_seen_at', 'client_version']]);
+
+        $this->assertDatabaseHas('member_devices', [
+            'id' => $deviceId,
+            'client_version' => '1.2.3',
+        ]);
+        $this->assertNotNull(DB::table('member_devices')->where('id', $deviceId)->value('last_seen_at'));
+        $this->getJson('/api/v1/me/devices')
+            ->assertJsonPath('data.devices.0.client_version', '1.2.3');
+    }
+
+    public function test_heartbeat_is_scoped_to_registered_devices_and_rejects_revoked_devices(): void
+    {
+        $this->actingAs(User::findOrFail('user-member'));
+        $installationId = '778f705a-c8cb-46cf-8c63-cb02aad93c3e';
+        $deviceId = $this->postJson('/api/v1/me/devices', [
+            'installation_id' => $installationId,
+            'name' => 'Android 手机',
+            'platform' => 'android',
+        ])->assertCreated()->json('data.id');
+        $otherMember = User::factory()->create([
+            'id' => 'user-other-member',
+            'role' => 'member',
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($otherMember);
+        $this->postJson('/api/v1/client/heartbeat', [
+            'installation_id' => $installationId,
+            'client_version' => '1.2.3',
+        ])->assertNotFound();
+
+        $this->actingAs(User::findOrFail('user-member'));
+        $this->deleteJson('/api/v1/me/devices/'.$deviceId)->assertNoContent();
+        $this->postJson('/api/v1/client/heartbeat', [
+            'installation_id' => $installationId,
+            'client_version' => '1.2.4',
+        ])->assertNotFound();
+    }
+
+    public function test_heartbeat_requires_session_and_a_valid_client_version(): void
+    {
+        $payload = [
+            'installation_id' => '778f705a-c8cb-46cf-8c63-cb02aad93c3e',
+            'client_version' => '1.2.3',
+        ];
+
+        $this->postJson('/api/v1/client/heartbeat', $payload)->assertUnauthorized();
+
+        $this->actingAs(User::findOrFail('user-member'));
+        $this->postJson('/api/v1/client/heartbeat', [...$payload, 'client_version' => '   '])
+            ->assertStatus(400)
+            ->assertJsonPath('error.code', 'validation_error');
+    }
 }

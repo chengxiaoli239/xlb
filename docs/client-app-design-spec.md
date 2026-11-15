@@ -51,14 +51,14 @@
 
 客户端只访问业务 API，不持有云厂商密钥和节点管理权限：
 
-- `POST /api/v1/auth/login`：登录并返回会话。
+- `POST /api/v1/auth/login`：登录并返回会话。自有客户端保留 session cookie；写请求先取 `/api/v1/auth/csrf` 并发送 `X-CSRF-TOKEN`，cookie 应保存在平台安全存储中。
 - `GET /api/v1/me/overview`：账户、权益、流量、设备摘要。
 - `GET /api/v1/me/subscriptions`：固定订阅凭证列表。
 - `POST /api/v1/me/subscriptions`：幂等获取固定订阅；已存在有效凭证时返回原凭证。
 - `POST /api/v1/me/subscriptions/{id}/rotate`：轮换并立即撤销旧凭证。
 - `GET /api/v1/me/clients`：客户端目录、版本、下载源、二维码和教程地址。
 - `GET /subscribe/{token}`：返回经会员权益和节点策略过滤后的 Clash/Mihomo 配置。
-- `POST /api/v1/client/heartbeat`：上报客户端版本、平台、设备摘要和连接状态，不上传明文订阅 token。
+- `POST /api/v1/client/heartbeat`：会话认证后，按已登记的 `installation_id` 上报客户端版本和最近出现时间，不接收连接状态，也不上传明文订阅 token。该回报只证明客户端请求到达控制面，不证明节点握手或 VPN 已连接。
 
 订阅配置接口需要支持 `User-Agent`、客户端格式和版本协商，并返回配置版本、过期时间、节点列表和策略组。节点真实开放前必须接入用户鉴权、流量计量和健康检查。
 

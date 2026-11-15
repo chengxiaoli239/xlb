@@ -23,7 +23,7 @@ class MemberDeviceController extends Controller
             ->where('user_id', $userId)
             ->where('status', 'registered')
             ->orderByDesc('created_at')
-            ->get(['id', 'installation_id', 'name', 'platform', 'status', 'created_at', 'revoked_at'])
+            ->get(['id', 'installation_id', 'name', 'platform', 'status', 'created_at', 'revoked_at', 'client_version', 'last_seen_at'])
             ->map(fn (object $device): array => $this->present($device))
             ->all();
         $registeredCount = count($devices);
@@ -36,6 +36,55 @@ class MemberDeviceController extends Controller
             'available_slots' => max(0, $maxDevices - $registeredCount),
             'devices' => $devices,
         ]])->header('Cache-Control', 'no-store, private');
+    }
+
+    public function heartbeat(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'installation_id' => ['required', 'uuid'],
+            'client_version' => ['required', 'string', 'max:40', 'regex:/\S/u'],
+        ]);
+        if ($validator->fails()) {
+            return $this->error('validation_error', '请检查设备标识和客户端版本', 400);
+        }
+
+        $attributes = $validator->validated();
+        $installationId = strtolower($attributes['installation_id']);
+        $clientVersion = trim($attributes['client_version']);
+        if ($clientVersion === '') {
+            return $this->error('validation_error', '客户端版本不能为空', 400);
+        }
+
+        $result = DB::transaction(function () use ($request, $installationId, $clientVersion): array {
+            $device = DB::table('member_devices')
+                ->where('user_id', $request->user()->id)
+                ->where('installation_id', $installationId)
+                ->where('status', 'registered')
+                ->lockForUpdate()
+                ->first(['id']);
+            if (! $device) {
+                return ['error' => ['code' => 'not_found', 'message' => '设备未登记或已移除']];
+            }
+
+            $lastSeenAt = now()->utc()->toIso8601String();
+            DB::table('member_devices')->where('id', $device->id)->update([
+                'client_version' => $clientVersion,
+                'last_seen_at' => $lastSeenAt,
+                'updated_at' => $lastSeenAt,
+            ]);
+
+            return ['data' => [
+                'device_id' => $device->id,
+                'client_version' => $clientVersion,
+                'last_seen_at' => $lastSeenAt,
+            ]];
+        }, 3);
+
+        if (isset($result['error'])) {
+            return $this->error($result['error']['code'], $result['error']['message'], 404);
+        }
+
+        return response()->json(['data' => $result['data']])->header('Cache-Control', 'no-store, private');
     }
 
     public function store(Request $request): JsonResponse
@@ -176,7 +225,7 @@ class MemberDeviceController extends Controller
             ->first(['e.id', 'e.ends_at', 'p.max_devices']);
     }
 
-    /** @return array{id:string,installation_id:string,name:string,platform:string,status:string,created_at:string,revoked_at:?string} */
+    /** @return array{id:string,installation_id:string,name:string,platform:string,status:string,created_at:string,revoked_at:?string,client_version:?string,last_seen_at:?string} */
     private function present(object $device): array
     {
         return [
@@ -187,6 +236,8 @@ class MemberDeviceController extends Controller
             'status' => $device->status,
             'created_at' => $device->created_at,
             'revoked_at' => $device->revoked_at,
+            'client_version' => $device->client_version,
+            'last_seen_at' => $device->last_seen_at,
         ];
     }
 

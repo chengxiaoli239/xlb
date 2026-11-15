@@ -23,7 +23,7 @@ type NodeDetail = Node & { changes: Array<{ id: string; from_status: NodeStatus;
 type RouteVersion = { id: string; scope: 'test' | 'production'; version: number; status: string; canary_percent: number; previous_version_id: string | null; note: string | null; drain_until: string | null; published_at: string | null; nodes: Array<{ id: string; name: string; region: string; status: string; is_test: boolean; health_status: string; weight: number }> };
 type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
 type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string | null; last_used_at: string | null; url: string | null };
-type MemberDevice = { id: string; installation_id: string; name: string; platform: ClientPlatform; status: 'registered'; created_at: string; revoked_at: string | null };
+type MemberDevice = { id: string; installation_id: string; name: string; platform: ClientPlatform | 'other'; status: 'registered'; created_at: string; revoked_at: string | null; client_version: string | null; last_seen_at: string | null };
 type MemberDeviceSummary = { entitlement_active: boolean; max_devices: number; registered_count: number; available_slots: number; devices: MemberDevice[] };
 type ClientPlatform = 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'browser';
 type ClientCompatibility = 'pending' | 'verified' | 'maintenance' | 'unsupported';
@@ -503,11 +503,11 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
       <SectionTitle title="设备登记" detail={deviceSummary ? `${deviceSummary.registered_count} / ${deviceSummary.max_devices} 个名额` : '读取中'} action={<button className="primary-button" disabled={!deviceSummary?.entitlement_active || !deviceSummary.available_slots || deviceBusy} onClick={openDeviceModal}><Smartphone size={15} /> 登记设备</button>} />
       {!deviceSummary ? <LoadingBlock /> : <>
         <div className="device-quota"><span>剩余名额 <b>{deviceSummary.available_slots}</b></span><span>可登记设备上限 {deviceSummary.max_devices} 台</span></div>
-        <div className="notice notice-neutral"><ShieldCheck size={16} /><span>设备登记只占用会员名额，不代表 VPN 已连接或已分配真实节点凭证。Clash Verge Rev 等第三方客户端不会向本平台回报在线状态。</span></div>
-        {!deviceSummary.devices.length ? <Empty title="暂无登记设备" detail={deviceSummary.entitlement_active ? '登记常用设备后，可在此查看和移除。' : '购买有效套餐后即可登记设备。'} /> : <div className="table-wrap"><table><thead><tr><th>设备</th><th>平台</th><th>登记状态</th><th>登记时间</th><th>操作</th></tr></thead><tbody>{deviceSummary.devices.map(device => {
+        <div className="notice notice-neutral"><ShieldCheck size={16} /><span>设备登记不代表 VPN 已连接。自有客户端回报只更新版本和最近出现时间，不验证节点握手；Clash Verge Rev 等第三方客户端不会向本平台回报在线状态。</span></div>
+        {!deviceSummary.devices.length ? <Empty title="暂无登记设备" detail={deviceSummary.entitlement_active ? '登记常用设备后，可在此查看和移除。' : '购买有效套餐后即可登记设备。'} /> : <div className="table-wrap"><table><thead><tr><th>设备</th><th>平台</th><th>登记状态</th><th>客户端回报</th><th>登记时间</th><th>操作</th></tr></thead><tbody>{deviceSummary.devices.map(device => {
           const platform = clientPlatforms.find(item => item.id === device.platform);
           const Icon = platform?.icon ?? Monitor;
-          return <tr key={device.id}><td><span className="table-main"><Icon size={16} />{device.name}</span></td><td>{platform?.label ?? device.platform}</td><td><StatusPill status="已登记" tone="green" /></td><td>{dateTime(device.created_at)}</td><td><button className="text-button danger-text" onClick={() => setDeviceRemovalTarget(device)}><X size={14} /> 移除</button></td></tr>;
+          return <tr key={device.id}><td><span className="table-main"><Icon size={16} />{device.name}</span></td><td>{platform?.label ?? device.platform}</td><td><StatusPill status="已登记" tone="green" /></td><td>{device.last_seen_at ? <><span>{dateTime(device.last_seen_at)}</span><small className="table-sub">版本 {device.client_version ?? '未上报'}</small></> : <span>尚未回报</span>}</td><td>{dateTime(device.created_at)}</td><td><button className="text-button danger-text" onClick={() => setDeviceRemovalTarget(device)}><X size={14} /> 移除</button></td></tr>;
         })}</tbody></table></div>}
       </>}
     </section>
