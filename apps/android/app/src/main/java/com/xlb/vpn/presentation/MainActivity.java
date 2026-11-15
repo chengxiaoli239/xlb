@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
+import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -266,12 +267,15 @@ public final class MainActivity extends Activity {
 
     private EditText input(String hint, int type) {
         EditText input = new EditText(this);
+        input.setSingleLine(true);
         input.setInputType(type);
+        if ((type & InputType.TYPE_TEXT_VARIATION_PASSWORD) != 0) {
+            input.setTransformationMethod(PasswordTransformationMethod.getInstance());
+        }
         input.setHint(hint);
         input.setTextSize(16f);
         input.setTextColor(COLOR_INK);
         input.setHintTextColor(COLOR_HINT);
-        input.setSingleLine(true);
         input.setPadding(dp(14), 0, dp(14), 0);
         input.setBackground(rounded(Color.WHITE, dp(12), COLOR_BORDER));
         input.setMinHeight(dp(54));
