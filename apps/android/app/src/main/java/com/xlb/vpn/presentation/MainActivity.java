@@ -1,6 +1,7 @@
 package com.xlb.vpn.presentation;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.BroadcastReceiver;
@@ -400,7 +401,18 @@ public final class MainActivity extends Activity {
                     row.addView(tag);
                 }
                 deviceCard.addView(row, spacedParams(14, 0));
-                deviceCard.addView(text(platformName(device.platform), 13, COLOR_MUTED, false));
+                LinearLayout deviceActions = new LinearLayout(this);
+                deviceActions.setOrientation(LinearLayout.HORIZONTAL);
+                deviceActions.setGravity(Gravity.CENTER_VERTICAL);
+                deviceActions.addView(text(platformName(device.platform), 13, COLOR_MUTED, false),
+                        new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                Button remove = textButton("移除");
+                remove.setTextSize(13f);
+                remove.setMinHeight(dp(36));
+                remove.setEnabled(!busy);
+                remove.setOnClickListener(view -> confirmDeviceRemoval(current.account, device));
+                deviceActions.addView(remove);
+                deviceCard.addView(deviceActions);
             }
             if (!thisPhoneListed) {
                 String hint = !current.device.entitlementActive ? "当前没有有效套餐，暂不能添加设备。" :
@@ -409,6 +421,76 @@ public final class MainActivity extends Activity {
             }
         }
         content.addView(deviceCard, spacedParams(0, 16));
+    }
+
+    private void confirmDeviceRemoval(PlatformApi.MemberAccount account, PlatformApi.RegisteredDevice device) {
+        if (busy) return;
+        String detail = device.current ?
+                "移除本机会断开 VPN 并退出登录。重新登录后会作为新设备加入。" :
+                "移除后，这台设备将不再占用套餐名额。";
+        new AlertDialog.Builder(this)
+                .setTitle("移除" + device.name + "？")
+                .setMessage(detail)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("确认移除", (dialog, which) -> removeDevice(account, device))
+                .show();
+    }
+
+    private void removeDevice(PlatformApi.MemberAccount account, PlatformApi.RegisteredDevice device) {
+        if (busy) return;
+        busy = true;
+        showMessage("正在移除设备…", false);
+        worker.execute(() -> {
+            boolean removed = false;
+            boolean localResetFailed = false;
+            PlatformApi.ClientSnapshot updated = null;
+            String failure = null;
+            try {
+                api.removeDevice(device.id);
+                removed = true;
+                if (device.current) {
+                    mainHandler.post(() -> startService(new Intent(this, XlbVpnService.class)
+                            .setAction(XlbVpnService.ACTION_STOP)));
+                    try {
+                        api.rotateInstallationId();
+                    } catch (RuntimeException exception) {
+                        localResetFailed = true;
+                    }
+                    try {
+                        api.logout();
+                    } catch (PlatformApi.PlatformApiException ignored) {
+                        // logout always clears the local session, even if the server is unavailable.
+                    } catch (RuntimeException exception) {
+                        localResetFailed = true;
+                    }
+                } else {
+                    updated = api.loadDevices(account);
+                }
+            } catch (PlatformApi.PlatformApiException exception) {
+                failure = exception.getMessage();
+            }
+            boolean confirmedRemoved = removed;
+            boolean needsReinstall = localResetFailed;
+            PlatformApi.ClientSnapshot refreshed = updated;
+            String error = failure;
+            mainHandler.post(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                busy = false;
+                if (!confirmedRemoved) {
+                    showMessage(error == null ? "设备移除失败，请重试" : error, true);
+                    return;
+                }
+                if (device.current) {
+                    snapshot = null;
+                } else {
+                    snapshot = refreshed == null ? new PlatformApi.ClientSnapshot(account, null, null) : refreshed;
+                }
+                render();
+                String completion = needsReinstall ? "设备已移除，本地状态清理失败，请重装应用" :
+                        refreshed == null && !device.current ? "设备已移除，列表暂未刷新" : "设备已移除";
+                showMessage(completion, needsReinstall);
+            });
+        });
     }
 
     private String platformName(String platform) {

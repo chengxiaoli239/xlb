@@ -16,9 +16,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public final class PlatformApi {
-    private static final String CLIENT_VERSION = "0.2.6";
+    private static final String CLIENT_VERSION = "0.2.7";
+    private static final Pattern DEVICE_ID = Pattern.compile(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
     private final String baseUrl;
     private final SecureSessionStore sessionStore;
@@ -73,6 +76,21 @@ public final class PlatformApi {
             } catch (PlatformApiException exception) {
                 registrationMessage = exception.getMessage();
             }
+            return loadDevices(account, registrationMessage);
+        } catch (PlatformApiException exception) {
+            return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
+        } catch (Exception exception) {
+            return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
+        }
+    }
+
+    public ClientSnapshot loadDevices(MemberAccount account) throws PlatformApiException {
+        return loadDevices(account, null);
+    }
+
+    private ClientSnapshot loadDevices(MemberAccount account, String message) throws PlatformApiException {
+        try {
+            String installationId = sessionStore.installationId();
             JSONObject devices = request("GET", "/api/v1/me/devices", null).optJSONObject("data");
             if (devices == null) {
                 throw new PlatformApiException("设备列表响应格式不正确");
@@ -86,7 +104,7 @@ public final class PlatformApi {
                 JSONObject device = registered.optJSONObject(index);
                 if (device != null) {
                     String name = device.optString("name").trim();
-                    entries.add(new RegisteredDevice(name.isEmpty() ? "未命名设备" : name,
+                    entries.add(new RegisteredDevice(device.optString("id"), name.isEmpty() ? "未命名设备" : name,
                             device.optString("platform"),
                             installationId.equals(device.optString("installation_id"))));
                 }
@@ -96,12 +114,23 @@ public final class PlatformApi {
                     devices.optInt("max_devices"),
                     devices.optBoolean("entitlement_active"),
                     entries
-            ), registrationMessage);
+            ), message);
         } catch (PlatformApiException exception) {
-            return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
+            throw exception;
         } catch (Exception exception) {
-            return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
+            throw new PlatformApiException("设备列表暂不可用，请稍后重试", exception);
         }
+    }
+
+    public void removeDevice(String deviceId) throws PlatformApiException {
+        if (deviceId == null || !DEVICE_ID.matcher(deviceId).matches()) {
+            throw new PlatformApiException("设备编号无效，请刷新设备列表");
+        }
+        request("DELETE", "/api/v1/me/devices/" + deviceId, null);
+    }
+
+    public void rotateInstallationId() {
+        sessionStore.rotateInstallationId();
     }
 
     public void logout() throws PlatformApiException {
@@ -151,7 +180,10 @@ public final class PlatformApi {
             }
             storeCookies(connection.getHeaderFields());
             int statusCode = connection.getResponseCode();
-            InputStream stream = statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            InputStream stream = null;
+            if (statusCode != HttpURLConnection.HTTP_NO_CONTENT && statusCode != 205) {
+                stream = statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            }
             String responseBody = readBody(stream);
             JSONObject response = responseBody.trim().isEmpty() ? new JSONObject() : new JSONObject(responseBody);
             if (statusCode < 200 || statusCode >= 300) {
@@ -241,11 +273,13 @@ public final class PlatformApi {
     }
 
     public static final class RegisteredDevice {
+        public final String id;
         public final String name;
         public final String platform;
         public final boolean current;
 
-        public RegisteredDevice(String name, String platform, boolean current) {
+        public RegisteredDevice(String id, String name, String platform, boolean current) {
+            this.id = id;
             this.name = name;
             this.platform = platform;
             this.current = current;

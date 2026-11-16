@@ -53,6 +53,16 @@ public final class SecureSessionStore {
         return created;
     }
 
+    public synchronized void rotateInstallationId() {
+        JSONObject state = readState();
+        try {
+            state.put(INSTALLATION_ID, UUID.randomUUID().toString());
+        } catch (JSONException exception) {
+            throw new IllegalStateException("无法更新设备标识", exception);
+        }
+        writeState(state);
+    }
+
     public synchronized String cookieHeader() {
         JSONObject cookies = readState().optJSONObject(COOKIES);
         if (cookies == null) {
