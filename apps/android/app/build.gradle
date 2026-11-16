@@ -3,13 +3,14 @@ apply plugin: 'com.android.application'
 android {
     namespace 'com.xlb.vpn'
     compileSdk 35
+    ndkVersion '29.0.14206865'
 
     defaultConfig {
         applicationId 'com.xlb.vpn'
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName '0.1.0'
+        versionCode 8
+        versionName '0.2.6'
         buildConfigField 'String', 'API_BASE_URL', '"https://api.xlb.invalid"'
     }
 
@@ -30,8 +31,39 @@ android {
         }
     }
 
+    sourceSets.main.jniLibs.srcDirs += ["$buildDir/generated/mihomo"]
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+def goCoreDir = file('../core-native')
+def ndkBin = "${android.sdkDirectory}/ndk/${android.ndkVersion}/toolchains/llvm/prebuilt/darwin-x86_64/bin"
+def buildMihomoArm64 = tasks.register('buildMihomoArm64', Exec) {
+    workingDir goCoreDir
+    def outputDir = file("$buildDir/generated/mihomo/arm64-v8a")
+    outputs.file(file("$outputDir/libxlbcore.so"))
+    inputs.files(fileTree(goCoreDir) { include '*.go', '*.c', '*.h', 'go.mod', 'go.sum' })
+    doFirst { outputDir.mkdirs() }
+    environment 'CGO_ENABLED', '1'
+    environment 'GOOS', 'android'
+    environment 'GOARCH', 'arm64'
+    environment 'CC', "$ndkBin/aarch64-linux-android26-clang"
+    commandLine 'go', 'build', '-trimpath', '-buildmode=c-shared', '-tags=with_gvisor,cmfa', '-o', file("$outputDir/libxlbcore.so"), '.'
+}
+
+tasks.named('preBuild').configure { dependsOn(buildMihomoArm64) }
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    testImplementation 'junit:junit:4.13.2'
 }

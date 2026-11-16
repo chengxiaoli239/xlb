@@ -1,13 +1,18 @@
 package com.xlb.vpn.presentation;
 
 import android.app.Activity;
+import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.net.VpnService;
 import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
@@ -24,12 +29,13 @@ import android.widget.TextView;
 import com.xlb.vpn.BuildConfig;
 import com.xlb.vpn.R;
 import com.xlb.vpn.data.PlatformApi;
+import com.xlb.vpn.data.DebugProfileFetcher;
 import com.xlb.vpn.data.SecureSessionStore;
+import com.xlb.vpn.data.SubscriptionQrParser;
+import com.xlb.vpn.tunnel.XlbVpnService;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -41,9 +47,6 @@ public final class MainActivity extends Activity {
     private static final int COLOR_TEAL = Color.rgb(8, 126, 121);
     private static final int COLOR_TEAL_DARK = Color.rgb(5, 94, 91);
     private static final int COLOR_TEAL_LIGHT = Color.rgb(225, 244, 241);
-    private static final int COLOR_GREEN = Color.rgb(36, 157, 109);
-    private static final int COLOR_AMBER = Color.rgb(220, 152, 43);
-    private static final int COLOR_AMBER_DARK = Color.rgb(151, 97, 17);
     private static final int COLOR_ERROR = Color.rgb(184, 62, 62);
     private static final int COLOR_BORDER = Color.rgb(220, 229, 229);
     private static final int COLOR_NOTICE = Color.rgb(232, 240, 240);
@@ -55,7 +58,20 @@ public final class MainActivity extends Activity {
     private LinearLayout content;
     private PlatformApi.ClientSnapshot snapshot;
     private boolean busy;
+    private String pendingProfile;
+    private String tunnelState = XlbVpnService.currentState();
+    private String tunnelMessage;
+    private static final int VPN_PERMISSION_REQUEST = 91;
+    private final BroadcastReceiver tunnelReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            tunnelState = intent.getStringExtra(XlbVpnService.EXTRA_STATE);
+            tunnelMessage = intent.getStringExtra(XlbVpnService.EXTRA_MESSAGE);
+            if (snapshot != null) render();
+        }
+    };
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -63,6 +79,13 @@ public final class MainActivity extends Activity {
         getWindow().setNavigationBarColor(COLOR_CANVAS);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         api = new PlatformApi(BuildConfig.API_BASE_URL, new SecureSessionStore(this));
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(tunnelReceiver, new IntentFilter(XlbVpnService.ACTION_STATE),
+                    XlbVpnService.INTERNAL_PERMISSION, null, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(tunnelReceiver, new IntentFilter(XlbVpnService.ACTION_STATE),
+                    XlbVpnService.INTERNAL_PERMISSION, null);
+        }
         renderLoading();
         worker.execute(() -> {
             PlatformApi.ClientSnapshot result = null;
@@ -86,13 +109,39 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        unregisterReceiver(tunnelReceiver);
+        pendingProfile = null;
         worker.shutdownNow();
         super.onDestroy();
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == IntentIntegrator.REQUEST_CODE) {
+            IntentResult scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+            if (scan != null && scan.getContents() != null) {
+                try {
+                    importSubscription(SubscriptionQrParser.subscriptionUrl(scan.getContents()));
+                } catch (DebugProfileFetcher.ProfileException exception) {
+                    showMessage(exception.getMessage(), true);
+                }
+            }
+            return;
+        }
+        if (requestCode != VPN_PERMISSION_REQUEST) return;
+        String profile = pendingProfile;
+        pendingProfile = null;
+        if (resultCode != RESULT_OK || profile == null) {
+            showMessage("VPN 授权未完成", true);
+            return;
+        }
+        startVpn(profile);
+    }
+
     private void renderLoading() {
         setPage();
-        TextView loading = text("正在安全检查登录状态…", 16, COLOR_MUTED, false);
+        TextView loading = text("正在打开迅连宝…", 16, COLOR_MUTED, false);
         loading.setGravity(Gravity.CENTER);
         loading.setPadding(0, dp(90), 0, dp(90));
         content.addView(loading);
@@ -148,7 +197,7 @@ public final class MainActivity extends Activity {
 
     private void renderLoginForm() {
         content.addView(text("登录账户", 27, COLOR_INK, true));
-        TextView subtitle = text("登录后自动登记此手机并同步客户端版本。", 15, COLOR_MUTED, false);
+        TextView subtitle = text("登录后查看连接状态和已使用的设备。", 15, COLOR_MUTED, false);
         subtitle.setPadding(0, dp(7), 0, dp(21));
         content.addView(subtitle);
 
@@ -159,7 +208,7 @@ public final class MainActivity extends Activity {
         card.addView(text("登录密码", 13, COLOR_INK, true));
         EditText password = input("输入账户密码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         card.addView(password, spacedParams(7, 19));
-        Button login = primaryButton("登录并同步设备");
+        Button login = primaryButton("登录");
         login.setOnClickListener(view -> {
             String emailValue = email.getText().toString().trim();
             String passwordValue = password.getText().toString();
@@ -168,7 +217,7 @@ public final class MainActivity extends Activity {
                 return;
             }
             hideKeyboard(password);
-            perform("正在登录并登记设备…", false, () -> {
+            perform("正在登录…", false, () -> {
                 PlatformApi.MemberAccount account = api.login(emailValue, passwordValue);
                 return api.synchronize(account);
             });
@@ -184,59 +233,122 @@ public final class MainActivity extends Activity {
         email.setPadding(0, dp(5), 0, dp(18));
         content.addView(email);
 
-        LinearLayout stateCard = card();
-        LinearLayout stateRow = new LinearLayout(this);
-        stateRow.setOrientation(LinearLayout.HORIZONTAL);
-        stateRow.setGravity(Gravity.CENTER_VERTICAL);
-        View dot = new View(this);
-        dot.setBackground(rounded(current.device == null ? COLOR_AMBER : COLOR_GREEN, dp(20), null));
-        stateRow.addView(dot, new LinearLayout.LayoutParams(dp(10), dp(10)));
-        TextView state = text(current.device == null ? "设备同步待处理" : "账户已同步", 17, COLOR_INK, true);
-        LinearLayout.LayoutParams stateParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        stateParams.setMarginStart(dp(10));
-        stateRow.addView(state, stateParams);
-        stateCard.addView(stateRow);
-        stateCard.addView(text(current.message == null ? "设备登记和客户端版本回报已完成" : current.message, 14,
-                current.message == null ? COLOR_MUTED : COLOR_AMBER_DARK, false));
-        TextView message = (TextView) stateCard.getChildAt(1);
-        message.setPadding(dp(20), dp(8), 0, 0);
-        content.addView(stateCard, spacedParams(0, 12));
-
-        LinearLayout deviceCard = card();
-        deviceCard.addView(text("本机设备", 13, COLOR_MUTED, true));
-        TextView model = text(current.device == null ? android.os.Build.MODEL : current.device.deviceName, 19, COLOR_INK, true);
-        model.setPadding(0, dp(6), 0, dp(10));
-        deviceCard.addView(model);
-        if (current.device != null) {
-            deviceCard.addView(infoRow("设备名额", current.device.registered + " / " + current.device.maximum));
-            deviceCard.addView(infoRow("会员权益", current.device.entitlementActive ? "有效" : "未生效"));
-            deviceCard.addView(infoRow("最近回报", formatTime(current.device.lastSeenAt)));
-        }
-        content.addView(deviceCard, spacedParams(0, 12));
-
         LinearLayout vpnCard = card();
         vpnCard.addView(text("连接状态", 13, COLOR_MUTED, true));
-        TextView disconnected = text("尚未连接 VPN", 19, COLOR_INK, true);
+        String status = XlbVpnService.STATE_CONNECTED.equals(tunnelState) ? "VPN 隧道已建立" :
+                XlbVpnService.STATE_CONNECTING.equals(tunnelState) ? "正在建立 VPN" :
+                XlbVpnService.STATE_ERROR.equals(tunnelState) ? "连接未建立" : "尚未连接 VPN";
+        TextView disconnected = text(status, 19, COLOR_INK, true);
         disconnected.setPadding(0, dp(6), 0, dp(7));
         vpnCard.addView(disconnected);
-        vpnCard.addView(text("当前版本仅接通账户与设备登记。没有加载真实订阅或 VPN 节点。", 14, COLOR_MUTED, false));
-        content.addView(vpnCard, spacedParams(0, 16));
+        if (tunnelMessage != null) {
+            vpnCard.addView(text(tunnelMessage, 14, COLOR_ERROR, false));
+        }
+        if (BuildConfig.DEBUG) {
+            vpnCard.addView(text("开发测试 · 仅连接订阅首个节点", 13, COLOR_MUTED, false));
+            EditText url = input("HTTPS 测试订阅地址", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+            vpnCard.addView(url, spacedParams(14, 10));
+            Button connect = primaryButton("导入并连接测试配置");
+            connect.setEnabled(!busy && !XlbVpnService.STATE_CONNECTED.equals(tunnelState));
+            connect.setOnClickListener(view -> {
+                String address = url.getText().toString().trim();
+                url.setText("");
+                if (address.isEmpty()) {
+                    showMessage("请输入 HTTPS 测试订阅地址", true);
+                    return;
+                }
+                hideKeyboard(url);
+                importSubscription(address);
+            });
+            vpnCard.addView(connect);
+            Button scan = secondaryButton("扫码导入订阅");
+            scan.setEnabled(!busy && !XlbVpnService.STATE_CONNECTED.equals(tunnelState));
+            scan.setOnClickListener(view -> new IntentIntegrator(this)
+                    .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                    .setPrompt("扫描订阅二维码")
+                    .setBeepEnabled(false)
+                    .setBarcodeImageEnabled(false)
+                    .setOrientationLocked(false)
+                    .initiateScan());
+            vpnCard.addView(scan, spacedParams(9, 0));
+            if (XlbVpnService.STATE_CONNECTING.equals(tunnelState) || XlbVpnService.STATE_CONNECTED.equals(tunnelState)) {
+                Button disconnect = secondaryButton("断开连接");
+                disconnect.setOnClickListener(view -> startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP)));
+                vpnCard.addView(disconnect, spacedParams(9, 0));
+            }
+        }
+        content.addView(vpnCard, spacedParams(0, 12));
+        addDevicesCard(current);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
-        Button refresh = secondaryButton(busy ? "同步中…" : "重新同步");
+        Button refresh = secondaryButton(busy ? "刷新中…" : "刷新");
         refresh.setEnabled(!busy);
-        refresh.setOnClickListener(view -> perform("正在刷新设备回报…", false, () -> api.synchronize(current.account)));
+        refresh.setOnClickListener(view -> perform("正在刷新…", false, () -> api.synchronize(current.account)));
         actions.addView(refresh, new LinearLayout.LayoutParams(0, dp(52), 1f));
         Button logout = textButton("退出登录");
-        logout.setOnClickListener(view -> perform("正在退出…", true, () -> {
+        logout.setOnClickListener(view -> {
+            startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
+            perform("正在退出…", true, () -> {
             api.logout();
             return null;
-        }));
+            });
+        });
         LinearLayout.LayoutParams logoutParams = new LinearLayout.LayoutParams(0, dp(52), 1f);
         logoutParams.setMarginStart(dp(10));
         actions.addView(logout, logoutParams);
         content.addView(actions);
+    }
+
+    private void importSubscription(String address) {
+        if (busy || !BuildConfig.DEBUG) return;
+        busy = true;
+        showMessage("正在获取测试配置…", false);
+        worker.execute(() -> {
+            String profile = null;
+            String error = null;
+            try {
+                profile = DebugProfileFetcher.fetch(address);
+            } catch (DebugProfileFetcher.ProfileException exception) {
+                error = exception.getMessage();
+            } catch (Exception exception) {
+                error = "订阅下载失败，请检查网络和地址";
+            }
+            String result = profile;
+            String failure = error;
+            mainHandler.post(() -> {
+                busy = false;
+                if (isFinishing() || isDestroyed()) return;
+                if (failure != null) {
+                    render();
+                    showMessage(failure, true);
+                    return;
+                }
+                pendingProfile = result;
+                Intent approval = VpnService.prepare(this);
+                if (approval == null) {
+                    pendingProfile = null;
+                    startVpn(result);
+                } else {
+                    startActivityForResult(approval, VPN_PERMISSION_REQUEST);
+                }
+            });
+        });
+    }
+
+    private void startVpn(String profile) {
+        tunnelState = XlbVpnService.STATE_CONNECTING;
+        tunnelMessage = null;
+        render();
+        Intent start = new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_START)
+                .putExtra(XlbVpnService.EXTRA_PROFILE, profile);
+        try {
+            startForegroundService(start);
+        } catch (RuntimeException exception) {
+            tunnelState = XlbVpnService.STATE_ERROR;
+            tunnelMessage = "无法启动系统 VPN 服务";
+            render();
+        }
     }
 
     private void addFooter() {
@@ -246,14 +358,69 @@ public final class MainActivity extends Activity {
         content.addView(endpoint);
     }
 
-    private View infoRow(String label, String value) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(8), 0, dp(5));
-        row.addView(text(label, 14, COLOR_MUTED, false), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        row.addView(text(value, 14, COLOR_INK, true));
-        return row;
+    private void addDevicesCard(PlatformApi.ClientSnapshot current) {
+        LinearLayout deviceCard = card();
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.HORIZONTAL);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        heading.addView(text("我的设备", 18, COLOR_INK, true),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        String quota = current.device == null ? "暂不可用" :
+                current.device.entitlementActive ? current.device.registered + " / " + current.device.maximum + " 台" :
+                        current.device.registered + " 台";
+        heading.addView(text(quota, 15, COLOR_MUTED, true));
+        deviceCard.addView(heading);
+
+        if (current.device == null) {
+            deviceCard.addView(text("设备列表暂不可用，请稍后刷新。", 14, COLOR_MUTED, false), spacedParams(12, 0));
+        } else {
+            boolean thisPhoneListed = false;
+            if (current.device.devices.isEmpty()) {
+                deviceCard.addView(text("暂无已加入的设备", 14, COLOR_MUTED, false), spacedParams(14, 0));
+            }
+            for (int index = 0; index < current.device.devices.size(); index++) {
+                PlatformApi.RegisteredDevice device = current.device.devices.get(index);
+                if (index > 0) {
+                    View divider = new View(this);
+                    divider.setBackgroundColor(COLOR_BORDER);
+                    LinearLayout.LayoutParams line = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+                    line.topMargin = dp(13);
+                    deviceCard.addView(divider, line);
+                }
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.addView(text(device.name, 16, COLOR_INK, true),
+                        new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                if (device.current) {
+                    thisPhoneListed = true;
+                    TextView tag = text("本机", 12, COLOR_TEAL_DARK, true);
+                    tag.setPadding(dp(9), dp(4), dp(9), dp(4));
+                    tag.setBackground(rounded(COLOR_TEAL_LIGHT, dp(10), null));
+                    row.addView(tag);
+                }
+                deviceCard.addView(row, spacedParams(14, 0));
+                deviceCard.addView(text(platformName(device.platform), 13, COLOR_MUTED, false));
+            }
+            if (!thisPhoneListed) {
+                String hint = !current.device.entitlementActive ? "当前没有有效套餐，暂不能添加设备。" :
+                        current.message != null ? current.message : "此手机尚未加入设备列表。";
+                deviceCard.addView(text(hint, 14, COLOR_MUTED, false), spacedParams(14, 0));
+            }
+        }
+        content.addView(deviceCard, spacedParams(0, 16));
+    }
+
+    private String platformName(String platform) {
+        switch (platform) {
+            case "android": return "Android";
+            case "ios": return "iPhone / iPad";
+            case "windows": return "Windows";
+            case "macos": return "macOS";
+            case "linux": return "Linux";
+            case "browser": return "浏览器";
+            default: return "其他设备";
+        }
     }
 
     private LinearLayout card() {
@@ -400,15 +567,6 @@ public final class MainActivity extends Activity {
         InputMethodManager manager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (manager != null) {
             manager.hideSoftInputFromWindow(view.getWindowToken(), 0);
-        }
-    }
-
-    private String formatTime(String value) {
-        try {
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE);
-            return Instant.parse(value).atZone(ZoneId.systemDefault()).format(formatter);
-        } catch (Exception ignored) {
-            return value;
         }
     }
 

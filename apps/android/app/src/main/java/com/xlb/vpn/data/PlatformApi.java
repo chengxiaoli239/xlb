@@ -12,11 +12,13 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public final class PlatformApi {
-    private static final String CLIENT_VERSION = "0.1.0";
+    private static final String CLIENT_VERSION = "0.2.6";
 
     private final String baseUrl;
     private final SecureSessionStore sessionStore;
@@ -58,40 +60,47 @@ public final class PlatformApi {
                     .put("installation_id", installationId)
                     .put("name", Build.MODEL.length() > 80 ? Build.MODEL.substring(0, 80) : Build.MODEL)
                     .put("platform", "android");
-            request("POST", "/api/v1/me/devices", registration);
-
-            JSONObject heartbeat = request("POST", "/api/v1/client/heartbeat", new JSONObject()
-                    .put("installation_id", installationId)
-                    .put("client_version", CLIENT_VERSION)).optJSONObject("data");
-            if (heartbeat == null) {
-                throw new PlatformApiException("设备回报响应格式不正确");
+            String registrationMessage = null;
+            try {
+                request("POST", "/api/v1/me/devices", registration);
+                try {
+                    request("POST", "/api/v1/client/heartbeat", new JSONObject()
+                            .put("installation_id", installationId)
+                            .put("client_version", CLIENT_VERSION));
+                } catch (PlatformApiException ignored) {
+                    // Version telemetry is best effort and not a customer-facing state.
+                }
+            } catch (PlatformApiException exception) {
+                registrationMessage = exception.getMessage();
             }
             JSONObject devices = request("GET", "/api/v1/me/devices", null).optJSONObject("data");
             if (devices == null) {
                 throw new PlatformApiException("设备列表响应格式不正确");
             }
             JSONArray registered = devices.optJSONArray("devices");
-            String deviceName = Build.MODEL;
-            if (registered != null) {
-                for (int index = 0; index < registered.length(); index++) {
-                    JSONObject device = registered.optJSONObject(index);
-                    if (device != null && installationId.equals(device.optString("installation_id"))) {
-                        deviceName = device.optString("name", Build.MODEL);
-                        break;
-                    }
+            if (registered == null) {
+                throw new PlatformApiException("设备列表响应格式不正确");
+            }
+            List<RegisteredDevice> entries = new ArrayList<>();
+            for (int index = 0; index < registered.length(); index++) {
+                JSONObject device = registered.optJSONObject(index);
+                if (device != null) {
+                    String name = device.optString("name").trim();
+                    entries.add(new RegisteredDevice(name.isEmpty() ? "未命名设备" : name,
+                            device.optString("platform"),
+                            installationId.equals(device.optString("installation_id"))));
                 }
             }
             return new ClientSnapshot(account, new DeviceSnapshot(
-                    devices.optInt("registered_count"),
+                    devices.optInt("registered_count", entries.size()),
                     devices.optInt("max_devices"),
                     devices.optBoolean("entitlement_active"),
-                    deviceName,
-                    heartbeat.optString("last_seen_at")
-            ), null);
+                    entries
+            ), registrationMessage);
         } catch (PlatformApiException exception) {
-            return new ClientSnapshot(account, null, exception.getMessage());
+            return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
         } catch (Exception exception) {
-            return new ClientSnapshot(account, null, "设备同步失败，请重试");
+            return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
         }
     }
 
@@ -192,7 +201,7 @@ public final class PlatformApi {
                 if (pair.length != 2 || pair[0].trim().isEmpty()) {
                     continue;
                 }
-                boolean delete = parts.length > 1 && parts[1].toLowerCase().contains("max-age=0");
+                boolean delete = parts.length > 1 && parts[1].toLowerCase(Locale.ROOT).contains("max-age=0");
                 sessionStore.updateCookie(pair[0].trim(), pair[1].trim(), delete);
             }
         }
@@ -221,15 +230,25 @@ public final class PlatformApi {
         public final int registered;
         public final int maximum;
         public final boolean entitlementActive;
-        public final String deviceName;
-        public final String lastSeenAt;
+        public final List<RegisteredDevice> devices;
 
-        public DeviceSnapshot(int registered, int maximum, boolean entitlementActive, String deviceName, String lastSeenAt) {
+        public DeviceSnapshot(int registered, int maximum, boolean entitlementActive, List<RegisteredDevice> devices) {
             this.registered = registered;
             this.maximum = maximum;
             this.entitlementActive = entitlementActive;
-            this.deviceName = deviceName;
-            this.lastSeenAt = lastSeenAt;
+            this.devices = devices;
+        }
+    }
+
+    public static final class RegisteredDevice {
+        public final String name;
+        public final String platform;
+        public final boolean current;
+
+        public RegisteredDevice(String name, String platform, boolean current) {
+            this.name = name;
+            this.platform = platform;
+            this.current = current;
         }
     }
 
