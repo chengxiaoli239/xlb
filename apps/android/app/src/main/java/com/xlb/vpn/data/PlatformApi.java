@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 public final class PlatformApi {
-    private static final String CLIENT_VERSION = "0.2.7";
+    private static final String CLIENT_VERSION = "0.2.8";
     private static final Pattern DEVICE_ID = Pattern.compile(
             "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
@@ -76,7 +76,7 @@ public final class PlatformApi {
             } catch (PlatformApiException exception) {
                 registrationMessage = exception.getMessage();
             }
-            return loadDevices(account, registrationMessage);
+            return withOverview(loadDevices(account, registrationMessage));
         } catch (PlatformApiException exception) {
             return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
         } catch (Exception exception) {
@@ -85,7 +85,28 @@ public final class PlatformApi {
     }
 
     public ClientSnapshot loadDevices(MemberAccount account) throws PlatformApiException {
-        return loadDevices(account, null);
+        return withOverview(loadDevices(account, null));
+    }
+
+    private ClientSnapshot withOverview(ClientSnapshot current) {
+        try {
+            JSONObject overview = request("GET", "/api/v1/me/overview", null).optJSONObject("data");
+            if (overview == null) return current;
+            JSONObject active = overview.optJSONObject("entitlement");
+            EntitlementSummary entitlement = active == null ? null : new EntitlementSummary(
+                    active.optString("plan_name"), active.optString("starts_at"), active.optString("ends_at"),
+                    number(active, "traffic_gb"), number(active, "data_used_gb"), active.optInt("max_devices"));
+            return new ClientSnapshot(current.account, current.device, current.message, entitlement,
+                    overview.optInt("activeSubscriptions"));
+        } catch (PlatformApiException exception) {
+            return current;
+        }
+    }
+
+    private static double number(JSONObject object, String field) {
+        if (!object.has(field) || object.isNull(field)) return 0;
+        double value = object.optDouble(field, 0);
+        return Double.isFinite(value) ? value : 0;
     }
 
     private ClientSnapshot loadDevices(MemberAccount account, String message) throws PlatformApiException {
@@ -290,11 +311,39 @@ public final class PlatformApi {
         public final MemberAccount account;
         public final DeviceSnapshot device;
         public final String message;
+        public final EntitlementSummary entitlement;
+        public final int subscriptionCount;
 
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message) {
+            this(account, device, message, null, 0);
+        }
+
+        public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
+                              EntitlementSummary entitlement, int subscriptionCount) {
             this.account = account;
             this.device = device;
             this.message = message;
+            this.entitlement = entitlement;
+            this.subscriptionCount = subscriptionCount;
+        }
+    }
+
+    public static final class EntitlementSummary {
+        public final String planName;
+        public final String startsAt;
+        public final String endsAt;
+        public final double trafficGb;
+        public final double dataUsedGb;
+        public final int maximumDevices;
+
+        public EntitlementSummary(String planName, String startsAt, String endsAt,
+                                  double trafficGb, double dataUsedGb, int maximumDevices) {
+            this.planName = planName;
+            this.startsAt = startsAt;
+            this.endsAt = endsAt;
+            this.trafficGb = trafficGb;
+            this.dataUsedGb = dataUsedGb;
+            this.maximumDevices = maximumDevices;
         }
     }
 

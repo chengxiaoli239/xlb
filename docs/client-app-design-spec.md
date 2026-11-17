@@ -9,6 +9,7 @@
 - 当前 Figma 设计稿以品牌色、字体、连接状态和订阅流程为主；Starter 方案的 MCP 写入额度用尽后，桌面和 Android 画板改由本地实现预览继续推进。
 - 2026-11-13 已在 Professional 计划下补齐并优化 `01 · Windows & macOS`、`02 · Android`：桌面端扩大内容区并统一盾牌/地球/订阅/设置矢量图标；Android 端放大品牌标识和正文层级，并明确“扫码导入 Clash / Mihomo”。
 - 2026-11-16 新增 `apps/android` 原生真机联调壳：代码已实现 session/CSRF、Keystore 加密会话、稳定安装 ID、设备登记和客户端心跳；Debug/Release 构建通过，荣耀手机安装仍待系统锁屏密码确认；尚未接入 `VpnService`、Mihomo、订阅节点或真实流量。
+- 2026-11-17 Android 登录后页面按 `02 · Android` 的 `XLB Android Client · Connection Center` 重构：连接首页、线路/订阅/设置导航、浅深主题和真实会员权益摘要已经落地；Figma 示例节点、延迟和流量不作为应用数据。Debug 测试订阅入口只在 Debug 构建开放。
 - 本机 Clash Verge Rev 版本为 `2.5.10`；实际 Mihomo 核心构建号、系统代理/TUN 权限和真实节点连接仍需在隔离测试环境验收。
 
 ## 视觉基线

@@ -8,6 +8,7 @@ import android.content.BroadcastReceiver;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Color;
+import android.graphics.PorterDuff;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -22,8 +23,10 @@ import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -39,19 +42,26 @@ import com.google.zxing.integration.android.IntentResult;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 public final class MainActivity extends Activity {
-    private static final int COLOR_CANVAS = Color.rgb(243, 247, 247);
-    private static final int COLOR_INK = Color.rgb(24, 39, 45);
-    private static final int COLOR_MUTED = Color.rgb(91, 109, 115);
-    private static final int COLOR_HINT = Color.rgb(145, 159, 163);
-    private static final int COLOR_TEAL = Color.rgb(8, 126, 121);
-    private static final int COLOR_TEAL_DARK = Color.rgb(5, 94, 91);
-    private static final int COLOR_TEAL_LIGHT = Color.rgb(225, 244, 241);
-    private static final int COLOR_ERROR = Color.rgb(184, 62, 62);
-    private static final int COLOR_BORDER = Color.rgb(220, 229, 229);
-    private static final int COLOR_NOTICE = Color.rgb(232, 240, 240);
+    private int COLOR_CANVAS;
+    private int COLOR_INK;
+    private int COLOR_MUTED;
+    private int COLOR_HINT;
+    private int COLOR_TEAL;
+    private int COLOR_TEAL_DARK;
+    private int COLOR_TEAL_LIGHT;
+    private int COLOR_ERROR;
+    private int COLOR_BORDER;
+    private int COLOR_NOTICE;
+    private int COLOR_SURFACE;
+    private int COLOR_SURFACE_ALT;
+    private int COLOR_HERO;
     private static final String MESSAGE_TAG = "operation_message";
+    private static final String PREF_DARK_MODE = "dark_mode";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -59,6 +69,8 @@ public final class MainActivity extends Activity {
     private LinearLayout content;
     private PlatformApi.ClientSnapshot snapshot;
     private boolean busy;
+    private boolean darkMode;
+    private int selectedTab;
     private String pendingProfile;
     private String tunnelState = XlbVpnService.currentState();
     private String tunnelMessage;
@@ -76,9 +88,8 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(COLOR_CANVAS);
-        getWindow().setNavigationBarColor(COLOR_CANVAS);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        darkMode = getPreferences(MODE_PRIVATE).getBoolean(PREF_DARK_MODE, false);
+        applyTheme();
         api = new PlatformApi(BuildConfig.API_BASE_URL, new SecureSessionStore(this));
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             registerReceiver(tunnelReceiver, new IntentFilter(XlbVpnService.ACTION_STATE),
@@ -141,7 +152,7 @@ public final class MainActivity extends Activity {
     }
 
     private void renderLoading() {
-        setPage();
+        setPage(false);
         TextView loading = text("正在打开迅连宝…", 16, COLOR_MUTED, false);
         loading.setGravity(Gravity.CENTER);
         loading.setPadding(0, dp(90), 0, dp(90));
@@ -149,50 +160,111 @@ public final class MainActivity extends Activity {
     }
 
     private void render() {
-        setPage();
+        setPage(snapshot != null);
         addBrandHeader();
         if (snapshot == null) {
             renderLoginForm();
         } else {
-            renderAccount(snapshot);
+            switch (selectedTab) {
+                case 1:
+                    renderRoutes();
+                    break;
+                case 2:
+                    renderSubscription(snapshot);
+                    break;
+                case 3:
+                    renderSettings(snapshot);
+                    break;
+                default:
+                    renderConnectionHome(snapshot);
+                    break;
+            }
         }
-        addFooter();
     }
 
-    private void setPage() {
+    private void applyTheme() {
+        if (darkMode) {
+            COLOR_CANVAS = Color.rgb(20, 29, 45);
+            COLOR_INK = Color.rgb(243, 250, 247);
+            COLOR_MUTED = Color.rgb(155, 174, 170);
+            COLOR_HINT = Color.rgb(117, 139, 134);
+            COLOR_TEAL = Color.rgb(20, 124, 102);
+            COLOR_TEAL_DARK = Color.rgb(84, 201, 172);
+            COLOR_TEAL_LIGHT = Color.rgb(41, 68, 63);
+            COLOR_ERROR = Color.rgb(255, 151, 145);
+            COLOR_BORDER = Color.rgb(52, 69, 89);
+            COLOR_NOTICE = Color.rgb(38, 55, 74);
+            COLOR_SURFACE = Color.rgb(32, 43, 62);
+            COLOR_SURFACE_ALT = Color.rgb(38, 55, 74);
+            COLOR_HERO = Color.rgb(27, 58, 54);
+        } else {
+            COLOR_CANVAS = Color.rgb(245, 248, 246);
+            COLOR_INK = Color.rgb(24, 37, 35);
+            COLOR_MUTED = Color.rgb(100, 119, 110);
+            COLOR_HINT = Color.rgb(145, 159, 163);
+            COLOR_TEAL = Color.rgb(20, 124, 102);
+            COLOR_TEAL_DARK = Color.rgb(16, 100, 82);
+            COLOR_TEAL_LIGHT = Color.rgb(225, 242, 232);
+            COLOR_ERROR = Color.rgb(184, 62, 62);
+            COLOR_BORDER = Color.rgb(217, 229, 221);
+            COLOR_NOTICE = Color.rgb(232, 240, 235);
+            COLOR_SURFACE = Color.WHITE;
+            COLOR_SURFACE_ALT = Color.rgb(234, 243, 237);
+            COLOR_HERO = Color.rgb(230, 243, 235);
+        }
+        getWindow().setStatusBarColor(darkMode ? Color.rgb(17, 26, 40) : Color.rgb(234, 241, 236));
+        getWindow().setNavigationBarColor(COLOR_CANVAS);
+        int systemUi = darkMode ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        getWindow().getDecorView().setSystemUiVisibility(systemUi);
+    }
+
+    private void setPage(boolean authenticated) {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(COLOR_CANVAS);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(COLOR_CANVAS);
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(22), dp(14), dp(22), dp(20));
+        content.setPadding(dp(20), dp(4), dp(20), dp(16));
         scroll.addView(content);
-        setContentView(scroll);
+        root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        if (authenticated) {
+            root.addView(createBottomNavigation(), new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(68)));
+        }
+        setContentView(root);
     }
 
     private void addBrandHeader() {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(0, dp(8), 0, dp(26));
-        ImageView mark = new ImageView(this);
-        mark.setImageResource(R.drawable.xlb_mark);
+        header.setPadding(0, dp(6), 0, dp(18));
+        FrameLayout mark = new FrameLayout(this);
+        mark.setBackground(rounded(COLOR_TEAL, dp(11), null));
+        ImageView logo = image(R.drawable.xlb_light_logo, 36, null);
+        mark.addView(logo, centeredParams(dp(36), dp(36)));
         header.addView(mark, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        LinearLayout brand = new LinearLayout(this);
-        brand.setOrientation(LinearLayout.VERTICAL);
-        brand.addView(text("迅连宝", 20, COLOR_INK, true));
-        TextView caption = text("SECURE NETWORK", 10, COLOR_MUTED, true);
-        caption.setLetterSpacing(0.1f);
-        caption.setPadding(0, dp(2), 0, 0);
-        brand.addView(caption);
+        TextView brand = text("迅连宝", 19, COLOR_INK, true);
         LinearLayout.LayoutParams brandParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         brandParams.setMarginStart(dp(11));
         header.addView(brand, brandParams);
-        TextView environment = text("本地联调", 12, COLOR_TEAL, true);
-        environment.setGravity(Gravity.CENTER);
-        environment.setPadding(dp(12), dp(8), dp(12), dp(8));
-        environment.setBackground(rounded(COLOR_TEAL_LIGHT, dp(18), null));
-        header.addView(environment);
+        TextView mode = text(darkMode ? "深色" : "浅色", 11, COLOR_MUTED, true);
+        mode.setGravity(Gravity.CENTER);
+        mode.setMinHeight(dp(34));
+        mode.setPadding(dp(10), 0, dp(10), 0);
+        mode.setContentDescription("切换" + (darkMode ? "浅色" : "深色") + "主题");
+        mode.setOnClickListener(view -> toggleTheme());
+        header.addView(mode);
+        ImageView menuButton = image(R.drawable.xlb_light_menu, 20, COLOR_MUTED);
+        menuButton.setPadding(dp(7), dp(7), dp(7), dp(7));
+        menuButton.setBackground(rounded(COLOR_SURFACE_ALT, dp(8), null));
+        menuButton.setContentDescription("打开菜单");
+        menuButton.setOnClickListener(view -> showMenu(menuButton));
+        LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(dp(34), dp(34));
+        menuParams.setMarginStart(dp(4));
+        header.addView(menuButton, menuParams);
         content.addView(header);
     }
 
@@ -228,77 +300,355 @@ public final class MainActivity extends Activity {
         content.addView(notice("测试环境连接本机 PHP API。密码只用于本次登录，不会保存在手机中。"));
     }
 
-    private void renderAccount(PlatformApi.ClientSnapshot current) {
-        content.addView(text("你好，" + current.account.name, 25, COLOR_INK, true));
-        TextView email = text(current.account.email, 14, COLOR_MUTED, false);
-        email.setPadding(0, dp(5), 0, dp(18));
-        content.addView(email);
+    private void renderConnectionHome(PlatformApi.ClientSnapshot current) {
+        content.addView(text("连接中心", 27, COLOR_INK, true));
+        TextView subtitle = text("一键连接，保持网络稳定。", 13, COLOR_MUTED, false);
+        subtitle.setPadding(0, dp(2), 0, dp(14));
+        content.addView(subtitle);
 
-        LinearLayout vpnCard = card();
-        vpnCard.addView(text("连接状态", 13, COLOR_MUTED, true));
-        String status = XlbVpnService.STATE_CONNECTED.equals(tunnelState) ? "VPN 隧道已建立" :
-                XlbVpnService.STATE_CONNECTING.equals(tunnelState) ? "正在建立 VPN" :
-                XlbVpnService.STATE_ERROR.equals(tunnelState) ? "连接未建立" : "尚未连接 VPN";
-        TextView disconnected = text(status, 19, COLOR_INK, true);
-        disconnected.setPadding(0, dp(6), 0, dp(7));
-        vpnCard.addView(disconnected);
+        FrameLayout hero = new FrameLayout(this);
+        hero.setBackground(rounded(COLOR_HERO, dp(20), null));
+        hero.setClipToOutline(true);
+        FrameLayout.LayoutParams haloParams = new FrameLayout.LayoutParams(dp(148), dp(148), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        haloParams.topMargin = dp(15);
+        hero.addView(image(darkMode ? R.drawable.xlb_dark_halo : R.drawable.xlb_light_halo, 148, null), haloParams);
+        FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(dp(108), dp(108), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        ringParams.topMargin = dp(35);
+        hero.addView(image(darkMode ? R.drawable.xlb_dark_ring : R.drawable.xlb_light_ring, 108, null), ringParams);
+        FrameLayout.LayoutParams coreParams = new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        coreParams.topMargin = dp(57);
+        hero.addView(image(R.drawable.xlb_light_core, 64, null), coreParams);
+        FrameLayout.LayoutParams logoParams = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        logoParams.topMargin = dp(65);
+        hero.addView(image(R.drawable.xlb_light_connection_logo, 48, null), logoParams);
+        hero.setContentDescription(connectionActionLabel());
+        hero.setFocusable(true);
+
+        TextView status = text(connectionStatus(), 17, COLOR_INK, true);
+        status.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP);
+        statusParams.topMargin = dp(165);
+        hero.addView(status, statusParams);
+        TextView route = text(connectionRouteLabel(), 12, COLOR_MUTED, false);
+        route.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams routeParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP);
+        routeParams.topMargin = dp(191);
+        hero.addView(route, routeParams);
+        Button connect = primaryButton(connectionActionLabel());
+        connect.setTextSize(14f);
+        connect.setMinHeight(dp(44));
+        connect.setPadding(dp(12), 0, dp(12), 0);
+        connect.setEnabled(!busy && !XlbVpnService.STATE_CONNECTING.equals(tunnelState));
+        FrameLayout.LayoutParams connectParams = new FrameLayout.LayoutParams(dp(170), dp(44), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        connectParams.topMargin = dp(235);
+        hero.addView(connect, connectParams);
+        connect.setOnClickListener(view -> connectionAction());
+        hero.setOnClickListener(view -> connectionAction());
+        content.addView(hero, spacedParams(0, 19));
+
+        TextView routeLabel = text("CURRENT ROUTE", 10, COLOR_TEAL, true);
+        routeLabel.setPadding(0, 0, 0, dp(8));
+        content.addView(routeLabel);
+        content.addView(routeSummaryCard(), spacedParams(0, 21));
+        content.addView(subscriptionSummaryCard(current), spacedParams(0, 10));
+        content.addView(subscriptionEntry(), spacedParams(0, 8));
         if (tunnelMessage != null) {
-            vpnCard.addView(text(tunnelMessage, 14, COLOR_ERROR, false));
+            content.addView(text(tunnelMessage, 13, COLOR_ERROR, false), spacedParams(4, 4));
         }
-        if (BuildConfig.DEBUG) {
-            vpnCard.addView(text("开发测试 · 仅连接订阅首个节点", 13, COLOR_MUTED, false));
-            EditText url = input("HTTPS 测试订阅地址", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-            vpnCard.addView(url, spacedParams(14, 10));
-            Button connect = primaryButton("导入并连接测试配置");
-            connect.setEnabled(!busy && !XlbVpnService.STATE_CONNECTED.equals(tunnelState));
-            connect.setOnClickListener(view -> {
-                String address = url.getText().toString().trim();
-                url.setText("");
-                if (address.isEmpty()) {
-                    showMessage("请输入 HTTPS 测试订阅地址", true);
-                    return;
-                }
-                hideKeyboard(url);
-                importSubscription(address);
-            });
-            vpnCard.addView(connect);
-            Button scan = secondaryButton("扫码导入订阅");
-            scan.setEnabled(!busy && !XlbVpnService.STATE_CONNECTED.equals(tunnelState));
-            scan.setOnClickListener(view -> new IntentIntegrator(this)
-                    .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-                    .setPrompt("扫描订阅二维码")
-                    .setBeepEnabled(false)
-                    .setBarcodeImageEnabled(false)
-                    .setOrientationLocked(false)
-                    .initiateScan());
-            vpnCard.addView(scan, spacedParams(9, 0));
-            if (XlbVpnService.STATE_CONNECTING.equals(tunnelState) || XlbVpnService.STATE_CONNECTED.equals(tunnelState)) {
-                Button disconnect = secondaryButton("断开连接");
-                disconnect.setOnClickListener(view -> startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP)));
-                vpnCard.addView(disconnect, spacedParams(9, 0));
-            }
-        }
-        content.addView(vpnCard, spacedParams(0, 12));
+    }
+
+    private void renderRoutes() {
+        content.addView(text("线路", 27, COLOR_INK, true));
+        TextView subtitle = text("选择适合当前网络的连接线路。", 13, COLOR_MUTED, false);
+        subtitle.setPadding(0, dp(2), 0, dp(18));
+        content.addView(subtitle);
+        LinearLayout empty = card();
+        empty.setGravity(Gravity.CENTER_HORIZONTAL);
+        ImageView globe = image(R.drawable.xlb_light_globe, 36, COLOR_TEAL);
+        LinearLayout.LayoutParams globeParams = new LinearLayout.LayoutParams(dp(44), dp(44));
+        globeParams.bottomMargin = dp(12);
+        empty.addView(globe, globeParams);
+        empty.addView(text("暂无可用线路", 17, COLOR_INK, true));
+        TextView hint = text("线路上线后会显示在这里。", 13, COLOR_MUTED, false);
+        hint.setPadding(0, dp(6), 0, 0);
+        empty.addView(hint);
+        content.addView(empty, spacedParams(0, 12));
+    }
+
+    private void renderSubscription(PlatformApi.ClientSnapshot current) {
+        content.addView(text("订阅", 27, COLOR_INK, true));
+        TextView subtitle = text("查看套餐权益和客户端订阅状态。", 13, COLOR_MUTED, false);
+        subtitle.setPadding(0, dp(2), 0, dp(18));
+        content.addView(subtitle);
+        content.addView(subscriptionSummaryCard(current), spacedParams(0, 12));
+        LinearLayout credentials = card();
+        credentials.addView(text("订阅凭证", 17, COLOR_INK, true));
+        String credentialState = current.subscriptionCount > 0 ? "已准备好，可用于兼容客户端。" : "尚无可用订阅凭证。";
+        credentials.addView(text(credentialState, 13, COLOR_MUTED, false), spacedParams(7, 0));
+        Button importButton = secondaryButton(BuildConfig.DEBUG ? "扫码导入测试订阅" : "订阅二维码导入暂未开放");
+        importButton.setEnabled(BuildConfig.DEBUG && !busy && !XlbVpnService.STATE_CONNECTED.equals(tunnelState));
+        importButton.setOnClickListener(view -> startSubscriptionScan());
+        credentials.addView(importButton, spacedParams(14, 0));
+        content.addView(credentials, spacedParams(0, 12));
+    }
+
+    private void renderSettings(PlatformApi.ClientSnapshot current) {
+        content.addView(text("设置", 27, COLOR_INK, true));
+        TextView subtitle = text("账户与已登录设备。", 13, COLOR_MUTED, false);
+        subtitle.setPadding(0, dp(2), 0, dp(18));
+        content.addView(subtitle);
+        LinearLayout account = card();
+        account.addView(text(current.account.name, 17, COLOR_INK, true));
+        account.addView(text(current.account.email, 13, COLOR_MUTED, false), spacedParams(5, 0));
+        content.addView(account, spacedParams(0, 12));
         addDevicesCard(current);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
-        Button refresh = secondaryButton(busy ? "刷新中…" : "刷新");
+        Button refresh = secondaryButton(busy ? "刷新中…" : "刷新账户");
         refresh.setEnabled(!busy);
-        refresh.setOnClickListener(view -> perform("正在刷新…", false, () -> api.synchronize(current.account)));
+        refresh.setOnClickListener(view -> refreshAccount(current.account));
         actions.addView(refresh, new LinearLayout.LayoutParams(0, dp(52), 1f));
         Button logout = textButton("退出登录");
-        logout.setOnClickListener(view -> {
-            startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
-            perform("正在退出…", true, () -> {
-            api.logout();
-            return null;
-            });
-        });
+        logout.setOnClickListener(view -> handleLogout());
         LinearLayout.LayoutParams logoutParams = new LinearLayout.LayoutParams(0, dp(52), 1f);
         logoutParams.setMarginStart(dp(10));
         actions.addView(logout, logoutParams);
-        content.addView(actions);
+        content.addView(actions, spacedParams(10, 0));
+    }
+
+    private LinearLayout routeSummaryCard() {
+        LinearLayout route = new LinearLayout(this);
+        route.setOrientation(LinearLayout.HORIZONTAL);
+        route.setGravity(Gravity.CENTER_VERTICAL);
+        route.setPadding(dp(14), dp(12), dp(12), dp(12));
+        route.setBackground(rounded(COLOR_SURFACE, dp(14), null));
+        FrameLayout iconFrame = new FrameLayout(this);
+        iconFrame.setBackground(rounded(COLOR_SURFACE_ALT, dp(12), null));
+        iconFrame.addView(image(R.drawable.xlb_light_globe, 30, COLOR_TEAL), centeredParams(dp(30), dp(30)));
+        route.addView(iconFrame, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout info = new LinearLayout(this);
+        info.setOrientation(LinearLayout.VERTICAL);
+        info.setPadding(dp(13), 0, dp(4), 0);
+        info.addView(text("智能线路", 14, COLOR_INK, true));
+        info.addView(text(XlbVpnService.STATE_CONNECTED.equals(tunnelState) ? "VPN 隧道已建立" : "连接后显示线路详情", 11, COLOR_MUTED, false), spacedParams(4, 0));
+        route.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        ImageView dot = image(R.drawable.xlb_light_route_dot, 10, null);
+        route.addView(dot, new LinearLayout.LayoutParams(dp(10), dp(10)));
+        TextView state = text(XlbVpnService.STATE_CONNECTED.equals(tunnelState) ? "已连接" : "待连接", 10,
+                XlbVpnService.STATE_CONNECTED.equals(tunnelState) ? COLOR_TEAL : COLOR_MUTED, true);
+        LinearLayout.LayoutParams stateParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        stateParams.setMarginStart(dp(6));
+        route.addView(state, stateParams);
+        return route;
+    }
+
+    private LinearLayout subscriptionSummaryCard(PlatformApi.ClientSnapshot current) {
+        LinearLayout summary = new LinearLayout(this);
+        summary.setOrientation(LinearLayout.HORIZONTAL);
+        summary.setGravity(Gravity.CENTER_VERTICAL);
+        summary.setPadding(dp(14), dp(14), dp(12), dp(14));
+        summary.setBackground(rounded(COLOR_SURFACE, dp(14), null));
+        FrameLayout iconFrame = new FrameLayout(this);
+        iconFrame.setBackground(rounded(COLOR_SURFACE_ALT, dp(10), null));
+        iconFrame.addView(image(R.drawable.xlb_light_subscription, 28, COLOR_TEAL), centeredParams(dp(28), dp(28)));
+        summary.addView(iconFrame, new LinearLayout.LayoutParams(dp(38), dp(38)));
+
+        LinearLayout detail = new LinearLayout(this);
+        detail.setOrientation(LinearLayout.VERTICAL);
+        detail.setPadding(dp(14), 0, dp(4), 0);
+        String planName = current.entitlement == null || current.entitlement.planName.isEmpty() ? "会员权益" : current.entitlement.planName;
+        String title = current.entitlement == null ?
+                (current.device != null && current.device.entitlementActive ? "会员权益有效" : "暂无有效套餐") :
+                planName + (current.entitlement.trafficGb > 0 ? " · " + formatGb(current.entitlement.trafficGb) + " GB" : "");
+        detail.addView(text(title, 14, COLOR_INK, true));
+        String formattedExpiry = current.entitlement == null ? null : formatDate(current.entitlement.endsAt);
+        String expiry = formattedExpiry == null ? "套餐有效期暂不可用" : "有效期至 " + formattedExpiry;
+        detail.addView(text(expiry, 11, COLOR_MUTED, false), spacedParams(3, 0));
+        String usage = current.entitlement == null ? "流量用量暂不可用" : formatGb(current.entitlement.dataUsedGb) + " GB 已使用";
+        detail.addView(text(usage, 11, COLOR_TEAL_DARK, true), spacedParams(6, 0));
+        summary.addView(detail, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView manage = text("管理  ›", 11, COLOR_TEAL, true);
+        manage.setContentDescription("管理套餐和订阅");
+        manage.setOnClickListener(view -> selectTab(2));
+        summary.addView(manage);
+        summary.setOnClickListener(view -> selectTab(2));
+        return summary;
+    }
+
+    private View subscriptionEntry() {
+        LinearLayout entry = new LinearLayout(this);
+        entry.setOrientation(LinearLayout.HORIZONTAL);
+        entry.setGravity(Gravity.CENTER_VERTICAL);
+        entry.setPadding(dp(12), 0, dp(12), 0);
+        entry.setMinimumHeight(dp(50));
+        entry.setBackground(rounded(COLOR_SURFACE_ALT, dp(10), null));
+        FrameLayout iconFrame = new FrameLayout(this);
+        iconFrame.setBackground(rounded(darkMode ? Color.rgb(53, 83, 106) : Color.rgb(212, 235, 221), dp(7), null));
+        iconFrame.addView(image(R.drawable.xlb_light_qr, 22, COLOR_TEAL), centeredParams(dp(22), dp(22)));
+        entry.addView(iconFrame, new LinearLayout.LayoutParams(dp(28), dp(28)));
+        TextView label = text("扫码导入 Clash / Mihomo", 12, COLOR_INK, true);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        labelParams.setMarginStart(dp(12));
+        entry.addView(label, labelParams);
+        entry.addView(text("打开  ›", 11, COLOR_TEAL, true));
+        entry.setContentDescription("打开订阅导入");
+        entry.setOnClickListener(view -> selectTab(2));
+        return entry;
+    }
+
+    private String connectionStatus() {
+        if (XlbVpnService.STATE_CONNECTED.equals(tunnelState)) return "已连接";
+        if (XlbVpnService.STATE_CONNECTING.equals(tunnelState)) return "正在连接";
+        if (XlbVpnService.STATE_ERROR.equals(tunnelState)) return "连接未成功";
+        return "未连接";
+    }
+
+    private String connectionRouteLabel() {
+        if (XlbVpnService.STATE_CONNECTED.equals(tunnelState)) return BuildConfig.DEBUG ? "测试线路" : "迅连宝线路";
+        if (XlbVpnService.STATE_CONNECTING.equals(tunnelState)) return "正在准备安全连接";
+        return "智能线路 · 自动选择";
+    }
+
+    private String connectionActionLabel() {
+        if (XlbVpnService.STATE_CONNECTED.equals(tunnelState)) return "断开连接";
+        if (XlbVpnService.STATE_CONNECTING.equals(tunnelState)) return "正在连接…";
+        if (XlbVpnService.STATE_ERROR.equals(tunnelState)) return "重试连接";
+        return "连接";
+    }
+
+    private void connectionAction() {
+        if (busy || XlbVpnService.STATE_CONNECTING.equals(tunnelState)) return;
+        if (XlbVpnService.STATE_CONNECTED.equals(tunnelState)) {
+            startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
+            return;
+        }
+        if (!BuildConfig.DEBUG) {
+            showMessage("当前没有可用的服务线路，请稍后重试。", true);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("连接测试线路")
+                .setItems(new String[]{"扫码导入订阅", "输入测试订阅地址"}, (dialog, which) -> {
+                    if (which == 0) startSubscriptionScan();
+                    else showTestUrlDialog();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void startSubscriptionScan() {
+        if (!BuildConfig.DEBUG) {
+            showMessage("订阅二维码导入暂未开放。", false);
+            return;
+        }
+        new IntentIntegrator(this)
+                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                .setPrompt("扫描 HTTPS 订阅二维码")
+                .setBeepEnabled(false)
+                .setBarcodeImageEnabled(false)
+                .setOrientationLocked(false)
+                .initiateScan();
+    }
+
+    private void showTestUrlDialog() {
+        EditText url = input("HTTPS 测试订阅地址", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        new AlertDialog.Builder(this)
+                .setTitle("输入测试订阅")
+                .setView(url)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("连接", (dialog, which) -> {
+                    String address = url.getText().toString().trim();
+                    hideKeyboard(url);
+                    if (address.isEmpty()) showMessage("请输入 HTTPS 测试订阅地址", true);
+                    else importSubscription(address);
+                })
+                .show();
+    }
+
+    private void refreshAccount(PlatformApi.MemberAccount account) {
+        perform("正在刷新…", false, () -> api.synchronize(account));
+    }
+
+    private void handleLogout() {
+        startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
+        perform("正在退出…", true, () -> {
+            api.logout();
+            return null;
+        });
+    }
+
+    private void toggleTheme() {
+        darkMode = !darkMode;
+        getPreferences(MODE_PRIVATE).edit().putBoolean(PREF_DARK_MODE, darkMode).apply();
+        applyTheme();
+        render();
+    }
+
+    private void showMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add("设置").setOnMenuItemClickListener(item -> {
+            selectTab(3);
+            return true;
+        });
+        menu.getMenu().add(darkMode ? "切换浅色主题" : "切换深色主题").setOnMenuItemClickListener(item -> {
+            toggleTheme();
+            return true;
+        });
+        if (snapshot != null) {
+            menu.getMenu().add("刷新账户").setOnMenuItemClickListener(item -> {
+                refreshAccount(snapshot.account);
+                return true;
+            });
+            menu.getMenu().add("退出登录").setOnMenuItemClickListener(item -> {
+                handleLogout();
+                return true;
+            });
+        }
+        menu.show();
+    }
+
+    private void selectTab(int tab) {
+        selectedTab = tab;
+        render();
+    }
+
+    private LinearLayout createBottomNavigation() {
+        LinearLayout navigation = new LinearLayout(this);
+        navigation.setOrientation(LinearLayout.VERTICAL);
+        navigation.setBackgroundColor(COLOR_CANVAS);
+        View divider = new View(this);
+        divider.setBackgroundColor(COLOR_BORDER);
+        navigation.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        LinearLayout items = new LinearLayout(this);
+        items.setOrientation(LinearLayout.HORIZONTAL);
+        items.setGravity(Gravity.CENTER_VERTICAL);
+        String[] labels = {"首页", "线路", "订阅", "设置"};
+        int[] icons = {R.drawable.xlb_light_home, R.drawable.xlb_light_route,
+                R.drawable.xlb_light_subscription_tab, R.drawable.xlb_light_settings};
+        for (int index = 0; index < labels.length; index++) {
+            final int tab = index;
+            LinearLayout item = new LinearLayout(this);
+            item.setOrientation(LinearLayout.VERTICAL);
+            item.setGravity(Gravity.CENTER);
+            FrameLayout iconBackground = new FrameLayout(this);
+            iconBackground.setBackground(rounded(index == selectedTab ? COLOR_TEAL_LIGHT : COLOR_SURFACE_ALT, dp(8), null));
+            ImageView icon = image(icons[index], 24, index == selectedTab ? COLOR_TEAL : COLOR_MUTED);
+            iconBackground.addView(icon, centeredParams(dp(24), dp(24)));
+            item.addView(iconBackground, new LinearLayout.LayoutParams(dp(30), dp(30)));
+            TextView label = text(labels[index], 11, index == selectedTab ? COLOR_TEAL : COLOR_MUTED, index == selectedTab);
+            label.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            labelParams.topMargin = dp(2);
+            item.addView(label, labelParams);
+            item.setContentDescription(labels[index]);
+            item.setOnClickListener(view -> selectTab(tab));
+            items.addView(item, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        }
+        navigation.addView(items, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        return navigation;
     }
 
     private void importSubscription(String address) {
@@ -350,13 +700,6 @@ public final class MainActivity extends Activity {
             tunnelMessage = "无法启动系统 VPN 服务";
             render();
         }
-    }
-
-    private void addFooter() {
-        TextView endpoint = text(BuildConfig.DEBUG ? "开发接口 · 127.0.0.1:4175" : "迅连宝服务", 12, COLOR_MUTED, false);
-        endpoint.setGravity(Gravity.CENTER);
-        endpoint.setPadding(0, dp(22), 0, dp(4));
-        content.addView(endpoint);
     }
 
     private void addDevicesCard(PlatformApi.ClientSnapshot current) {
@@ -415,8 +758,7 @@ public final class MainActivity extends Activity {
                 deviceCard.addView(deviceActions);
             }
             if (!thisPhoneListed) {
-                String hint = !current.device.entitlementActive ? "当前没有有效套餐，暂不能添加设备。" :
-                        current.message != null ? current.message : "此手机尚未加入设备列表。";
+                String hint = !current.device.entitlementActive ? "需要有效套餐后才能添加设备。" : "此手机尚未加入设备列表。";
                 deviceCard.addView(text(hint, 14, COLOR_MUTED, false), spacedParams(14, 0));
             }
         }
@@ -509,7 +851,7 @@ public final class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(18), dp(17), dp(18), dp(17));
-        card.setBackground(rounded(Color.WHITE, dp(18), null));
+        card.setBackground(rounded(COLOR_SURFACE, dp(16), null));
         card.setElevation(dp(1));
         return card;
     }
@@ -526,7 +868,7 @@ public final class MainActivity extends Activity {
         input.setTextColor(COLOR_INK);
         input.setHintTextColor(COLOR_HINT);
         input.setPadding(dp(14), 0, dp(14), 0);
-        input.setBackground(rounded(Color.WHITE, dp(12), COLOR_BORDER));
+        input.setBackground(rounded(COLOR_SURFACE, dp(12), COLOR_BORDER));
         input.setMinHeight(dp(54));
         return input;
     }
@@ -541,7 +883,7 @@ public final class MainActivity extends Activity {
     }
 
     private Button textButton(String label) {
-        return baseButton(label, COLOR_MUTED, Color.WHITE, COLOR_BORDER);
+        return baseButton(label, COLOR_MUTED, COLOR_SURFACE, COLOR_BORDER);
     }
 
     private Button baseButton(String label, int textColor, int fill) {
@@ -566,6 +908,34 @@ public final class MainActivity extends Activity {
         notice.setBackground(rounded(COLOR_NOTICE, dp(12), null));
         notice.setLineSpacing(dp(3), 1f);
         return notice;
+    }
+
+    private ImageView image(int resource, int size, Integer tint) {
+        ImageView image = new ImageView(this);
+        image.setImageResource(resource);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setMaxWidth(dp(size));
+        image.setMaxHeight(dp(size));
+        if (tint != null) image.setColorFilter(tint, PorterDuff.Mode.SRC_IN);
+        image.setContentDescription(null);
+        return image;
+    }
+
+    private FrameLayout.LayoutParams centeredParams(int width, int height) {
+        return new FrameLayout.LayoutParams(width, height, Gravity.CENTER);
+    }
+
+    private String formatGb(double value) {
+        return String.format(Locale.US, "%.1f", Math.max(0, value));
+    }
+
+    private String formatDate(String value) {
+        if (value == null || value.isEmpty()) return null;
+        try {
+            return OffsetDateTime.parse(value).format(DateTimeFormatter.ofPattern("yyyy年MM月dd日", Locale.CHINA));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private TextView text(String value, int size, int color, boolean bold) {
@@ -619,6 +989,7 @@ public final class MainActivity extends Activity {
                 }
                 busy = false;
                 if (finalResult != null) {
+                    if (snapshot == null) selectedTab = 0;
                     snapshot = finalResult;
                     render();
                 } else if (clearOnFailure) {
