@@ -23,7 +23,7 @@ class MemberDeviceController extends Controller
             ->where('user_id', $userId)
             ->where('status', 'registered')
             ->orderByDesc('created_at')
-            ->get(['id', 'installation_id', 'name', 'platform', 'status', 'created_at', 'revoked_at', 'client_version', 'last_seen_at'])
+            ->get(['id', 'installation_id', 'name', 'platform', 'status', 'created_at', 'revoked_at'])
             ->map(fn (object $device): array => $this->present($device))
             ->all();
         $registeredCount = count($devices);
@@ -38,7 +38,7 @@ class MemberDeviceController extends Controller
         ]])->header('Cache-Control', 'no-store, private');
     }
 
-    public function heartbeat(Request $request): JsonResponse
+    public function heartbeat(Request $request): Response|JsonResponse
     {
         $validator = Validator::make($request->all(), [
             'installation_id' => ['required', 'uuid'],
@@ -55,7 +55,7 @@ class MemberDeviceController extends Controller
             return $this->error('validation_error', '客户端版本不能为空', 400);
         }
 
-        $result = DB::transaction(function () use ($request, $installationId, $clientVersion): array {
+        $result = DB::transaction(function () use ($request, $installationId, $clientVersion): ?array {
             $device = DB::table('member_devices')
                 ->where('user_id', $request->user()->id)
                 ->where('installation_id', $installationId)
@@ -73,18 +73,14 @@ class MemberDeviceController extends Controller
                 'updated_at' => $lastSeenAt,
             ]);
 
-            return ['data' => [
-                'device_id' => $device->id,
-                'client_version' => $clientVersion,
-                'last_seen_at' => $lastSeenAt,
-            ]];
+            return null;
         }, 3);
 
         if (isset($result['error'])) {
             return $this->error($result['error']['code'], $result['error']['message'], 404);
         }
 
-        return response()->json(['data' => $result['data']])->header('Cache-Control', 'no-store, private');
+        return response()->noContent()->header('Cache-Control', 'no-store, private');
     }
 
     public function store(Request $request): JsonResponse
@@ -225,7 +221,7 @@ class MemberDeviceController extends Controller
             ->first(['e.id', 'e.ends_at', 'p.max_devices']);
     }
 
-    /** @return array{id:string,installation_id:string,name:string,platform:string,status:string,created_at:string,revoked_at:?string,client_version:?string,last_seen_at:?string} */
+    /** @return array{id:string,installation_id:string,name:string,platform:string,status:string,created_at:string,revoked_at:?string} */
     private function present(object $device): array
     {
         return [
@@ -236,8 +232,6 @@ class MemberDeviceController extends Controller
             'status' => $device->status,
             'created_at' => $device->created_at,
             'revoked_at' => $device->revoked_at,
-            'client_version' => $device->client_version,
-            'last_seen_at' => $device->last_seen_at,
         ];
     }
 

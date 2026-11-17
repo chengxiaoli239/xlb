@@ -184,11 +184,7 @@ class MemberDeviceApiTest extends TestCase
         $this->postJson('/api/v1/client/heartbeat', [
             'installation_id' => $installationId,
             'client_version' => '1.2.3',
-        ])->assertOk()
-            ->assertJsonPath('data.device_id', $deviceId)
-            ->assertJsonPath('data.client_version', '1.2.3')
-            ->assertJsonMissingPath('data.connected')
-            ->assertJsonStructure(['data' => ['device_id', 'last_seen_at', 'client_version']]);
+        ])->assertNoContent();
 
         $this->assertDatabaseHas('member_devices', [
             'id' => $deviceId,
@@ -196,7 +192,8 @@ class MemberDeviceApiTest extends TestCase
         ]);
         $this->assertNotNull(DB::table('member_devices')->where('id', $deviceId)->value('last_seen_at'));
         $this->getJson('/api/v1/me/devices')
-            ->assertJsonPath('data.devices.0.client_version', '1.2.3');
+            ->assertJsonMissingPath('data.devices.0.client_version')
+            ->assertJsonMissingPath('data.devices.0.last_seen_at');
     }
 
     public function test_heartbeat_is_scoped_to_registered_devices_and_rejects_revoked_devices(): void
