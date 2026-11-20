@@ -1,0 +1,8 @@
+{
+  "suggested_only_pending_calibration": {
+    "K6_P95_MS": 500,
+    "K6_FAILED_RATE": 0.01,
+    "K6_VUS": 2,
+    "K6_DURATION": "30s"
+  }
+}
