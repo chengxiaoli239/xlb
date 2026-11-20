@@ -25,6 +25,10 @@ final class MihomoCore {
         }
     }
 
+    static String firstRouteName(String profile) {
+        return nativeFirstRouteName(profile.getBytes(StandardCharsets.UTF_8));
+    }
+
     static void startTun(ParcelFileDescriptor descriptor) {
         String failure = nativeStartTun(descriptor.getFd());
         if (failure != null) {
@@ -38,6 +42,7 @@ final class MihomoCore {
 
     private static native void nativeInit(String home, SocketProtector protector);
     private static native String nativeLoad(byte[] profile);
+    private static native String nativeFirstRouteName(byte[] profile);
     private static native String nativeStartTun(int fd);
     private static native void nativeStop();
 }

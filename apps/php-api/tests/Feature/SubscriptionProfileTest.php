@@ -161,6 +161,31 @@ class SubscriptionProfileTest extends TestCase
         $this->get($next.'?format=mihomo')->assertNotFound();
     }
 
+    public function test_account_wide_credential_is_not_issued_or_served_outside_local_test_scope(): void
+    {
+        $url = $this->profileUrl();
+        config(['subscription_routes.scope' => 'production']);
+
+        $this->getJson('/api/v1/me/subscriptions')->assertOk()->assertJsonPath('data.0.url', null);
+        $this->postJson('/api/v1/me/subscriptions')->assertStatus(409)
+            ->assertJsonPath('error.code', 'legacy_account_credential_disabled');
+        $this->postJson('/api/v1/me/subscriptions/'.DB::table('subscriptions')->value('id').'/rotate')
+            ->assertStatus(409)->assertJsonPath('error.code', 'legacy_account_credential_disabled');
+        $this->get($url)->assertNotFound();
+    }
+
+    public function test_account_wide_credential_is_disabled_in_production_even_if_test_scope_is_misconfigured(): void
+    {
+        $url = $this->profileUrl();
+        $this->withSession(['_token' => 'subscription-test-csrf'])->withHeader('X-CSRF-TOKEN', 'subscription-test-csrf');
+        $this->app->instance('env', 'production');
+
+        $this->getJson('/api/v1/me/subscriptions')->assertOk()->assertJsonPath('data.0.url', null);
+        $this->postJson('/api/v1/me/subscriptions')->assertStatus(409)
+            ->assertJsonPath('error.code', 'legacy_account_credential_disabled');
+        $this->get($url)->assertNotFound();
+    }
+
     public function test_prepaid_contiguous_renewal_extends_profile_expiry_without_changing_credentials_or_current_quota(): void
     {
         $url = $this->profileUrl();

@@ -76,7 +76,12 @@ class SandboxRefundTest extends TestCase
 
         config(['node_access.enabled' => true, 'node_access.driver' => 'mock']);
         $driver = $this->mock(NodePeerRevocationDriver::class);
+        $job = DB::table('node_access_revocation_outbox')->where('peer_id', $peerId)->first();
         $driver->shouldReceive('revoke')->once()->andReturn([
+            'node_id' => DB::table('node_access_peers')->where('id', $peerId)->value('node_id'),
+            'peer_id' => $peerId,
+            'request_id' => $job->id,
+            'generation' => (int) $job->generation,
             'acknowledgement_id' => 'sandbox-ack-001',
             'upload_bytes' => 900,
             'download_bytes' => 2780,
@@ -134,7 +139,12 @@ class SandboxRefundTest extends TestCase
 
         $this->travel(11)->seconds();
         $retryDriver = $this->mock(NodePeerRevocationDriver::class);
+        $nodeId = (string) DB::table('node_access_peers')->where('id', $peerId)->value('node_id');
         $retryDriver->shouldReceive('revoke')->once()->andReturn([
+            'node_id' => $nodeId,
+            'peer_id' => $peerId,
+            'request_id' => $job->id,
+            'generation' => (int) $job->generation,
             'acknowledgement_id' => 'sandbox-ack-retry',
             'upload_bytes' => 1400,
             'download_bytes' => 2800,
@@ -206,6 +216,29 @@ class SandboxRefundTest extends TestCase
         $this->get($subscriptionUrl)->assertOk();
     }
 
+    public function test_future_renewal_does_not_keep_refunded_peer_authorized_today(): void
+    {
+        $member = User::factory()->create(['id' => (string) Str::uuid(), 'role' => 'member']);
+        $this->actingAs($member);
+        $orderId = $this->createPaidOrder();
+        $peerId = $this->createPeer($member->id);
+        $subscriptionUrl = $this->postJson('/api/v1/me/subscriptions')->assertOk()->json('data.url');
+        DB::table('entitlements')->insert([
+            'id' => (string) Str::uuid(), 'user_id' => $member->id, 'plan_id' => 'annual',
+            'status' => 'active', 'starts_at' => now()->addMonth()->toIso8601String(),
+            'ends_at' => now()->addYear()->toIso8601String(), 'data_used_gb' => 0,
+        ]);
+
+        $this->actingAs(User::findOrFail('user-admin'))
+            ->withHeader('Idempotency-Key', (string) Str::uuid())
+            ->postJson('/api/v1/admin/orders/'.$orderId.'/sandbox-refund', ['reason' => '未来续费未生效'])
+            ->assertCreated()
+            ->assertJsonPath('data.node_revocations.status', 'pending');
+
+        $this->assertDatabaseHas('node_access_peers', ['id' => $peerId, 'status' => 'revocation_pending']);
+        $this->get($subscriptionUrl)->assertNotFound();
+    }
+
     public function test_sandbox_refund_is_disabled_outside_local_and_testing_environments(): void
     {
         $member = User::factory()->create(['id' => (string) Str::uuid(), 'role' => 'member']);
@@ -248,6 +281,10 @@ class SandboxRefundTest extends TestCase
         DB::table('node_access_peers')->insert([
             'id' => $peerId, 'user_id' => $userId, 'node_id' => $nodeId,
             'device_id' => 'device-'.$peerId, 'device_name' => '测试设备', 'public_key' => 'public-'.$peerId,
+            'device_key_fingerprint' => str_repeat('c', 64), 'generation' => 1,
+            'expires_at' => now()->addYear()->utc()->toIso8601String(),
+            'credential_ciphertext' => encrypt('sandbox-peer-credential'), 'profile_ciphertext' => null,
+            'provision_request_id' => 'provision-'.$peerId,
             'status' => 'active', 'upload_bytes' => 1000, 'download_bytes' => 2000,
             'last_observed_at' => $now, 'revoked_at' => null, 'created_at' => $now, 'updated_at' => $now,
         ]);

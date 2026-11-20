@@ -187,6 +187,8 @@ class PlatformController extends Controller
             'activeSubscriptions' => DB::table('subscriptions')->where('status', 'active')->count(),
             'availableNodes' => DB::table('nodes')->where('is_test', true)->where('status', 'available')->count(),
             'nodeCount' => DB::table('nodes')->where('is_test', true)->count(),
+            'pendingNodeRevocations' => DB::table('node_access_revocation_outbox')
+                ->whereIn('status', ['pending', 'retry', 'processing'])->count(),
             'pendingCommissionCents' => (int) DB::table('commission_entries')->where('status', 'pending')->sum('amount_cents'),
             'recentAudit' => $recentAudit,
         ]]);
@@ -327,14 +329,24 @@ class PlatformController extends Controller
 
     public function subscriptions(Request $request, SubscriptionCredentialService $credentials): JsonResponse
     {
-        $rows = DB::table('subscriptions')->where('user_id', $request->user()->id)->orderByDesc('created_at')->get();
-        $data = $rows->map(fn (object $row): array => $credentials->present($row));
+        $rows = DB::table('subscriptions as s')->leftJoin('member_devices as d', 'd.id', '=', 's.member_device_id')
+            ->where('s.user_id', $request->user()->id)->orderByDesc('s.created_at')
+            ->get(['s.*', 'd.name as device_name']);
+        $legacyAllowed = $this->legacySubscriptionsAllowed();
+        $deviceCredentialsAllowed = app()->environment(['local', 'testing']) && config('subscription_routes.scope') === 'test';
+        $data = $rows->map(fn (object $row): array => $credentials->present(
+            $row,
+            $row->member_device_id ? $deviceCredentialsAllowed : $legacyAllowed,
+        ));
 
         return response()->json(['data' => $data])->header('Cache-Control', 'no-store, private');
     }
 
     public function createSubscription(Request $request, SubscriptionCredentialService $credentials): JsonResponse
     {
+        if (! $this->legacySubscriptionsAllowed()) {
+            return $this->error('legacy_account_credential_disabled', '账号级订阅只允许在隔离开发环境使用', 409);
+        }
         $subscription = $credentials->ensure($request->user()->id);
         $created = $subscription['created'];
         unset($subscription['created']);
@@ -344,6 +356,9 @@ class PlatformController extends Controller
 
     public function rotateSubscription(Request $request, string $id, SubscriptionCredentialService $credentials): JsonResponse
     {
+        if (! $this->legacySubscriptionsAllowed()) {
+            return $this->error('legacy_account_credential_disabled', '账号级订阅只允许在隔离开发环境使用', 409);
+        }
         $result = $credentials->rotate($request->user()->id, $id);
 
         return $result
@@ -369,6 +384,11 @@ class PlatformController extends Controller
     public function subscriptionProfile(Request $request, string $token, SubscriptionProfileService $profiles): Response
     {
         return $profiles->respond($request, $token);
+    }
+
+    private function legacySubscriptionsAllowed(): bool
+    {
+        return app()->environment(['local', 'testing']) && config('subscription_routes.scope') === 'test';
     }
 
     /** @return array<string, bool|int|string|array<string>|null> */

@@ -2,6 +2,7 @@
 
 extern void XlbInit(char *, int (*)(int));
 extern char *XlbLoad(char *, int);
+extern char *XlbFirstRouteName(char *, int);
 extern char *XlbStartTun(int);
 extern void XlbStop(void);
 extern void XlbFreeString(char *);
@@ -51,6 +52,14 @@ JNIEXPORT jstring JNICALL Java_com_xlb_vpn_tunnel_MihomoCore_nativeLoad(JNIEnv *
     char *result = XlbLoad((char *)value, (*env)->GetArrayLength(env, profile));
     (*env)->ReleaseByteArrayElements(env, profile, value, JNI_ABORT);
     return result_string(env, result);
+}
+
+JNIEXPORT jstring JNICALL Java_com_xlb_vpn_tunnel_MihomoCore_nativeFirstRouteName(JNIEnv *env, jclass cls, jbyteArray profile) {
+	(void)cls;
+	jbyte *value = (*env)->GetByteArrayElements(env, profile, NULL);
+	char *result = XlbFirstRouteName((char *)value, (*env)->GetArrayLength(env, profile));
+	(*env)->ReleaseByteArrayElements(env, profile, value, JNI_ABORT);
+	return result_string(env, result);
 }
 
 JNIEXPORT jstring JNICALL Java_com_xlb_vpn_tunnel_MihomoCore_nativeStartTun(JNIEnv *env, jclass cls, jint fd) {

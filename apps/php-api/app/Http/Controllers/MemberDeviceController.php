@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\NodePeerRevocationRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -23,7 +24,7 @@ class MemberDeviceController extends Controller
             ->where('user_id', $userId)
             ->where('status', 'registered')
             ->orderByDesc('created_at')
-            ->get(['id', 'installation_id', 'name', 'platform', 'status', 'created_at', 'revoked_at'])
+            ->get(['id', 'installation_id', 'name', 'platform', 'status', 'created_at', 'revoked_at', 'remove_requested_at'])
             ->map(fn (object $device): array => $this->present($device))
             ->all();
         $registeredCount = count($devices);
@@ -60,6 +61,7 @@ class MemberDeviceController extends Controller
                 ->where('user_id', $request->user()->id)
                 ->where('installation_id', $installationId)
                 ->where('status', 'registered')
+                ->whereNull('remove_requested_at')
                 ->lockForUpdate()
                 ->first(['id']);
             if (! $device) {
@@ -112,7 +114,7 @@ class MemberDeviceController extends Controller
                 ->lockForUpdate()
                 ->first();
             if ($existing) {
-                if ($existing->status === 'registered') {
+                if ($existing->status === 'registered' && $existing->remove_requested_at === null) {
                     return ['device' => $this->present($existing), 'created' => false];
                 }
 
@@ -166,10 +168,10 @@ class MemberDeviceController extends Controller
             ->header('Cache-Control', 'no-store, private');
     }
 
-    public function destroy(Request $request, string $id): Response|JsonResponse
+    public function destroy(Request $request, string $id, NodePeerRevocationRequestService $revocations): Response|JsonResponse
     {
         $userId = $request->user()->id;
-        $error = DB::transaction(function () use ($userId, $id): ?array {
+        $result = DB::transaction(function () use ($userId, $id, $revocations): array {
             DB::table('users')->where('id', $userId)->lockForUpdate()->first();
 
             $device = DB::table('member_devices')
@@ -179,31 +181,53 @@ class MemberDeviceController extends Controller
                 ->lockForUpdate()
                 ->first();
             if (! $device) {
-                return ['code' => 'not_found', 'message' => '设备不存在或已移除', 'status' => 404];
+                return ['error' => ['code' => 'not_found', 'message' => '设备不存在或已移除', 'status' => 404]];
             }
 
-            $pendingPeer = DB::table('node_access_peers')
+            $at = now()->utc()->toIso8601String();
+            $newRemovalRequest = $device->remove_requested_at === null;
+            if ($newRemovalRequest) {
+                DB::table('member_devices')->where('id', $id)->update([
+                    'remove_requested_at' => $at,
+                    'updated_at' => $at,
+                ]);
+                DB::table('subscriptions')->where('member_device_id', $id)->where('status', 'active')->update([
+                    'status' => 'revoked', 'token_encrypted' => null,
+                ]);
+            }
+
+            $peers = DB::table('node_access_peers')
                 ->where('user_id', $userId)
                 ->where('device_id', $id)
-                ->where('status', '!=', 'revoked')
-                ->exists();
-            if ($pendingPeer) {
-                return ['code' => 'device_peer_revocation_pending', 'message' => '设备仍关联未确认撤权的节点凭证，暂不能移除', 'status' => 409];
+                ->whereIn('status', ['active', 'provisioning', 'revocation_pending'])
+                ->lockForUpdate()->get();
+            foreach ($peers as $peer) {
+                $revocations->request($peer, 'device_removed');
             }
 
-            $revokedAt = now()->utc()->toIso8601String();
+            $pendingPeer = DB::table('node_access_peers')->where('device_id', $id)->where('status', '!=', 'revoked')->exists();
+            if ($pendingPeer) {
+                if ($newRemovalRequest) {
+                    $this->audit($userId, 'member_device.revocation_requested', $id);
+                }
+
+                return ['pending' => true];
+            }
+
             DB::table('member_devices')->where('id', $id)->update([
-                'status' => 'revoked',
-                'revoked_at' => $revokedAt,
-                'updated_at' => $revokedAt,
+                'status' => 'revoked', 'revoked_at' => $at, 'updated_at' => $at,
             ]);
             $this->audit($userId, 'member_device.revoked', $id);
 
-            return null;
+            return ['pending' => false];
         }, 3);
 
-        if ($error) {
-            return $this->error($error['code'], $error['message'], $error['status']);
+        if (isset($result['error'])) {
+            return $this->error($result['error']['code'], $result['error']['message'], $result['error']['status']);
+        }
+        if ($result['pending']) {
+            return response()->json(['data' => ['status' => 'revocation_pending']], 202)
+                ->header('Cache-Control', 'no-store, private');
         }
 
         return response()->noContent()->header('Cache-Control', 'no-store, private');
@@ -232,6 +256,7 @@ class MemberDeviceController extends Controller
             'status' => $device->status,
             'created_at' => $device->created_at,
             'revoked_at' => $device->revoked_at,
+            'removal_pending' => $device->remove_requested_at !== null,
         ];
     }
 

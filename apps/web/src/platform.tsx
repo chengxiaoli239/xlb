@@ -21,9 +21,9 @@ type NodeStatus = 'candidate' | 'available' | 'draining' | 'maintenance' | 'isol
 type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: NodeStatus; is_test: boolean; automation_managed: boolean; max_sessions: number; active_sessions: number; latency_ms: number | null; health_status: string; last_health_check_at: string | null; config_version: number; allowed_transitions: NodeStatus[]; updated_at: string };
 type NodeDetail = Node & { changes: Array<{ id: string; from_status: NodeStatus; to_status: NodeStatus; created_at: string; actor_name: string }> };
 type RouteVersion = { id: string; scope: 'test' | 'production'; version: number; status: string; canary_percent: number; previous_version_id: string | null; note: string | null; drain_until: string | null; published_at: string | null; nodes: Array<{ id: string; name: string; region: string; status: string; is_test: boolean; health_status: string; weight: number }> };
-type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
-type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string | null; last_used_at: string | null; url: string | null };
-type MemberDevice = { id: string; installation_id: string; name: string; platform: ClientPlatform | 'other'; status: 'registered'; created_at: string; revoked_at: string | null };
+type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingNodeRevocations: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
+type Subscription = { id: string; name: string; status: string; created_at: string; expires_at: string | null; last_used_at: string | null; url: string | null; device_id: string | null; device_name: string | null; credential_generation: number; rotated_at: string | null; requires_reimport: boolean; node_binding_status?: 'pending' | 'confirmed' | 'unavailable' | null };
+type MemberDevice = { id: string; installation_id: string; name: string; platform: ClientPlatform | 'other'; status: 'registered'; created_at: string; revoked_at: string | null; removal_pending: boolean };
 type MemberDeviceSummary = { entitlement_active: boolean; max_devices: number; registered_count: number; available_slots: number; devices: MemberDevice[] };
 type ClientPlatform = 'android' | 'ios' | 'windows' | 'macos' | 'linux' | 'browser';
 type ClientCompatibility = 'pending' | 'verified' | 'maintenance' | 'unsupported';
@@ -373,6 +373,7 @@ function OverviewPage({ user, refresh, setView, notify }: { user: User; refresh:
   ] : null;
   return <div className="page-stack">
     <PageHeading eyebrow={isAdmin ? '运营总览' : '账户总览'} title={'早上好，' + user.name} subtitle={isAdmin ? '这里是迅连宝本地平台的运行概况。' : '管理你的套餐、设备和 Clash 订阅。'} action={<button className="secondary-button" onClick={() => notify('当前为本地开发环境')}><ArrowDownToLine size={15} /> 导出概览</button>} />
+    {isAdmin && summary && summary.pendingNodeRevocations > 0 && <div className="notice notice-warning" role="status"><Bell size={16} /><span><b>{summary.pendingNodeRevocations} 条节点撤权等待回执。</b> 控制面已停止新授权；节点实际断流尚未确认，请检查撤权处理器和节点状态。</span></div>}
     {isAdmin && metrics ? <div className="metric-grid">{metrics.map(item => <Metric key={item.label} {...item} />)}</div> : <MemberEntitlement entitlement={entitlement} setView={setView} />}
     <div className="content-grid">
       <section className="panel activity-panel"><SectionTitle title={isAdmin ? '近期操作' : '最近订单'} detail={isAdmin ? '管理员与系统的最近操作记录' : '仅显示当前账户的订单'} action={<button className="text-button" onClick={() => setView(isAdmin ? 'nodes' : 'orders')}>查看全部 <ArrowUpRight size={14} /></button>} />
@@ -427,7 +428,11 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
   const [deviceBusy, setDeviceBusy] = useState(false);
   const [deviceForm, setDeviceForm] = useState<{ installation_id: string; name: string; platform: ClientPlatform }>({ installation_id: '', name: '', platform: 'android' });
   const [createdUrl, setCreatedUrl] = useState('');
+  const [linkDevice, setLinkDevice] = useState<MemberDevice | null>(null);
   const [showSubscription, setShowSubscription] = useState(false);
+  const [pendingSubscriptionId, setPendingSubscriptionId] = useState<string | null>(null);
+  const [pendingBindingStatus, setPendingBindingStatus] = useState<'pending' | 'unavailable' | null>(null);
+  const [bindingRefreshBusy, setBindingRefreshBusy] = useState(false);
   const [rotateTarget, setRotateTarget] = useState<Subscription | null>(null);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
@@ -459,9 +464,9 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
     if (!deviceRemovalTarget) return;
     setDeviceBusy(true);
     try {
-      await api('/api/v1/me/devices/' + deviceRemovalTarget.id, { method: 'DELETE' });
+      const result = await api<{ status?: string }>('/api/v1/me/devices/' + deviceRemovalTarget.id, { method: 'DELETE' });
       setDeviceRemovalTarget(null);
-      notify('设备登记已移除；如关联节点凭证，需先完成节点撤权');
+      notify(result.status === 'revocation_pending' ? '撤权请求已提交；节点确认后释放设备名额' : '设备已移除');
       await load();
     } catch (error) {
       notify((error as Error).message);
@@ -469,47 +474,120 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
       setDeviceBusy(false);
     }
   };
-  const create = async () => {
+  const createForDevice = async (device: MemberDevice) => {
     setBusy(true);
-    try { const item = await api<Subscription>('/api/v1/me/subscriptions', { method: 'POST' }); setCreatedUrl(item.url ?? ''); setShowSubscription(true); notify('订阅链接已生成；会员权益生效后可获取线路配置'); await load(); }
+    try {
+      const item = await api<Subscription>('/api/v1/me/devices/' + device.id + '/subscription', { method: 'POST' });
+      setLinkDevice(device);
+      setCreatedUrl(item.url ?? '');
+      setPendingSubscriptionId(item.url ? null : item.id);
+      setPendingBindingStatus(item.url ? null : item.node_binding_status === 'pending' ? 'pending' : 'unavailable');
+      setShowSubscription(true);
+      notify(item.url ? '已为此设备准备独立订阅链接' : '凭证已创建，等待节点确认后才会提供链接');
+      await load();
+    }
     catch (error) { notify((error as Error).message); }
     finally { setBusy(false); }
   };
   const revoke = async (row: Subscription) => {
-    try { await api('/api/v1/me/subscriptions/' + row.id + '/revoke', { method: 'POST' }); notify('订阅凭证已撤销'); await load(); }
+    if (!row.device_id) return;
+    try { await api('/api/v1/me/devices/' + row.device_id + '/subscription/revoke', { method: 'POST' }); notify('此设备的订阅凭证已撤销；既有连接仍需节点回执确认'); await load(); }
     catch (error) { notify((error as Error).message); }
   };
   const rotate = async (row: Subscription) => {
+    if (!row.device_id) return;
     setBusy(true);
-    try { const next = await api<Subscription>('/api/v1/me/subscriptions/' + row.id + '/rotate', { method: 'POST' }); setCreatedUrl(next.url ?? ''); setRotateTarget(null); notify('旧链接已撤销，新链接可随时复制'); await load(); }
+    try {
+      const next = await api<Subscription>('/api/v1/me/devices/' + row.device_id + '/subscription/rotate', { method: 'POST' });
+      setLinkDevice(deviceSummary?.devices.find(device => device.id === row.device_id) ?? null);
+      setCreatedUrl(next.url ?? '');
+      setPendingSubscriptionId(next.url ? null : next.id);
+      setPendingBindingStatus(next.url ? null : next.node_binding_status === 'pending' ? 'pending' : 'unavailable');
+      setRotateTarget(null);
+      notify(next.url ? '新链接已生成；Clash Verge 等客户端需要重新导入' : '旧链接已失效；新链接等待节点确认');
+      await load();
+    }
     catch (error) { notify((error as Error).message); }
     finally { setBusy(false); }
   };
-  const copy = async (value: string) => {
+  const copy = async (value: string, device?: MemberDevice | null) => {
     const absolute = new URL(value, window.location.origin).toString();
     try { await navigator.clipboard.writeText(absolute); notify('已复制订阅地址'); }
-    catch { setCreatedUrl(absolute); notify('无法访问剪贴板，请手动复制'); }
+    catch { if (device) setLinkDevice(device); setCreatedUrl(absolute); setShowSubscription(true); notify('无法访问剪贴板，请在对话框中手动复制'); }
   };
-  const showQr = (url: string) => {
+  const showQr = (url: string, device: MemberDevice) => {
+    setLinkDevice(device);
     setCreatedUrl(url);
+    setPendingSubscriptionId(null);
+    setPendingBindingStatus(null);
     setRotateTarget(null);
     setShowSubscription(true);
   };
-  const current = rows?.find(row => row.status === 'active' && row.url);
+  const openSubscriptionStatus = (subscription: Subscription, device: MemberDevice) => {
+    setLinkDevice(device);
+    setCreatedUrl(subscription.url ?? '');
+    setPendingSubscriptionId(subscription.url ? null : subscription.id);
+    setPendingBindingStatus(subscription.url ? null : subscription.node_binding_status === 'pending' ? 'pending' : 'unavailable');
+    setRotateTarget(null);
+    setShowSubscription(true);
+  };
+  const refreshPendingSubscription = async () => {
+    if (!pendingSubscriptionId || bindingRefreshBusy) return;
+    setBindingRefreshBusy(true);
+    try {
+      const subscriptions = await api<Subscription[]>('/api/v1/me/subscriptions');
+      setRows(subscriptions);
+      const current = subscriptions.find(item => item.id === pendingSubscriptionId);
+      if (current?.url) {
+        setCreatedUrl(current.url);
+        setPendingSubscriptionId(null);
+        setPendingBindingStatus(null);
+        notify('节点已确认此设备凭证');
+      } else if (current) {
+        setPendingBindingStatus(current.node_binding_status === 'pending' ? 'pending' : 'unavailable');
+      }
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setBindingRefreshBusy(false);
+    }
+  };
+  const deviceSubscriptions = rows?.filter(row => row.device_id) ?? [];
   return <div className="page-stack">
-    <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="购买后自动准备固定订阅地址；后续续费继续使用同一地址。也可以在购买前获取。" action={<div className="subscription-actions"><button className="secondary-button" disabled={!current?.url} onClick={() => current?.url && void copy(current.url)}><Clipboard size={15} />复制链接</button><button className="primary-button" disabled={busy || !rows} onClick={() => { if (current?.url) showQr(current.url); else { setCreatedUrl(''); setRotateTarget(null); setShowSubscription(true); } }}><QrCode size={16} />{current ? '扫码导入' : '获取二维码'}</button></div>} />
-    <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>权限说明</b> 订阅链接可预先创建；客户端仅会在当前会员权益有效且线路可用时取得配置。本地预览使用测试节点，不提供真实连接。</span></div>
+    <PageHeading eyebrow="账户连接" title="订阅与设备" subtitle="为每台已登记设备单独管理 Clash / Mihomo 订阅链接。" />
+    <div className="notice notice-warning"><ShieldCheck size={16} /><span><b>本地测试状态</b> 当前只验证逐设备凭证与导入流程，配置使用演示节点。订阅 URL 本身不能证明物理设备身份，生产签发仍关闭；轮换链接后，不能自动替换地址的客户端需要重新导入。</span></div>
     <section className="panel">
       <SectionTitle title="设备登记" detail={deviceSummary ? `${deviceSummary.registered_count} / ${deviceSummary.max_devices} 个名额` : '读取中'} action={<button className="primary-button" disabled={!deviceSummary?.entitlement_active || !deviceSummary.available_slots || deviceBusy} onClick={openDeviceModal}><Smartphone size={15} /> 登记设备</button>} />
       {!deviceSummary ? <LoadingBlock /> : <>
         <div className="device-quota"><span>剩余名额 <b>{deviceSummary.available_slots}</b></span><span>可登记设备上限 {deviceSummary.max_devices} 台</span></div>
-        <div className="notice notice-neutral"><ShieldCheck size={16} /><span>设备名额按此列表中的已登记设备计算。</span></div>
+        <div className="notice notice-neutral"><ShieldCheck size={16} /><span>撤权确认中的设备仍占用名额，收到节点回执后自动释放。</span></div>
         {!deviceSummary.devices.length ? <Empty title="暂无登记设备" detail={deviceSummary.entitlement_active ? '登记常用设备后，可在此查看和移除。' : '购买有效套餐后即可登记设备。'} /> : <div className="table-wrap"><table><thead><tr><th>设备</th><th>平台</th><th>登记状态</th><th>登记时间</th><th>操作</th></tr></thead><tbody>{deviceSummary.devices.map(device => {
           const platform = clientPlatforms.find(item => item.id === device.platform);
           const Icon = platform?.icon ?? Monitor;
-          return <tr key={device.id}><td><span className="table-main"><Icon size={16} />{device.name}</span></td><td>{platform?.label ?? device.platform}</td><td><StatusPill status="已登记" tone="green" /></td><td>{dateTime(device.created_at)}</td><td><button className="text-button danger-text" onClick={() => setDeviceRemovalTarget(device)}><X size={14} /> 移除</button></td></tr>;
+          return <tr key={device.id}><td><span className="table-main"><Icon size={16} />{device.name}</span></td><td>{platform?.label ?? device.platform}</td><td><StatusPill status={device.removal_pending ? '撤权确认中' : '已登记'} tone={device.removal_pending ? 'amber' : 'green'} /></td><td>{dateTime(device.created_at)}</td><td>{device.removal_pending ? <span className="table-sub">等待节点回执</span> : <button className="text-button danger-text" onClick={() => setDeviceRemovalTarget(device)}><X size={14} /> 移除</button>}</td></tr>;
         })}</tbody></table></div>}
       </>}
+    </section>
+    <section className="panel">
+      <SectionTitle title="第三方客户端订阅" detail="每台登记设备独立凭证" />
+      {!deviceSummary || !rows ? <LoadingBlock /> : !deviceSummary.devices.length ? <Empty title="先登记一台设备" detail="设备登记会计入套餐上限，然后可为它创建单独订阅链接。" /> : <div className="table-wrap"><table><thead><tr><th>设备</th><th>凭证状态</th><th>版本</th><th>操作</th></tr></thead><tbody>{deviceSummary.devices.map(device => {
+        const subscription = deviceSubscriptions.find(row => row.device_id === device.id);
+        const hasUrl = subscription?.status === 'active' && Boolean(subscription.url);
+        const bindingPending = subscription?.status === 'active' && subscription.node_binding_status === 'pending';
+        const credentialStatus = hasUrl ? '凭证可用' : subscription?.status === 'revoked' ? '已撤销' : bindingPending ? '节点确认中' : subscription ? '暂不可用' : '未创建';
+        return <tr key={device.id}>
+          <td><span className="table-main"><Link2 size={15} />{device.name}</span><small className="table-sub">{device.platform}</small></td>
+          <td><StatusPill status={credentialStatus} tone={hasUrl ? 'green' : bindingPending ? 'amber' : 'gray'} /></td>
+          <td>{subscription ? `第 ${subscription.credential_generation} 代` : '—'}</td>
+          <td><div className="row-actions">{hasUrl && subscription?.url ? <>
+            <button className="text-button" aria-label={'复制 ' + device.name + ' 的订阅链接'} onClick={() => void copy(subscription.url!, device)}><Clipboard size={14} />复制</button>
+            <button className="text-button" aria-label={'显示 ' + device.name + ' 的二维码'} onClick={() => showQr(subscription.url!, device)}><QrCode size={14} />二维码</button>
+            {(device.platform === 'windows' || device.platform === 'macos') && <a className="text-button" href={clashVergeImportUrl(subscription.url)}><ArrowUpRight size={14} />导入 Verge</a>}
+            <button className="text-button" disabled={busy} onClick={() => { setRotateTarget(subscription); setLinkDevice(device); setCreatedUrl(''); setShowSubscription(true); }}>轮换</button>
+            <button className="text-button danger-text" disabled={busy} onClick={() => void revoke(subscription)}>撤销</button>
+          </> : subscription?.status === 'active' ? <button className="text-button" disabled={busy || deviceBusy || device.removal_pending} onClick={() => openSubscriptionStatus(subscription, device)}><RefreshCw size={14} />查看状态</button> : <button className="text-button" disabled={busy || deviceBusy || !deviceSummary.entitlement_active || device.removal_pending} onClick={() => void createForDevice(device)}><Link2 size={14} />{subscription ? '重新生成' : '生成链接'}</button>}</div></td>
+        </tr>;
+      })}</tbody></table></div>}
     </section>
     {deviceModal && <Modal title="登记设备" detail="登记会占用套餐设备名额" onClose={() => { if (!deviceBusy) setDeviceModal(false); }}>
       <form className="device-registration-form" onSubmit={event => void registerDevice(event)}>
@@ -520,16 +598,20 @@ function SubscriptionsPage({ refresh, notify }: { refresh: number; notify: (valu
       </form>
     </Modal>}
     {deviceRemovalTarget && <Modal title="移除设备" detail={deviceRemovalTarget.name} onClose={() => { if (!deviceBusy) setDeviceRemovalTarget(null); }}>
-      <p className="modal-copy">移除会释放一个套餐设备名额。若服务端仍有关联的未撤权节点凭证，系统会阻止移除；此页面不会把登记状态当作连接状态。</p>
+      <p className="modal-copy">提交后立即禁止该设备取得新配置。若节点仍有关联凭证，设备会继续占用名额，收到撤权回执后自动释放。</p>
       <div className="modal-actions"><button className="secondary-button" disabled={deviceBusy} onClick={() => setDeviceRemovalTarget(null)}>取消</button><button className="danger-button" disabled={deviceBusy} onClick={() => void removeDevice()}><X size={15} /> 确认移除</button></div>
     </Modal>}
-    {showSubscription && <Modal title={createdUrl ? '固定订阅链接' : rotateTarget ? '轮换订阅链接' : '获取固定订阅链接'} detail={createdUrl ? '可随时在此页面重新复制；请勿公开分享' : rotateTarget ? '旧链接将立即失效' : '同一账户重复获取时会返回现有链接'} onClose={() => { if (busy) return; setShowSubscription(false); setCreatedUrl(''); setRotateTarget(null); }}>
-      {createdUrl ? <div className="subscription-qr-layout"><div className="subscription-qr"><QRCodeSVG value={absoluteSubscriptionUrl(createdUrl)} size={196} level="M" title="固定订阅二维码" /><b>用手机客户端扫描导入</b><span>{subscriptionQrNote()}</span></div><div className="secret-result"><div><span className="eyebrow">固定订阅 · 续费沿用</span><code>{absoluteSubscriptionUrl(createdUrl)}</code></div><div className="subscription-import-actions"><button className="secondary-button" onClick={() => void copy(createdUrl)}><Clipboard size={15} /> 复制链接</button><a className="secondary-button" href={clashVergeImportUrl(createdUrl)}><ArrowUpRight size={15} /> 导入 Clash Verge Rev</a></div></div></div> : <><p className="modal-copy">{rotateTarget ? '确认轮换后，当前订阅链接立即失效。请更新已连接的客户端。' : '订阅链接可以提前获取；会员权益生效且有可用线路后，兼容客户端即可从此地址获取配置。'}</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowSubscription(false); setRotateTarget(null); }}>取消</button><button className="primary-button" disabled={busy} onClick={() => void (rotateTarget ? rotate(rotateTarget) : create())}>{rotateTarget ? '确认轮换' : '获取链接'}</button></div></>}
+    {showSubscription && <Modal title={createdUrl ? '设备订阅链接' : pendingSubscriptionId ? '等待节点确认' : '轮换设备订阅链接'} detail={linkDevice ? linkDevice.name + ' · 请勿转发' : '每台设备使用独立凭证'} onClose={() => { if (busy || bindingRefreshBusy) return; setShowSubscription(false); setCreatedUrl(''); setPendingSubscriptionId(null); setPendingBindingStatus(null); setRotateTarget(null); }}>
+      {createdUrl ? <div className="subscription-qr-layout"><div className="subscription-qr"><QRCodeSVG value={absoluteSubscriptionUrl(createdUrl)} size={196} level="M" title="设备订阅二维码" /><b>在第三方客户端扫描导入</b><span>{subscriptionQrNote()}</span></div><div className="secret-result"><div><span className="eyebrow">{linkDevice?.name ?? '设备'} · Clash / Mihomo</span><code>{absoluteSubscriptionUrl(createdUrl)}</code></div><div className="subscription-import-actions"><button className="secondary-button" onClick={() => void copy(createdUrl, linkDevice)}><Clipboard size={15} /> 复制链接</button>{linkDevice && (linkDevice.platform === 'windows' || linkDevice.platform === 'macos') && <a className="secondary-button" href={clashVergeImportUrl(createdUrl)}><ArrowUpRight size={15} /> 导入 Clash Verge Rev</a>}</div><div className="notice notice-warning"><ShieldCheck size={15} /><span>轮换后旧地址立即失效。客户端不支持自动替换订阅 URL 时，需重新导入新地址。二维码包含访问凭证，请勿公开。</span></div></div></div> : pendingSubscriptionId ? <div className="page-stack"><div className={'notice ' + (pendingBindingStatus === 'pending' ? 'notice-neutral' : 'notice-warning')} role="status"><ShieldCheck size={16} /><span>{pendingBindingStatus === 'pending' ? '凭证已保存，正在等待与当前设备、节点和凭证代数匹配的确认回执。确认前链接保持禁用。' : '当前凭证尚无有效节点确认，链接保持禁用；不会展示二维码或可复制地址。'}</span></div><div className="modal-actions"><button className="secondary-button" disabled={bindingRefreshBusy} onClick={() => void refreshPendingSubscription()}><RefreshCw size={14} />{bindingRefreshBusy ? '刷新中' : '刷新状态'}</button><button className="primary-button" disabled={bindingRefreshBusy} onClick={() => { setShowSubscription(false); setPendingSubscriptionId(null); setPendingBindingStatus(null); }}>关闭</button></div></div> : <><p className="modal-copy">确认轮换后旧订阅 URL 会立即失效；已经导入的第三方客户端需要更新订阅地址。该操作不代表既有节点连接已断开。</p><div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => { setShowSubscription(false); setRotateTarget(null); }}>取消</button><button className="primary-button" disabled={busy || !rotateTarget} onClick={() => rotateTarget && void rotate(rotateTarget)}>确认轮换</button></div></>}
     </Modal>}
-    <section className="panel"><SectionTitle title="订阅凭证" detail={rows ? rows.length + ' 条记录' : '读取中'} action={<button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新</button>} />
-      {!rows ? <LoadingBlock /> : !rows.length ? <Empty title="尚未创建订阅" detail="获取固定链接后，可随时在这里复制或轮换地址。" /> : <div className="table-wrap"><table><thead><tr><th>名称</th><th>凭证状态</th><th>创建时间</th><th>配置权限</th><th>最近访问</th><th>操作</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><span className="table-main"><Link2 size={15} />{row.name}</span><small className="table-sub">{row.id.slice(0, 14)}</small></td><td><StatusPill status={row.status === 'active' ? '可用凭证' : '已撤销'} tone={row.status === 'active' ? 'green' : 'gray'} /></td><td>{shortDate(row.created_at)}</td><td>需有效会员权益</td><td>{shortDate(row.last_used_at)}</td><td><div className="row-actions">{row.status === 'active' && <>{row.url && <><button className="text-button" aria-label="复制固定订阅链接" title="复制固定订阅链接" onClick={() => void copy(row.url!)}><Clipboard size={14} />复制</button><button className="text-button" aria-label="显示订阅二维码" title="显示订阅二维码" onClick={() => showQr(row.url!)}><QrCode size={14} />二维码</button></>}<button className="text-button" onClick={() => { setCreatedUrl(''); setRotateTarget(row); setShowSubscription(true); }}>轮换</button><button className="text-button danger-text" onClick={() => void revoke(row)}>撤销</button></>}</div></td></tr>)}</tbody></table></div>}
+    <section className="panel"><SectionTitle title="订阅凭证" detail={rows ? deviceSubscriptions.length + ' 条设备凭证' : '读取中'} action={<button className="secondary-button" onClick={() => void load()}><RefreshCw size={14} /> 刷新</button>} />
+      {!rows ? <LoadingBlock /> : !deviceSubscriptions.length ? <Empty title="尚未创建设备订阅" detail="在上方为已登记设备生成链接，账号级测试凭证不会显示在这里。" /> : <div className="table-wrap"><table><thead><tr><th>设备</th><th>凭证状态</th><th>生成时间</th><th>最近拉取</th><th>操作</th></tr></thead><tbody>{deviceSubscriptions.map(row => {
+        const bindingPending = row.status === 'active' && row.node_binding_status === 'pending';
+        const credentialStatus = row.status !== 'active' ? '已撤销' : row.url ? '可用凭证' : bindingPending ? '节点确认中' : '暂不可用';
+        return <tr key={row.id}><td><span className="table-main"><Link2 size={15} />{row.device_name ?? row.name}</span><small className="table-sub">第 {row.credential_generation} 代</small></td><td><StatusPill status={credentialStatus} tone={row.url ? 'green' : bindingPending ? 'amber' : 'gray'} /></td><td>{shortDate(row.rotated_at ?? row.created_at)}</td><td>{shortDate(row.last_used_at)}</td><td><div className="row-actions">{row.status === 'active' && row.device_id && <>{row.url ? <><button className="text-button" onClick={() => void copy(row.url!)}><Clipboard size={14} />复制</button><button className="text-button" onClick={() => { const device = deviceSummary?.devices.find(item => item.id === row.device_id); if (device) showQr(row.url!, device); }}><QrCode size={14} />二维码</button></> : <button className="text-button" onClick={() => { const device = deviceSummary?.devices.find(item => item.id === row.device_id); if (device) openSubscriptionStatus(row, device); }}><RefreshCw size={14} />查看状态</button>}<button className="text-button" onClick={() => { setCreatedUrl(''); setPendingSubscriptionId(null); setPendingBindingStatus(null); setLinkDevice(deviceSummary?.devices.find(item => item.id === row.device_id) ?? null); setRotateTarget(row); setShowSubscription(true); }}>轮换</button><button className="text-button danger-text" onClick={() => void revoke(row)}>撤销</button></>}</div></td></tr>;
+      })}</tbody></table></div>}
     </section>
-    <div className="two-column"><section className="panel"><SectionTitle title="连接客户端" detail="外部客户端兼容性仍需逐版本验证" /><div className="client-list"><div><span className="client-icon"><Monitor size={17} /></span><span><b>Clash Verge Rev</b><small>Mihomo 内核 · 计划首批验证</small></span><StatusPill status="待验证" tone="amber" /></div><div><span className="client-icon"><Smartphone size={17} /></span><span><b>Clash Mi</b><small>应用名称与平台待确认</small></span><StatusPill status="待确认" tone="gray" /></div></div></section><section className="panel"><SectionTitle title="使用状态" detail="权限与接入边界" /><div className="policy-list"><p><ShieldCheck size={15} /> 令牌以摘要校验、加密密文保存。</p><p><RefreshCw size={15} /> 轮换会立即废止旧链接。</p><p><Activity size={15} /> 用量由服务端策略执行，不依赖配置文案。</p><p><Globe2 size={15} /> 本地测试节点使用保留地址，不提供真实连接。</p></div></section></div>
+    <div className="two-column"><section className="panel"><SectionTitle title="连接客户端" detail="外部客户端兼容性仍需逐版本验证" /><div className="client-list"><div><span className="client-icon"><Monitor size={17} /></span><span><b>Clash Verge Rev</b><small>Mihomo 内核 · 导入协议待真机验收</small></span><StatusPill status="待验证" tone="amber" /></div><div><span className="client-icon"><Smartphone size={17} /></span><span><b>Clash Mi</b><small>应用名称与平台待确认</small></span><StatusPill status="待确认" tone="gray" /></div></div></section><section className="panel"><SectionTitle title="使用状态" detail="权限与接入边界" /><div className="policy-list"><p><ShieldCheck size={15} /> 令牌摘要校验，密文加密保存。</p><p><RefreshCw size={15} /> 轮换立即废止旧订阅 URL；不代表既有连接已断开。</p><p><Activity size={15} /> 服务端会员和设备状态仍会检查。</p><p><Globe2 size={15} /> 本地测试节点使用保留地址，不提供真实连接。</p></div></section></div>
   </div>;
 }
 

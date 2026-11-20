@@ -24,6 +24,7 @@ class SandboxRefundProcessor
                 if (! $order->is_test) {
                     return $this->failure(409, 'test_only', '当前环境只允许处理本地测试订单');
                 }
+                DB::table('users')->where('id', $order->user_id)->lockForUpdate()->first();
 
                 $refund = DB::table('sandbox_refund_events')->where('order_id', $orderId)->first();
                 if ($refund) {
@@ -82,8 +83,11 @@ class SandboxRefundProcessor
                     'target_type' => 'order', 'target_id' => $orderId, 'created_at' => $at,
                 ]);
 
-                $hasRemainingEntitlement = DB::table('entitlements')->where('user_id', $order->user_id)->where('status', 'active')
-                    ->where('ends_at', '>', $at)->exists();
+                $hasRemainingEntitlement = DB::table('entitlements as e')->join('plans as p', 'p.id', '=', 'e.plan_id')
+                    ->join('users as u', 'u.id', '=', 'e.user_id')
+                    ->where('e.user_id', $order->user_id)->where('e.status', 'active')->where('u.status', 'active')
+                    ->where('e.starts_at', '<=', $at)->where('e.ends_at', '>', $at)
+                    ->whereColumn('e.data_used_gb', '<', 'p.traffic_gb')->exists();
                 if (! $hasRemainingEntitlement) {
                     $subscriptions = DB::table('subscriptions')->where('user_id', $order->user_id)
                         ->where('status', 'active')->lockForUpdate()->get(['id']);
@@ -97,16 +101,17 @@ class SandboxRefundProcessor
                     }
 
                     $peers = DB::table('node_access_peers')->where('user_id', $order->user_id)
-                        ->where('status', 'active')->lockForUpdate()->get(['id']);
+                        ->whereIn('status', ['active', 'provisioning'])->lockForUpdate()->get(['id', 'generation']);
                     foreach ($peers as $peer) {
                         $queued = DB::table('node_access_revocation_outbox')->insertOrIgnore([
                             'id' => (string) Str::uuid(), 'peer_id' => $peer->id, 'refund_event_id' => $refundId,
+                            'generation' => (int) $peer->generation + 1,
                             'status' => 'pending', 'attempts' => 0, 'next_attempt_at' => $at,
                             'created_at' => $at, 'updated_at' => $at,
                         ]);
                         if ($queued === 1) {
-                            DB::table('node_access_peers')->where('id', $peer->id)->where('status', 'active')->update([
-                                'status' => 'revocation_pending', 'updated_at' => $at,
+                            DB::table('node_access_peers')->where('id', $peer->id)->whereIn('status', ['active', 'provisioning'])->update([
+                                'status' => 'revocation_pending', 'generation' => (int) $peer->generation + 1, 'updated_at' => $at,
                             ]);
                             DB::table('audit_logs')->insert([
                                 'id' => (string) Str::uuid(), 'actor_user_id' => $adminId,

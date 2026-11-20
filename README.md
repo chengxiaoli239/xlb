@@ -1,7 +1,7 @@
 # 迅连宝本地平台
 
 本项目是从零开始的本地开发版，和旧站静态原型、任何线上后台及支付系统隔离。
-业务、研发与运维的分阶段实施方案见 [VPN 业务与运维路线图](docs/vpn-business-operations-roadmap.md)。
+业务、研发与运维的分阶段实施方案见 [VPN 业务与运维路线图](docs/vpn-business-operations-roadmap.md)；上线工程总规划（批量部署/快速上下线/压测负载均衡/四端研发/多云长期演进）见 [上线工程总体规划](docs/launch-engineering-master-plan.md)。
 
 ## 本地运行
 

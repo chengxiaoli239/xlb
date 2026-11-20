@@ -148,7 +148,7 @@ class SubscriptionRouteService
             ->where('rn.route_version_id', $selected->id)->where('n.status', 'available')->whereIn('n.health_status', $healthyStatuses)
             ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('node_deployments as d')->whereColumn('d.node_id', 'n.id'))
             ->orderByDesc('rn.weight')->orderBy('n.id')
-            ->get(['n.id', 'n.name', 'n.endpoint_host', 'n.endpoint_port', 'n.last_health_check_at'])
+            ->get(['n.id', 'n.name', 'n.endpoint_host', 'n.endpoint_port', 'n.agent_endpoint', 'n.max_sessions', 'n.active_sessions', 'n.last_health_check_at'])
             ->filter(fn (object $node): bool => $this->hasFreshHealthCheck($node->last_health_check_at));
 
         return $nodes->isEmpty() ? null : ['version' => $selected, 'nodes' => $nodes->all()];

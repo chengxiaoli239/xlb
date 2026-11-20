@@ -9,7 +9,10 @@ use Throwable;
 
 class NodeAccessRevocationProcessor
 {
-    public function __construct(private NodePeerRevocationDriver $driver) {}
+    public function __construct(
+        private NodePeerRevocationDriver $driver,
+        private NodePeerUsageAccountingService $usage,
+    ) {}
 
     public function processDue(int $limit = 25): int
     {
@@ -81,22 +84,20 @@ class NodeAccessRevocationProcessor
             throw new RuntimeException('The node peer or node record is unavailable.');
         }
 
-        $result = $this->driver->revoke($node, $peer, $job->id);
-        $acknowledgementId = $result['acknowledgement_id'] ?? null;
-        $uploadBytes = $result['upload_bytes'] ?? null;
-        $downloadBytes = $result['download_bytes'] ?? null;
-        $confirmationStatus = $result['confirmation_status'] ?? null;
-        if (! is_string($acknowledgementId) || $acknowledgementId === '' || strlen($acknowledgementId) > 255
-            || ! is_int($uploadBytes) || $uploadBytes < 0
-            || ! is_int($downloadBytes) || $downloadBytes < 0
-            || ! in_array($confirmationStatus, ['confirmed', 'confirmed_test'], true)) {
-            throw new RuntimeException('The node revocation acknowledgement is invalid.');
-        }
-        if ($confirmationStatus === 'confirmed_test' && ! app()->environment(['local', 'testing'])) {
-            throw new RuntimeException('Sandbox acknowledgement is not valid in this environment.');
-        }
+        $result = $this->driver->revoke($node, $peer, $job->id, (int) $job->generation);
+        $acknowledgement = NodeAccessAgentAcknowledgement::revocation(
+            $result,
+            $node,
+            $peer,
+            $job->id,
+            (int) $job->generation,
+        );
+        $acknowledgementId = $acknowledgement['acknowledgement_id'];
+        $uploadBytes = $acknowledgement['upload_bytes'];
+        $downloadBytes = $acknowledgement['download_bytes'];
+        $confirmationStatus = $acknowledgement['confirmation_status'];
 
-        DB::transaction(function () use ($job, $acknowledgementId, $uploadBytes, $downloadBytes, $confirmationStatus): void {
+        DB::transaction(function () use ($job, $peer, $acknowledgementId, $uploadBytes, $downloadBytes, $confirmationStatus): void {
             $claimed = DB::table('node_access_revocation_outbox')->where('id', $job->id)->where('status', 'processing')
                 ->where('lock_token', $job->lock_token)->lockForUpdate()->first();
             if (! $claimed) {
@@ -110,9 +111,14 @@ class NodeAccessRevocationProcessor
             }
             $finalUploadBytes = max((int) $peer->upload_bytes, $uploadBytes);
             $finalDownloadBytes = max((int) $peer->download_bytes, $downloadBytes);
+            $this->usage->applySnapshot($peer->id, $finalUploadBytes, $finalDownloadBytes);
             DB::table('node_access_peers')->where('id', $job->peer_id)->update([
                 'status' => 'revoked', 'upload_bytes' => $finalUploadBytes, 'download_bytes' => $finalDownloadBytes,
+                'credential_ciphertext' => null, 'profile_ciphertext' => null,
                 'revoked_at' => $at, 'updated_at' => $at,
+            ]);
+            DB::table('nodes')->where('id', $peer->node_id)->update([
+                'active_sessions' => DB::raw('MAX(0, active_sessions - 1)'), 'updated_at' => $at,
             ]);
             DB::table('node_access_revocation_outbox')->where('id', $job->id)->where('lock_token', $job->lock_token)->update([
                 'status' => $confirmationStatus, 'acknowledgement_id' => $acknowledgementId,
@@ -120,6 +126,23 @@ class NodeAccessRevocationProcessor
                 'last_error_code' => null, 'processing_at' => null, 'lease_expires_at' => null, 'lock_token' => null,
                 'confirmed_at' => $at, 'updated_at' => $at,
             ]);
+
+            $device = DB::table('member_devices')->where('id', $peer->device_id)->where('user_id', $peer->user_id)
+                ->lockForUpdate()->first();
+            if ($device && $device->remove_requested_at !== null) {
+                $hasRemainingPeers = DB::table('node_access_peers')->where('device_id', $peer->device_id)
+                    ->where('status', '!=', 'revoked')->exists();
+                if (! $hasRemainingPeers) {
+                    DB::table('member_devices')->where('id', $peer->device_id)->where('status', 'registered')->update([
+                        'status' => 'revoked', 'revoked_at' => $at, 'updated_at' => $at,
+                    ]);
+                    DB::table('audit_logs')->insert([
+                        'id' => (string) Str::uuid(), 'actor_user_id' => $peer->user_id,
+                        'action' => 'member_device.revoked', 'target_type' => 'member_device',
+                        'target_id' => $peer->device_id, 'created_at' => $at,
+                    ]);
+                }
+            }
         }, 3);
     }
 

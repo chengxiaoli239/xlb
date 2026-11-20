@@ -6,6 +6,9 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.IBinder;
@@ -16,6 +19,8 @@ import com.xlb.vpn.presentation.MainActivity;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -29,6 +34,7 @@ public final class XlbVpnService extends VpnService {
     public static final String ACTION_STOP = "com.xlb.vpn.STOP_TUNNEL";
     public static final String ACTION_STATE = "com.xlb.vpn.TUNNEL_STATE";
     public static final String EXTRA_PROFILE = "profile";
+    public static final String EXTRA_ROUTE_NAME = "route_name";
     public static final String EXTRA_STATE = "state";
     public static final String EXTRA_MESSAGE = "message";
     public static final String INTERNAL_PERMISSION = "com.xlb.vpn.permission.INTERNAL";
@@ -37,9 +43,14 @@ public final class XlbVpnService extends VpnService {
     public static final String STATE_DISCONNECTED = "disconnected";
     public static final String STATE_ERROR = "error";
     private static volatile String currentState = STATE_DISCONNECTED;
+    private static volatile String currentRouteName = "";
 
     private static final String CHANNEL_ID = "xlb_vpn";
     private static final int NOTIFICATION_ID = 31;
+    private static final String[] PROBE_URLS = {
+            "https://www.gstatic.com/generate_204",
+            "https://cp.cloudflare.com/generate_204"
+    };
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService tunnelWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger connectionAttempt = new AtomicInteger();
@@ -47,6 +58,14 @@ public final class XlbVpnService extends VpnService {
 
     public static String currentState() {
         return currentState;
+    }
+
+    public static String currentRouteName() {
+        return currentRouteName;
+    }
+
+    public static String firstRouteName(String profile) {
+        return MihomoCore.firstRouteName(profile);
     }
 
     @Override
@@ -61,9 +80,12 @@ public final class XlbVpnService extends VpnService {
             return START_NOT_STICKY;
         }
         String profile = intent.getStringExtra(EXTRA_PROFILE);
+        String requestedRouteName = intent.getStringExtra(EXTRA_ROUTE_NAME);
+        currentRouteName = "";
         intent.removeExtra(EXTRA_PROFILE);
+        intent.removeExtra(EXTRA_ROUTE_NAME);
         if (profile == null || profile.isBlank()) {
-            publish(STATE_ERROR, "没有可用的测试配置");
+            publish(STATE_ERROR, "没有可用的线路配置");
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -71,7 +93,7 @@ public final class XlbVpnService extends VpnService {
         startForeground(NOTIFICATION_ID, notification("正在连接"));
         publish(STATE_CONNECTING, null);
         int attempt = connectionAttempt.incrementAndGet();
-        worker.execute(() -> startTunnel(profile, attempt));
+        worker.execute(() -> startTunnel(profile, requestedRouteName, attempt));
         return START_NOT_STICKY;
     }
 
@@ -96,13 +118,21 @@ public final class XlbVpnService extends VpnService {
         super.onDestroy();
     }
 
-    private void startTunnel(String profile, int attempt) {
-        Future<?> operation = tunnelWorker.submit(() -> startTunnelInternal(profile));
+    private void startTunnel(String profile, String requestedRouteName, int attempt) {
+        Future<?> operation = tunnelWorker.submit(() -> startTunnelInternal(profile, requestedRouteName));
         try {
             operation.get(20, TimeUnit.SECONDS);
             if (connectionAttempt.get() == attempt) {
-                publish(STATE_CONNECTED, null);
-                startForeground(NOTIFICATION_ID, notification("隧道已建立"));
+                boolean verified = TunnelVerifier.verify(this::probeVpnRoute,
+                        () -> connectionAttempt.get() != attempt, Thread::sleep, 5);
+                if (connectionAttempt.get() == attempt && verified) {
+                    publish(STATE_CONNECTED, null);
+                    startForeground(NOTIFICATION_ID, notification("已连接"));
+                } else if (connectionAttempt.compareAndSet(attempt, attempt + 1)) {
+                    closeCore();
+                    publish(STATE_ERROR, "线路连接或网络验证失败，请重试");
+                    stopSelf();
+                }
             } else {
                 closeCore();
             }
@@ -121,7 +151,31 @@ public final class XlbVpnService extends VpnService {
         }
     }
 
-    private void startTunnelInternal(String profile) {
+    private boolean probeVpnRoute() throws IOException {
+        ConnectivityManager manager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network network = manager == null ? null : manager.getActiveNetwork();
+        NetworkCapabilities capabilities = network == null ? null : manager.getNetworkCapabilities(network);
+        if (capabilities == null || !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+            return false;
+        }
+        for (String address : PROBE_URLS) {
+            HttpURLConnection connection = (HttpURLConnection) network.openConnection(new URL(address));
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(2_500);
+            connection.setReadTimeout(2_500);
+            connection.setRequestProperty("Cache-Control", "no-store");
+            try {
+                if (connection.getResponseCode() == HttpURLConnection.HTTP_NO_CONTENT) return true;
+            } catch (IOException ignored) {
+                // Try the second independent HTTPS probe before the next verification attempt.
+            } finally {
+                connection.disconnect();
+            }
+        }
+        return false;
+    }
+
+    private void startTunnelInternal(String profile, String requestedRouteName) {
         try {
             closeCore();
             File home = new File(getFilesDir(), "mihomo");
@@ -130,6 +184,8 @@ public final class XlbVpnService extends VpnService {
             }
             MihomoCore.initialize(home, this::protect);
             MihomoCore.load(profile);
+            currentRouteName = requestedRouteName == null ? "" : requestedRouteName;
+            publish(STATE_CONNECTING, null);
             if (VpnService.prepare(this) != null) {
                 throw new IllegalStateException("系统 VPN 授权已失效");
             }
@@ -152,13 +208,14 @@ public final class XlbVpnService extends VpnService {
         }
     }
 
-    private static String safeMessage(Throwable exception) {
+    static String safeMessage(Throwable exception) {
         String message = exception.getMessage();
         if (message == null) return "VPN 初始化失败";
         switch (message) {
             case "invalid profile": return "测试配置格式不正确";
             case "profile has no proxies": return "测试配置没有可用节点";
             case "profile has no inline proxies": return "测试订阅没有内联节点，暂不支持远程节点列表";
+            case "proxy provider has no proxies": return "订阅没有返回可用线路，请确认订阅有效后重试";
             case "profile has no usable inline proxy": return "测试订阅的首个节点缺少名称或类型";
             case "core is not ready": return "VPN 内核未准备好";
             case "tunnel already running": return "VPN 隧道已经运行";
@@ -190,6 +247,7 @@ public final class XlbVpnService extends VpnService {
 
     private void stopTunnel() {
         closeCore();
+        currentRouteName = "";
         publish(STATE_DISCONNECTED, null);
         stopSelf();
     }
@@ -213,6 +271,7 @@ public final class XlbVpnService extends VpnService {
         currentState = state;
         Intent intent = new Intent(ACTION_STATE).setPackage(getPackageName()).putExtra(EXTRA_STATE, state);
         if (message != null) intent.putExtra(EXTRA_MESSAGE, message);
+        if (!currentRouteName.isEmpty()) intent.putExtra(EXTRA_ROUTE_NAME, currentRouteName);
         sendBroadcast(intent, INTERNAL_PERMISSION);
     }
 

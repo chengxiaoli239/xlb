@@ -62,7 +62,7 @@ func XlbLoad(profile *C.char, length C.int) *C.char {
 	if err != nil {
 		return C.CString("invalid profile")
 	}
-	minimal, err := debugprofile.FirstInlineProxy(raw)
+	minimal, err := debugprofile.FirstRouteProfile(raw)
 	if err != nil {
 		return C.CString(err.Error())
 	}
@@ -72,7 +72,28 @@ func XlbLoad(profile *C.char, length C.int) *C.char {
 	}
 	hub.ApplyConfig(parsed)
 	loaded = true
+	if len(raw.Proxy) == 0 {
+		name, _ := debugprofile.FirstRouteName(raw)
+		provider := tunnel.Providers()[name]
+		if provider == nil || len(provider.Proxies()) == 0 {
+			stopLocked()
+			return C.CString("proxy provider has no proxies")
+		}
+	}
 	return nil
+}
+
+//export XlbFirstRouteName
+func XlbFirstRouteName(profile *C.char, length C.int) *C.char {
+	raw, err := config.UnmarshalRawConfig(C.GoBytes(unsafe.Pointer(profile), length))
+	if err != nil {
+		return C.CString("")
+	}
+	name, err := debugprofile.FirstRouteName(raw)
+	if err != nil {
+		return C.CString("")
+	}
+	return C.CString(name)
 }
 
 //export XlbStartTun

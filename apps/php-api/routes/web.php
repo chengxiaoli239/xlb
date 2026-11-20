@@ -1,13 +1,18 @@
 <?php
 
 use App\Http\Controllers\ClientCatalogController;
+use App\Http\Controllers\DeviceBindingController;
 use App\Http\Controllers\MemberDeviceController;
+use App\Http\Controllers\MemberDeviceSubscriptionController;
 use App\Http\Controllers\NodeAutomationController;
+use App\Http\Controllers\NodeQuotaController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PlatformController;
 use App\Http\Controllers\SandboxPaymentController;
 use App\Http\Controllers\SubscriptionRouteController;
 use App\Http\Controllers\TicketController;
+use App\Http\Middleware\AuthenticateNodeAgentCertificate;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/api/health', [PlatformController::class, 'health']);
@@ -19,6 +24,14 @@ Route::post('/api/v1/client/heartbeat', [MemberDeviceController::class, 'heartbe
 Route::get('/api/v1/catalog/plans', [PlatformController::class, 'catalog']);
 Route::get('/subscribe/{token}', [PlatformController::class, 'subscriptionProfile'])->middleware('throttle:60,1');
 
+Route::prefix('/v1/node-quota')->middleware(AuthenticateNodeAgentCertificate::class)->group(function (): void {
+    Route::post('/reservations', [NodeQuotaController::class, 'reserve'])
+        ->withoutMiddleware(PreventRequestForgery::class)->middleware('throttle:600,1');
+    Route::post('/reservations/{requestId}/settlements', [NodeQuotaController::class, 'settle'])
+        ->where('requestId', '[A-Za-z0-9-]{1,36}')
+        ->withoutMiddleware(PreventRequestForgery::class)->middleware('throttle:600,1');
+});
+
 Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
     Route::get('/overview', [PlatformController::class, 'overview']);
     Route::get('/clients', [ClientCatalogController::class, 'memberIndex']);
@@ -29,6 +42,11 @@ Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
     Route::post('/orders/{id}/sandbox-payment', [SandboxPaymentController::class, 'simulate'])->middleware('throttle:10,1');
     Route::get('/devices', [MemberDeviceController::class, 'index']);
     Route::post('/devices', [MemberDeviceController::class, 'store'])->middleware('throttle:10,1');
+    Route::post('/devices/{id}/subscription', [MemberDeviceSubscriptionController::class, 'store'])->middleware('throttle:10,1');
+    Route::post('/devices/{id}/subscription/rotate', [MemberDeviceSubscriptionController::class, 'rotate'])->middleware('throttle:10,1');
+    Route::post('/devices/{id}/subscription/revoke', [MemberDeviceSubscriptionController::class, 'revoke'])->middleware('throttle:10,1');
+    Route::post('/device-bindings/challenge', [DeviceBindingController::class, 'challenge'])->middleware('throttle:10,1');
+    Route::post('/device-bindings/authorize', [DeviceBindingController::class, 'authorize'])->middleware('throttle:10,1');
     Route::delete('/devices/{id}', [MemberDeviceController::class, 'destroy']);
     Route::get('/subscriptions', [PlatformController::class, 'subscriptions']);
     Route::post('/subscriptions', [PlatformController::class, 'createSubscription']);

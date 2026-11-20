@@ -12,6 +12,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -19,12 +20,13 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 public final class PlatformApi {
-    private static final String CLIENT_VERSION = "0.2.8";
+    private static final String CLIENT_VERSION = "0.2.15";
     private static final Pattern DEVICE_ID = Pattern.compile(
             "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
     private final String baseUrl;
     private final SecureSessionStore sessionStore;
+    private final DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
 
     public PlatformApi(String baseUrl, SecureSessionStore sessionStore) {
         this.baseUrl = baseUrl;
@@ -33,6 +35,10 @@ public final class PlatformApi {
 
     public MemberAccount currentAccount() throws PlatformApiException {
         JSONObject account = request("GET", "/api/v1/auth/session", null).optJSONObject("data");
+        if (account != null && !"member".equals(account.optString("role"))) {
+            sessionStore.clearSession();
+            return null;
+        }
         return toMemberAccount(account);
     }
 
@@ -58,14 +64,29 @@ public final class PlatformApi {
 
     public ClientSnapshot synchronize(MemberAccount account) throws PlatformApiException {
         try {
-            String installationId = sessionStore.installationId();
-            JSONObject registration = new JSONObject()
-                    .put("installation_id", installationId)
-                    .put("name", Build.MODEL.length() > 80 ? Build.MODEL.substring(0, 80) : Build.MODEL)
-                    .put("platform", "android");
+            ClientSnapshot overview = withOverview(new ClientSnapshot(account, null, null));
+            if (overview.entitlement == null) {
+                return withOverview(loadDevices(account, null));
+            }
             String registrationMessage = null;
             try {
-                request("POST", "/api/v1/me/devices", registration);
+                String installationId = sessionStore.installationId();
+                JSONObject binding = new JSONObject()
+                        .put("installation_id", installationId)
+                        .put("name", Build.MODEL.length() > 80 ? Build.MODEL.substring(0, 80) : Build.MODEL)
+                        .put("platform", "android")
+                        .put("public_key", deviceKeyStore.publicKey(installationId));
+                JSONObject challenge = request("POST", "/api/v1/me/device-bindings/challenge", binding).optJSONObject("data");
+                if (challenge == null || challenge.optString("challenge_id").isEmpty()) {
+                    throw new PlatformApiException("设备授权响应格式不正确");
+                }
+                JSONObject proof = new JSONObject()
+                        .put("challenge_id", challenge.optString("challenge_id"))
+                        .put("signature", deviceKeyStore.sign(installationId, challenge.optString("challenge")));
+                JSONObject authorization = request("POST", "/api/v1/me/device-bindings/authorize", proof).optJSONObject("data");
+                if (authorization == null || authorization.optJSONObject("device") == null) {
+                    throw new PlatformApiException("设备授权响应格式不正确");
+                }
                 try {
                     request("POST", "/api/v1/client/heartbeat", new JSONObject()
                             .put("installation_id", installationId)
@@ -73,7 +94,7 @@ public final class PlatformApi {
                 } catch (PlatformApiException ignored) {
                     // Version telemetry is best effort and not a customer-facing state.
                 }
-            } catch (PlatformApiException exception) {
+            } catch (PlatformApiException | GeneralSecurityException exception) {
                 registrationMessage = exception.getMessage();
             }
             return withOverview(loadDevices(account, registrationMessage));
@@ -127,7 +148,8 @@ public final class PlatformApi {
                     String name = device.optString("name").trim();
                     entries.add(new RegisteredDevice(device.optString("id"), name.isEmpty() ? "未命名设备" : name,
                             device.optString("platform"),
-                            installationId.equals(device.optString("installation_id"))));
+                            installationId.equals(device.optString("installation_id")),
+                            device.optBoolean("removal_pending")));
                 }
             }
             return new ClientSnapshot(account, new DeviceSnapshot(
@@ -143,11 +165,12 @@ public final class PlatformApi {
         }
     }
 
-    public void removeDevice(String deviceId) throws PlatformApiException {
+    public boolean removeDevice(String deviceId) throws PlatformApiException {
         if (deviceId == null || !DEVICE_ID.matcher(deviceId).matches()) {
             throw new PlatformApiException("设备编号无效，请刷新设备列表");
         }
-        request("DELETE", "/api/v1/me/devices/" + deviceId, null);
+        JSONObject data = request("DELETE", "/api/v1/me/devices/" + deviceId, null).optJSONObject("data");
+        return data != null && "revocation_pending".equals(data.optString("status"));
     }
 
     public void rotateInstallationId() {
@@ -298,12 +321,14 @@ public final class PlatformApi {
         public final String name;
         public final String platform;
         public final boolean current;
+        public final boolean removalPending;
 
-        public RegisteredDevice(String id, String name, String platform, boolean current) {
+        public RegisteredDevice(String id, String name, String platform, boolean current, boolean removalPending) {
             this.id = id;
             this.name = name;
             this.platform = platform;
             this.current = current;
+            this.removalPending = removalPending;
         }
     }
 
@@ -313,6 +338,7 @@ public final class PlatformApi {
         public final String message;
         public final EntitlementSummary entitlement;
         public final int subscriptionCount;
+        public final String accountProfile;
 
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message) {
             this(account, device, message, null, 0);
@@ -320,11 +346,17 @@ public final class PlatformApi {
 
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
                               EntitlementSummary entitlement, int subscriptionCount) {
+            this(account, device, message, entitlement, subscriptionCount, null);
+        }
+
+        public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
+                              EntitlementSummary entitlement, int subscriptionCount, String accountProfile) {
             this.account = account;
             this.device = device;
             this.message = message;
             this.entitlement = entitlement;
             this.subscriptionCount = subscriptionCount;
+            this.accountProfile = accountProfile;
         }
     }
 

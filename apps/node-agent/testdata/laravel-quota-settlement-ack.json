@@ -1,0 +1,13 @@
+{
+  "data": {
+    "node_id": "node-test-1",
+    "peer_id": "peer-quota-1",
+    "request_id": "quota-ingress-1",
+    "generation": 1,
+    "acknowledgement_id": "quota-ingress-ack-1",
+    "upload_bytes": 100,
+    "download_bytes": 150,
+    "final": true,
+    "settled": true
+  }
+}
