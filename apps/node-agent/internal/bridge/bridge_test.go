@@ -3,6 +3,7 @@ package bridge
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -62,11 +63,12 @@ func TestSOCKSBridgeUsesDeviceProofAndForwardsTCPOverHTTP2(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 
+	deviceSigner := nonExportableSigner{Signer: deviceKey}
 	deviceCertificate, err := agent.NewDeviceCertificate(agent.DeviceCertificateIdentity{
 		NodeID: request.NodeID, PeerID: request.PeerID, DeviceID: request.DeviceID,
 		SubscriptionID: request.SubscriptionID, SubscriptionGeneration: request.SubscriptionGeneration,
 		PeerGeneration: request.PeerGeneration, DeviceGeneration: request.DeviceGeneration,
-	}, deviceKey)
+	}, deviceSigner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +136,14 @@ func TestSOCKSBridgeUsesDeviceProofAndForwardsTCPOverHTTP2(t *testing.T) {
 	if count := binary.BigEndian.Uint16(connectReply[8:]); count != 0 {
 		t.Fatalf("SOCKS bound port=%d; want zero placeholder", count)
 	}
+}
+
+type nonExportableSigner struct {
+	crypto.Signer
+}
+
+func (signer nonExportableSigner) Sign(random io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+	return signer.Signer.Sign(random, digest, opts)
 }
 
 type localEchoDialer struct {

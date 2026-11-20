@@ -25,7 +25,7 @@ def check_name(value):
 
 def aws(args, *command):
     result = subprocess.run(
-        ["aws", "--profile", args.profile, "--region", args.region, "--no-cli-pager",
+        [str(Path(__file__).with_name("aws-cli")), "--profile", args.profile, "--region", args.region, "--no-cli-pager",
          "--cli-connect-timeout", "8", "--cli-read-timeout", "20", *command],
         text=True, capture_output=True, timeout=45,
     )

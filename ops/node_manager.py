@@ -58,7 +58,7 @@ class Manager:
             raise CloudError('account_mismatch')
 
     def aws(self, *args, missing=None):
-        command = [os.environ.get('XLB_NODE_AWS_BINARY', 'aws')]
+        command = [str(ROOT / 'aws-cli')]
         child_environment = os.environ.copy()
         if self.credential_source == 'profile':
             command.extend(['--profile', self.aws_profile])

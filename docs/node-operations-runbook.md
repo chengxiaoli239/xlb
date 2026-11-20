@@ -39,7 +39,9 @@ python3 -B ops/node_probe.py --host pd01 --expected-ip '<已核实的 pd01 出�
 
 ## 3. AWS 临时节点的快速创建与释放
 
-工具：`ops/node_lab.py` 和 `ops/aws-node-lab.template.json`。2026-11-08 已完成一次美国 us-west-2 的创建/SSM 就绪/限量出网/Scheduler 自动终止/完整回收演练，见 [验收记录](aws-node-lab-acceptance-2026-11-08.md)。本次临时权限也已回收，下次测试需要重新准备经授权的权限；不存在常驻实验节点。
+工具：`ops/node_lab.py` 和 `ops/aws-node-lab.template.json`。2026-11-08 的美国 us-west-2 测试已完成创建、SSM 就绪、限量出网、Scheduler 自动终止和完整回收，见 [验收记录](aws-node-lab-acceptance-2026-11-08.md)；该次临时权限也已回收。2026-11-20 的 M5/M6 实验栈及关联资源后来经只读复核均不存在；当前证据以 [会员连接 PRD 开发进度](member-connection-prd.md#开发进度) 的资源回收状态为准。资源查询不代表账单最终结算。
+
+AWS CLI 统一经 `ops/aws-cli` 执行。该入口移除大小写形式的 HTTP/HTTPS/ALL proxy 环境变量，并设 `NO_PROXY=*`，避免 WorkBuddy 动态注入代理拦截 AWS TLS；不关闭证书校验、不改 AWS CA 配置。手工调用使用 `ops/aws-cli sts ...`、`ops/aws-cli cloudformation ...`、`ops/aws-cli ec2 ...`、`ops/aws-cli ssm ...` 或 `ops/aws-cli iam ...`。`node_lab.py` 与 `node_manager.py` 也调用此入口。
 
 模板创建小规格 Amazon Linux x86_64 测试主机、独立安全组和 EventBridge 到期终止任务。默认 t3.micro，可选 t3.small，标准 CPU 积分模式，12GB 加密 gp3 根盘、随实例删除；不创建 NAT Gateway、负载均衡器、弹性 IP 或生产角色。实例要求 IMDSv2。主机没有公网入站，使用 SSM 管理和端口转发；公网协议验收应另做来源 IP 白名单下的专用变更。
 

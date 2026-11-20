@@ -83,6 +83,7 @@ class ManagerTest(unittest.TestCase):
             manager = Manager({'name': self.name})
         command = run.call_args.args[0]
         child_environment = run.call_args.kwargs['env']
+        self.assertEqual(Path(command[0]).name, 'aws-cli')
         self.assertNotIn('--profile', command)
         self.assertNotIn('AWS_PROFILE', child_environment)
         self.assertNotIn('AWS_ACCESS_KEY_ID', child_environment)

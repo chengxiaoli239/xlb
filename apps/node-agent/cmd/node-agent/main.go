@@ -26,12 +26,16 @@ func run() error {
 		return errors.New("NODE_AGENT_MODE must be isolated-test; production mode is not implemented")
 	}
 	nodeID := os.Getenv("NODE_AGENT_NODE_ID")
+	runtimeConfigPath := os.Getenv("NODE_AGENT_RUNTIME_CONFIG")
 	statePath := os.Getenv("NODE_AGENT_STATE_PATH")
 	certificatePath := os.Getenv("NODE_AGENT_SERVER_CERT")
 	privateKeyPath := os.Getenv("NODE_AGENT_SERVER_KEY")
 	clientCAPath := os.Getenv("NODE_AGENT_CLIENT_CA")
-	if nodeID == "" || statePath == "" || certificatePath == "" || privateKeyPath == "" || clientCAPath == "" {
+	if nodeID == "" || runtimeConfigPath == "" || statePath == "" || certificatePath == "" || privateKeyPath == "" || clientCAPath == "" {
 		return errors.New("node agent identity, state, and mTLS files are required")
+	}
+	if err := validateRuntimeConfig(runtimeConfigPath, nodeID); err != nil {
+		return err
 	}
 
 	address := os.Getenv("NODE_AGENT_LISTEN")
@@ -105,6 +109,25 @@ func run() error {
 		}
 		return nil
 	}
+}
+
+func validateRuntimeConfig(path, nodeID string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return errors.New("NODE_AGENT_RUNTIME_CONFIG could not be opened")
+	}
+	defer file.Close()
+
+	config, err := agent.DecodeTrustedNodeRuntimeConfig(file)
+	if err != nil {
+		return err
+	}
+	if config.Environment != agent.RuntimeEnvironmentTest || config.Node.ID != nodeID ||
+		config.ProfileRenderer.Status != agent.RuntimeProfileUnavailable {
+		return agent.ErrInvalidNodeRuntimeConfig
+	}
+
+	return nil
 }
 
 func acquireProcessLock(path string) (*os.File, error) {

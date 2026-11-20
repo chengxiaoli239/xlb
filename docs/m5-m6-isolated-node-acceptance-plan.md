@@ -1,7 +1,7 @@
 # M5/M6 隔离节点验收计划
 
 日期：2026-11-19
-状态（2026-11-20 更新）：原计划范围与 `$1` 预算上限已获批；实验 IAM 栈 `xlb-lab-access-usw2` 和单台 `t3.small` 节点栈 `xlb-lab-us-20261119-m5m6` 曾创建。M5 的 12 进程争 3 名额通过。旧 M6 观测不满足身份拒绝归因、有效 peer 重连及撤权最终回执等放行证据，不能算通过。旧节点 TTL 为 `2026-11-19 03:03:14 UTC`，过期后删除未获 AWS 接受，完整释放未确认。2026-11-20 本轮 `aws sts get-caller-identity --profile xlb-ops` 遇 AWS signin endpoint TLS EOF，未取得身份，因此没有查询或改动 AWS；旧节点及 IAM 栈、EBS/ENI/安全组/Scheduler 状态仍为未核实。本次没有新建节点，也没有 M6 新证据。此文档当前状态以本段为准，下面的创建步骤是运行手册，不表示仍未创建。
+状态（2026-11-20 更新）：原计划范围与 `$1` 预算上限已获批；实验 IAM 栈 `xlb-lab-access-usw2` 和单台 `t3.small` 节点栈 `xlb-lab-us-20261119-m5m6` 曾创建。M5 的 12 进程争 3 名额通过；旧 M6 证据不满足身份拒绝归因、有效 peer 重连及撤权最终回执等放行标准。清除 HTTP/HTTPS/ALL proxy 环境变量并设置 `NO_PROXY=*` 后，`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `arn:aws:iam::289069331089:root`。只读盘点显示节点栈仍为 `CREATE_COMPLETE`，其 EC2 实例 ID 仍列在栈资源中，但 EC2 `describe-instances` 无返回；相关 EBS 卷和 ENI 查询无结果；安全组 `sg-0db2cef785cbeeba3` 仍存在，且到期 Scheduler `xlb-lab-us-20261119-m5m6-expiry` 仍为 ENABLED，计划时间已过。实验 IAM 栈仍为 `CREATE_COMPLETE`，`XlbLabSsmRole`、`XlbLabExpiryRole` 与 `XlbLabSsmProfile` 均存在。因此节点资源栈和实验权限栈尚未完整回收。此次仅做只读查询，没有创建、删除或延长任何资源，未取得 M6 四项新证据。以下旧状态说明均为历史记录，当前结论以本段为准。
 
 本地计划复核：2026-11-19。`apps/node-agent` 已有离线 Go peer-store 核心和多进程容量测试（12 个进程争 3 个槽位）；本复核没有重复 AWS 只读盘点。
 
@@ -78,14 +78,14 @@
 2. 先创建独立实验 IAM 栈，并传 `--capabilities CAPABILITY_NAMED_IAM`。确认 `CREATE_COMPLETE`、输出中的 Instance Profile/到期 Role ARN 与上方精确名称一致。
 3. 生成全新的 UTC 到期时间，运行 `ops/node_lab.py create` 的默认 plan 并复核账号、区域、栈名、标签、子网、AMI、规格、角色、TTL。确认后才由用户明确授权的执行步骤加 `--apply` 创建 60 分钟节点栈。
 4. 每 15 秒查询 EC2 状态与 SSM 管理状态，最多等 5 分钟；确认 EC2 checks 正常、SSM `PingStatus=Online`、实例和卷标签正确、安全组无入站且只有 TCP 443 出站。未在期限内就绪则立即删栈，不延长 TTL。
-5. 用 `aws ssm start-session --target <instance-id>` 验证交互会话。此链路只通过 AWS SSM，不开 SSH，也不改本机系统代理。
+5. 用 `ops/aws-cli ssm start-session --target <instance-id>` 验证交互会话。此链路只通过 AWS SSM，不开 SSH，也不改本机系统代理。
 
 ### C. Agent mTLS 端口转发
 
 Agent 只监听节点 `127.0.0.1:9443`。另开终端执行：
 
 ```bash
-aws --profile xlb-ops --region us-west-2 ssm start-session \
+ops/aws-cli --profile xlb-ops --region us-west-2 ssm start-session \
   --target <instance-id> \
   --document-name AWS-StartPortForwardingSession \
   --parameters '{"portNumber":["9443"],"localPortNumber":["19443"]}'

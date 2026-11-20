@@ -2,10 +2,14 @@ package debugprofile
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/metacubex/mihomo/config"
 	_ "github.com/metacubex/mihomo/hub/executor" // Provides Mihomo's config linkname hook during tests.
+	"github.com/metacubex/mihomo/tunnel"
 )
 
 func TestFirstRouteProfileDiscardsSubscriptionCapabilities(t *testing.T) {
@@ -86,5 +90,31 @@ func TestFirstRouteNameRejectsMissingNodeMetadata(t *testing.T) {
 	source.Proxy = []map[string]any{{"type": "ss"}}
 	if _, err := FirstRouteName(source); !errors.Is(err, ErrInvalidInlineProxy) {
 		t.Fatalf("got %v, want ErrInvalidInlineProxy", err)
+	}
+}
+
+func TestMihomoCoreParsesTheSharedProofBridgeProfile(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not resolve test source path")
+	}
+	fixturePath := filepath.Join(filepath.Dir(sourceFile), "../../../../node-agent/testdata/mihomo-local-bridge-profile.yaml")
+	profile, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := config.UnmarshalRawConfig(profile)
+	if err != nil {
+		t.Fatalf("Mihomo rejected the shared proof bridge profile YAML: %v", err)
+	}
+	parsed, err := config.ParseRawConfig(raw)
+	if err != nil {
+		t.Fatalf("Mihomo rejected the shared proof bridge config: %v", err)
+	}
+	if parsed.General.Mode != tunnel.Global || parsed.Proxies["XLB proof bridge"] == nil || parsed.Proxies["GLOBAL"] == nil ||
+		len(parsed.Rules) != 1 || len(parsed.Listeners) != 0 {
+		t.Fatalf("Mihomo parsed unexpected bridge profile: mode=%s has-bridge=%v has-global=%v providers=%d rules=%d listeners=%d",
+			parsed.General.Mode, parsed.Proxies["XLB proof bridge"] != nil, parsed.Proxies["GLOBAL"] != nil,
+			len(parsed.Providers), len(parsed.Rules), len(parsed.Listeners))
 	}
 }

@@ -1,13 +1,22 @@
 import argparse
 import json
+import subprocess
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
-from node_lab import TAGS, check_delete_scope, check_name, create_request
+from node_lab import TAGS, aws, check_delete_scope, check_name, create_request
 
 
 class NodeLabSafetyTest(unittest.TestCase):
+    def test_aws_calls_use_proxy_safe_repository_wrapper(self):
+        args = argparse.Namespace(profile="xlb-ops", region="us-west-2")
+        completed = subprocess.CompletedProcess([], 0, '{"Account":"289069331089"}', "")
+        with patch("node_lab.subprocess.run", return_value=completed) as run:
+            self.assertEqual(aws(args, "sts", "get-caller-identity"), {"Account": "289069331089"})
+        self.assertEqual(Path(run.call_args.args[0][0]).name, "aws-cli")
+
     def test_non_test_and_mixed_resource_stacks_cannot_be_deleted(self):
         stack = {"StackName": "xlb-lab-us-test", "Tags": [{"Key": k, "Value": v} for k, v in TAGS.items()]}
         resources = [{"ResourceType": "AWS::EC2::Instance"}]

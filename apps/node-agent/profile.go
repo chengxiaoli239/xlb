@@ -72,6 +72,11 @@ func ValidateProfileArtifact(request ProfileRenderRequest, artifact ProfileArtif
 		len(artifact.Content) == 0 || len(artifact.Content) > 128*1024 || len(artifact.SHA256) != 64 {
 		return fmt.Errorf("profile artifact metadata is invalid: %w", ErrInvalid)
 	}
+	if artifact.Format == "mihomo-yaml" {
+		if err := validateMihomoBridgeProfile(artifact.Content); err != nil {
+			return err
+		}
+	}
 
 	digest := sha256.Sum256([]byte(artifact.Content))
 	if hex.EncodeToString(digest[:]) != artifact.SHA256 {
