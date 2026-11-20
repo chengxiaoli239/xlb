@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+**/node_modules
+**/vendor
+**/dist
+**/build
+**/.vite
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
+ops/.state
+storage/logs
