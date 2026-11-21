@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check } from 'k6';
+import { csrfTokenFrom, requiredTestPassword } from './auth.js';
 
 const trimSlash = (value) => value.replace(/\/+$/, '');
 const apiBase = trimSlash(__ENV.API_BASE_URL || 'http://127.0.0.1:4175');
@@ -28,7 +29,6 @@ const vus = positiveNumber(__ENV.K6_VUS, '2', 'K6_VUS');
 export const API_BASE_URL = apiBase;
 export const WEB_BASE_URL = webBase;
 export const TEST_EMAIL = __ENV.TEST_EMAIL || 'member@xlb.local';
-export const TEST_PASSWORD = __ENV.TEST_PASSWORD || 'member-local-2026';
 
 export const options = {
   vus,
@@ -40,12 +40,14 @@ export const options = {
 };
 
 export function login() {
+  const testPassword = requiredTestPassword(__ENV.TEST_PASSWORD);
+
   const csrfResponse = http.get(`${API_BASE_URL}/api/v1/auth/csrf`, {
     tags: { name: 'auth_csrf' },
   });
   const csrfBody = parseJson(csrfResponse);
   const cookieValues = http.cookieJar().cookiesForURL(API_BASE_URL);
-  const csrfToken = csrfBody?.csrf_token || csrfBody?.token || cookieValues['XSRF-TOKEN']?.[0];
+  const csrfToken = csrfTokenFrom(csrfBody) || cookieValues['XSRF-TOKEN']?.[0];
 
   const csrfOk = check(csrfResponse, {
     'CSRF bootstrap returns 2xx': (response) => response.status >= 200 && response.status < 300,
@@ -55,7 +57,7 @@ export function login() {
 
   const response = http.post(
     `${API_BASE_URL}/api/v1/auth/login`,
-    JSON.stringify({ email: TEST_EMAIL, password: TEST_PASSWORD }),
+    JSON.stringify({ email: TEST_EMAIL, password: testPassword }),
     {
       headers: {
         'Content-Type': 'application/json',
