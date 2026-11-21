@@ -46,7 +46,25 @@ android {
 }
 
 def goCoreDir = file('../core-native')
-def ndkBin = "${android.sdkDirectory}/ndk/${android.ndkVersion}/toolchains/llvm/prebuilt/darwin-x86_64/bin"
+def ndkPrebuiltDir = file("${android.sdkDirectory}/ndk/${android.ndkVersion}/toolchains/llvm/prebuilt")
+def ndkCompilerName = 'aarch64-linux-android26-clang'
+def ndkHostTag
+if (System.getProperty('os.name').toLowerCase().contains('mac')) {
+    def macHostTags = System.getProperty('os.arch') == 'aarch64'
+        ? ['darwin-arm64', 'darwin-x86_64']
+        : ['darwin-x86_64']
+    ndkHostTag = macHostTags.find { hostTag ->
+        new File(ndkPrebuiltDir, "${hostTag}/bin/${ndkCompilerName}").canExecute()
+    }
+    if (ndkHostTag == null) {
+        throw new GradleException("No usable macOS NDK compiler found under ${ndkPrebuiltDir}")
+    }
+} else if (System.getProperty('os.name').toLowerCase().contains('linux') && System.getProperty('os.arch') == 'amd64') {
+    ndkHostTag = 'linux-x86_64'
+} else {
+    throw new GradleException("Unsupported NDK host: ${System.getProperty('os.name')} ${System.getProperty('os.arch')}")
+}
+def ndkBin = new File(ndkPrebuiltDir, "${ndkHostTag}/bin")
 def buildMihomoArm64 = tasks.register('buildMihomoArm64', Exec) {
     workingDir goCoreDir
     def outputDir = file("$buildDir/generated/mihomo/arm64-v8a")
@@ -56,7 +74,7 @@ def buildMihomoArm64 = tasks.register('buildMihomoArm64', Exec) {
     environment 'CGO_ENABLED', '1'
     environment 'GOOS', 'android'
     environment 'GOARCH', 'arm64'
-    environment 'CC', "$ndkBin/aarch64-linux-android26-clang"
+    environment 'CC', new File(ndkBin, ndkCompilerName).absolutePath
     commandLine 'go', 'build', '-trimpath', '-buildmode=c-shared', '-tags=with_gvisor,cmfa', '-o', file("$outputDir/libxlbcore.so"), '.'
 }
 

@@ -123,8 +123,8 @@ jobs:
       - name: Test operation plans with mocked cloud calls
         run: python3 -m unittest discover -s ops -p 'test_*.py'
 
-  android-java:
-    name: Android JVM tests and lint (no native package)
+  android:
+    name: Android native build, JVM tests, and lint
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -142,14 +142,18 @@ jobs:
         with:
           packages: platform-tools
 
-      - name: Install pinned compile SDK
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Install pinned Android SDK and NDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;29.0.14206865'
+
+      - name: Set up Go for Mihomo JNI
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.0'
+          cache-dependency-path: apps/android/core-native/go.sum
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # The current native task targets the local macOS NDK. This gate checks
-      # Java behavior only; it does not build or validate Mihomo/JNI or an APK.
-      - name: Run JVM tests and lint without native compilation
+      - name: Build debug APK and run JVM tests and lint
         working-directory: apps/android
-        run: ./gradlew testDebugUnitTest lintDebug -x buildMihomoArm64 --no-daemon
+        run: ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon
