@@ -59,6 +59,13 @@ jobs:
       - name: Run API tests
         run: pnpm --filter @xlb/api test
 
+      - name: Run web account tests
+        run: pnpm --filter @xlb/web test
+
+      - name: Run extension tests
+        working-directory: apps/extension
+        run: node --test
+
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -72,3 +79,72 @@ jobs:
 
       - name: Run Laravel tests
         run: pnpm test
+
+  node-agent:
+    name: Isolated node agent tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/node-agent/go.mod
+          cache-dependency-path: apps/node-agent/go.sum
+
+      - name: Test concurrent peer state and bridge
+        working-directory: apps/node-agent
+        run: go test -race ./...
+
+      - name: Vet and build isolated executables
+        working-directory: apps/node-agent
+        run: |
+          go vet ./...
+          go build ./...
+
+  operations:
+    name: Offline node operations safety tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Test operation plans with mocked cloud calls
+        run: python3 -m unittest discover -s ops -p 'test_*.py'
+
+  android-java:
+    name: Android JVM tests and lint (no native package)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned compile SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The current native task targets the local macOS NDK. This gate checks
+      # Java behavior only; it does not build or validate Mihomo/JNI or an APK.
+      - name: Run JVM tests and lint without native compilation
+        working-directory: apps/android
+        run: ./gradlew testDebugUnitTest lintDebug -x buildMihomoArm64 --no-daemon

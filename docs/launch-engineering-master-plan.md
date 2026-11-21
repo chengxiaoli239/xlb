@@ -27,11 +27,11 @@
 | M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试 | Android Keystore bridge 真实接入、Windows CNG/macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成 |
 | M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口；Web/扩展可辨识匿名账号并保留权益状态 | Android 真机只验到打开并取消同意对话框，未验成功创建/恢复；邮箱验证升级、跨端恢复、PC 扫码授权及桌面客户端未实现。验证注册不必新增实体手机：可用隔离 emulator/profile；不得清除现有会员设备数据 |
 | M10 智能路由 | 加权候选原型、熔断恢复状态机、注入探测契约/假驱动、进程内状态仓库均有单测 | 无持久化状态、真实 probe worker/协议探测、`SubscriptionRouteService` 接线或客户端线路 UI；D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt |
-| M11 与 E0 工程基础 | GitHub Actions CI、PHP/Web Dockerfiles、k6 场景与 loopback-only smoke 脚本已存在 | 工作流覆盖面仍需补齐 Go/Android/扩展并观察 CI 运行；没有压测基线报告、staging、生产制品/回滚、S3/CDN、监控告警或成本预算 |
+| M11 与 E0 工程基础 | GitHub Actions 现覆盖 Web/API 构建、API/PHP/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android JVM tests/lint（显式跳过当前只支持 macOS NDK 的 Mihomo native build）；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 也已存在 | 本地 PHP/Web/扩展/Go/ops/Android 检查及 actionlint 已通过；push 后仍须观察实际 GitHub Actions run。没有压测基线报告、staging、生产制品/回滚、S3/CDN、监控告警或成本预算 |
 
 | 发布阶段 | 状态 | 下一退出门 |
 | --- | --- | --- |
-| E0 地基 | 部分完成 | CI 全模块覆盖、可追溯构建/staging/回滚；合规与 D 决策保留为发布门 |
+| E0 地基 | 部分完成（离线 CI 检查面已扩展） | 观察 GitHub Actions 实际 run；补制品可追溯、staging/回滚；合规与 D 决策保留为发布门 |
 | E1 会员数据面放行 | 未通过 | 真实 member profile、双真机复用拒绝、节点撤权回执/最终流量和连接验收 |
 | E2 工程化 | 未完成 | 批量编排、常驻受控 worker、实测容量与热备/回收演练 |
 | E3 四端 | 部分完成 | Android 首批端到端；Windows 桌面客户端建立；macOS/iOS 条件与后续验收 |
