@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Services\InMemoryNodeHealthStateStore;
 use App\Services\NodeHealthCircuitBreaker;
 use App\Services\NodeHealthProbeCoordinator;
 use App\Services\NodeHealthProbeDriver;
@@ -39,12 +40,12 @@ class NodeHealthProbeCoordinatorTest extends TestCase
                 return array_shift($this->results) ?? throw new InvalidArgumentException('No scripted probe result remains.');
             }
         };
-        $coordinator = new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker);
-        $state = new NodeHealthState('healthy', 0, 0);
+        $stateStore = new InMemoryNodeHealthStateStore;
+        $coordinator = new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker, $stateStore);
 
-        $first = $coordinator->probe('node-1', $state);
-        $second = $coordinator->probe('node-1', $first->transition->state);
-        $third = $coordinator->probe('node-1', $second->transition->state);
+        $first = $coordinator->probe('node-1');
+        $second = $coordinator->probe('node-1');
+        $third = $coordinator->probe('node-1');
 
         $this->assertSame(['node-1', 'node-1', 'node-1'], $driver->probedNodeIds);
         $this->assertSame('timeout', $first->result->failureCode);
@@ -52,6 +53,7 @@ class NodeHealthProbeCoordinatorTest extends TestCase
         $this->assertSame('unhealthy', $third->transition->state->status);
         $this->assertTrue($third->transition->openedCircuit);
         $this->assertEquals($observedAt->modify('+30 seconds'), $third->transition->state->lastProbeAt);
+        $this->assertSame($third->transition->state, $stateStore->get('node-1'));
     }
 
     public function test_successful_probe_preserves_latency_and_observation_time(): void
@@ -67,8 +69,8 @@ class NodeHealthProbeCoordinatorTest extends TestCase
             }
         };
 
-        $assessment = (new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker))
-            ->probe('node-1', new NodeHealthState('healthy', 0, 0));
+        $assessment = (new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker, new InMemoryNodeHealthStateStore))
+            ->probe('node-1');
 
         $this->assertSame(42, $assessment->result->latencyMs);
         $this->assertSame(0.5, $assessment->result->packetLossPct);
@@ -103,12 +105,10 @@ class NodeHealthProbeCoordinatorTest extends TestCase
                 return array_shift($this->results) ?? throw new InvalidArgumentException('No scripted probe result remains.');
             }
         };
-        $coordinator = new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker);
-        $state = new NodeHealthState('healthy', 0, 0);
+        $coordinator = new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker, new InMemoryNodeHealthStateStore);
         $transitions = [];
         foreach ($results as $_) {
-            $assessment = $coordinator->probe('node-1', $state);
-            $state = $assessment->transition->state;
+            $assessment = $coordinator->probe('node-1');
             $transitions[] = $assessment->transition;
         }
 
@@ -134,11 +134,28 @@ class NodeHealthProbeCoordinatorTest extends TestCase
             }
         };
         $state = new NodeHealthState('unhealthy', 3, 1, $observedAt->modify('+1 second'));
+        $stateStore = new InMemoryNodeHealthStateStore;
+        $stateStore->put('node-1', $state);
 
-        $assessment = (new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker))->probe('node-1', $state);
+        $assessment = (new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker, $stateStore))->probe('node-1');
 
         $this->assertTrue($assessment->transition->ignoredAsStale);
         $this->assertSame($state, $assessment->transition->state);
+        $this->assertSame($state, $stateStore->get('node-1'));
+    }
+
+    public function test_coordinator_requires_a_node_id_before_calling_the_driver(): void
+    {
+        $driver = new class implements NodeHealthProbeDriver
+        {
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                throw new InvalidArgumentException('The driver must not be called for an invalid node ID.');
+            }
+        };
+
+        $this->expectException(InvalidArgumentException::class);
+        (new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker, new InMemoryNodeHealthStateStore))->probe(' ');
     }
 
     public function test_probe_result_rejects_invalid_metrics_and_outcomes(): void
