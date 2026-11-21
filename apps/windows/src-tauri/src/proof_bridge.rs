@@ -18,8 +18,10 @@ enum BridgeState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum BridgeFailure {
+pub(super) enum BridgeFailure {
     InvalidMemberProof,
+    DeviceKeyUnavailable,
+    DeviceProofSigningFailed,
     LaunchFailed,
     ProcessExited,
     StopFailed,
@@ -31,28 +33,39 @@ struct BridgeSnapshot {
     failure: Option<BridgeFailure>,
 }
 
+/// Signing capability supplied by the platform's non-exportable device key.
+/// Implementations must never return private key material.
+pub(super) trait DeviceProofSigner {
+    fn public_key_spki_base64url(&self) -> Result<String, BridgeFailure>;
+    fn sign_challenge_base64url(&self, challenge: &[u8; 32]) -> Result<String, BridgeFailure>;
+}
+
 /// An unforgeable capability created only by the native member/device verifier.
 /// Keep fields and constructor private so IDs or booleans cannot claim proof success.
 struct VerifiedMemberDeviceProof {
     member_id: String,
     installation_id: String,
-    non_exportable_key_handle: String,
     peer_binding_id: String,
+    signer: Box<dyn DeviceProofSigner>,
 }
 
 impl VerifiedMemberDeviceProof {
     fn new(
         member_id: String,
         installation_id: String,
-        non_exportable_key_handle: String,
         peer_binding_id: String,
+        signer: Box<dyn DeviceProofSigner>,
     ) -> Self {
         Self {
             member_id,
             installation_id,
-            non_exportable_key_handle,
             peer_binding_id,
+            signer,
         }
+    }
+
+    fn signer(&self) -> &dyn DeviceProofSigner {
+        self.signer.as_ref()
     }
 }
 
@@ -68,7 +81,6 @@ impl BridgeConfig {
     fn has_required_binding_references(&self) -> bool {
         !self.proof.member_id.trim().is_empty()
             && !self.proof.installation_id.trim().is_empty()
-            && !self.proof.non_exportable_key_handle.trim().is_empty()
             && !self.proof.peer_binding_id.trim().is_empty()
     }
 }
@@ -82,9 +94,10 @@ trait ProofBridgeProcess {
 }
 
 trait ProofBridgeAdapter {
-    /// Recheck current entitlement and binding against revocation, complete the
-    /// peer proof handshake, and only then return an alive process. On error,
-    /// implementations must not leave a child process running without a handle.
+    /// Recheck current entitlement and binding against revocation, use the
+    /// supplied signer for the peer proof handshake, and only then return an
+    /// alive process. On error, implementations must not leave a child process
+    /// running without a handle. This contract is not a server verifier.
     fn launch(
         &mut self,
         config: &BridgeConfig,
@@ -236,6 +249,18 @@ mod tests {
 
     struct FakeAdapter(Counters);
 
+    struct FakeSigner;
+
+    impl DeviceProofSigner for FakeSigner {
+        fn public_key_spki_base64url(&self) -> Result<String, BridgeFailure> {
+            Ok("test-public-key".into())
+        }
+
+        fn sign_challenge_base64url(&self, challenge: &[u8; 32]) -> Result<String, BridgeFailure> {
+            Ok(format!("test-signature-{}", challenge[0]))
+        }
+    }
+
     impl ProofBridgeAdapter for FakeAdapter {
         fn launch(
             &mut self,
@@ -291,8 +316,8 @@ mod tests {
         BridgeConfig::from_verified_proof(VerifiedMemberDeviceProof::new(
             "member-1".into(),
             "installation-1".into(),
-            "windows-key-handle".into(),
             "peer-binding-1".into(),
+            Box::new(FakeSigner),
         ))
     }
 
@@ -308,11 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn missing_device_key_handle_fails_closed_without_launch() {
+    fn missing_peer_binding_fails_closed_without_launch() {
         let counters = Counters::default();
         let mut supervisor = supervisor(counters.clone());
         let mut config = valid_config();
-        config.proof.non_exportable_key_handle.clear();
+        config.proof.peer_binding_id.clear();
 
         assert_eq!(
             supervisor.start(&config),
@@ -322,6 +347,15 @@ mod tests {
             }
         );
         assert_eq!(counters.launches.get(), 0);
+    }
+
+    #[test]
+    fn verified_proof_exposes_signing_capability_without_key_bytes() {
+        let config = valid_config();
+        let challenge = [7; 32];
+
+        assert_eq!(config.proof.signer().public_key_spki_base64url().unwrap(), "test-public-key");
+        assert_eq!(config.proof.signer().sign_challenge_base64url(&challenge).unwrap(), "test-signature-7");
     }
 
     #[test]

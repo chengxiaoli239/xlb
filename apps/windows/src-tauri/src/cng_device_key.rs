@@ -254,6 +254,21 @@ impl Drop for DeviceKey {
     }
 }
 
+impl super::proof_bridge::DeviceProofSigner for DeviceKey {
+    fn public_key_spki_base64url(&self) -> Result<String, super::proof_bridge::BridgeFailure> {
+        DeviceKey::public_key_spki_base64url(self)
+            .map_err(|_| super::proof_bridge::BridgeFailure::DeviceKeyUnavailable)
+    }
+
+    fn sign_challenge_base64url(
+        &self,
+        challenge: &[u8; 32],
+    ) -> Result<String, super::proof_bridge::BridgeFailure> {
+        DeviceKey::sign_challenge_base64url(self, challenge)
+            .map_err(|_| super::proof_bridge::BridgeFailure::DeviceProofSigningFailed)
+    }
+}
+
 fn validate_p256_public_blob(blob: &[u8]) -> Result<(), String> {
     let header_len = std::mem::size_of::<BCRYPT_ECCKEY_BLOB>();
     if blob.len() != header_len + 64 {
@@ -459,9 +474,10 @@ mod tests {
         let key = TestKey::for_identity("challenge");
         let signer = key.open();
         let challenge = [0x5a; 32];
-        let signature = decode_base64url(&signer.sign_challenge_base64url(&challenge).unwrap()).unwrap();
+        let proof_signer: &dyn super::super::proof_bridge::DeviceProofSigner = &signer;
+        let signature = decode_base64url(&proof_signer.sign_challenge_base64url(&challenge).unwrap()).unwrap();
         assert_eq!(signature[0], 0x30);
-        let public_key = signer.public_key_spki_base64url().unwrap();
+        let public_key = proof_signer.public_key_spki_base64url().unwrap();
         assert!(public_key.starts_with("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE"));
         assert_eq!(public_key.len(), 122);
         let digest = sha256(&challenge).unwrap();
