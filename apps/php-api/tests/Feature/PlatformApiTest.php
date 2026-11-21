@@ -28,6 +28,19 @@ class PlatformApiTest extends TestCase
         $this->getJson('/api/v1/me/overview')->assertUnauthorized();
     }
 
+    public function test_login_normalizes_email_case_and_rejects_inactive_accounts(): void
+    {
+        DB::table('users')->where('id', 'user-member')->update(['status' => 'suspended']);
+        $this->postJson('/api/v1/auth/login', ['email' => 'MEMBER@XLB.LOCAL', 'password' => 'member-local-2026'])
+            ->assertUnauthorized();
+
+        DB::table('users')->where('id', 'user-member')->update(['status' => 'active']);
+        $this->postJson('/api/v1/auth/login', ['email' => 'MEMBER@XLB.LOCAL', 'password' => 'member-local-2026'])
+            ->assertOk()->assertJsonPath('data.email', 'member@xlb.local')->assertJsonPath('data.role', 'member');
+        $this->getJson('/api/v1/auth/session')
+            ->assertOk()->assertJsonPath('data.id', 'user-member')->assertJsonPath('data.email', 'member@xlb.local');
+    }
+
     public function test_admin_can_version_and_unpublish_plans_without_changing_historical_rights(): void
     {
         $this->actingAs(User::findOrFail('user-admin'));
