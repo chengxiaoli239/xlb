@@ -3,6 +3,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use url::Url;
 
+mod proof_bridge;
+
 const KEYRING_SERVICE: &str = "com.xlb.vpn.windows";
 const KEYRING_USER_PREFIX: &str = "api-session-cookies";
 const API_PLACEHOLDER: &str = "https://api.xlb.invalid/";
