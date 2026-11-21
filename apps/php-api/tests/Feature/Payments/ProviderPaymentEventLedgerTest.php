@@ -140,6 +140,16 @@ class ProviderPaymentEventLedgerTest extends TestCase
         $this->assertDatabaseHas('provider_payment_orders', ['merchant_order_id' => $orderId, 'status' => 'paid', 'entitlement_granted' => true]);
         $this->assertDatabaseHas('provider_payment_fulfillments', ['merchant_order_id' => $orderId, 'status' => 'fulfilled', 'attempts' => 1]);
         $this->assertDatabaseCount('entitlements', 2);
+
+        $refund = $this->signedSandboxEvent($session, 'refunded');
+        $this->webhook($refund)->assertOk()->assertJsonPath('data.decision', 'apply');
+        $this->webhook($refund)->assertOk()->assertJsonPath('data.decision', 'duplicate');
+        $this->artisan('payments:process-sandbox-refunds')->assertSuccessful();
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'refunded_test']);
+        $this->assertDatabaseHas('entitlement_grants', ['order_id' => $orderId, 'status' => 'revoked_test']);
+        $this->assertDatabaseHas('provider_payment_orders', ['merchant_order_id' => $orderId, 'status' => 'refunded', 'entitlement_granted' => false]);
+        $this->assertDatabaseHas('provider_payment_compensations', ['merchant_order_id' => $orderId, 'status' => 'completed', 'attempts' => 1]);
+        $this->assertDatabaseCount('sandbox_refund_events', 1);
     }
 
     public function test_bad_signature_and_expired_timestamp_do_not_create_payment_events(): void
@@ -236,6 +246,11 @@ class ProviderPaymentEventLedgerTest extends TestCase
     /** @return array{body:string,headers:array<string,string>} */
     private function signedPaidEvent(array $session): array
     {
+        return $this->signedSandboxEvent($session, 'paid');
+    }
+
+    private function signedSandboxEvent(array $session, string $type): array
+    {
         $timestamp = (string) now()->utc()->getTimestamp();
         $body = json_encode([
             'provider' => $session['provider'],
@@ -244,7 +259,7 @@ class ProviderPaymentEventLedgerTest extends TestCase
             'transaction_id' => $session['channelTransactionId'],
             'amount_minor' => 2980,
             'currency' => 'CNY',
-            'event_type' => 'paid',
+            'event_type' => $type,
             'occurred_at' => now()->utc()->format(DATE_ATOM),
         ], JSON_THROW_ON_ERROR);
 

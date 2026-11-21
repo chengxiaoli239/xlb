@@ -63,6 +63,21 @@ final class SandboxPaymentFulfillmentWorker
                     'ends_at' => $endsAt->toIso8601String(),
                     'created_at' => $at->toIso8601String(),
                 ]);
+                $paymentEvent = DB::table('provider_payment_events')->where('id', $fulfillment->accepted_event_id)->first();
+                if (! $paymentEvent) {
+                    throw new LogicException('Accepted provider payment event is missing.');
+                }
+                DB::table('sandbox_payment_events')->insertOrIgnore([
+                    'id' => $paymentEvent->id,
+                    'event_id' => $paymentEvent->provider.':'.$paymentEvent->event_id,
+                    'transaction_id' => $paymentEvent->channel_transaction_id,
+                    'order_id' => $merchantOrderId,
+                    'amount_cents' => $paymentEvent->amount_minor,
+                    'currency' => $paymentEvent->currency,
+                    'status' => 'accepted_test',
+                    'review_reason' => null,
+                    'created_at' => $at->toIso8601String(),
+                ]);
                 DB::table('orders')->where('id', $merchantOrderId)->where('status', 'pending_test')->update([
                     'status' => 'paid_test', 'updated_at' => $at->toIso8601String(),
                 ]);
