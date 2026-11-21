@@ -25,7 +25,7 @@
 | M5 / M7 隔离协议与回收 | 本地并发/额度内核测试；2026-11-21 获批隔离节点上合成 peer 并发、复用拒绝、独立 peer、撤权回执/最终流量测试通过；资源按计划回收核查 | 只证明限定 harness 与隔离节点；不能外推生产数据库、会员客户端或长期容量 |
 | M6 双身份与会员线路 | 两台真机 ALT-AN00、VOG-AL10 的 installation ID 与 P-256 公钥绑定均有 SQLite 实测；合成 peer 隔离协议测试通过 | 会员真机复制拒绝、真实 member profile 隧道、匹配会员撤权回执未完成；当前隔离栈已回收，后续线路验收需重新核对并使用获批窗口 |
 | M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试 | Android Keystore bridge 真实接入、Windows CNG/macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成 |
-| M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口、匿名账号幂等恢复及显式退出后关闭自动恢复；Web/扩展可辨识匿名账号并保留权益状态 | Android 恢复实现已合并，但真实 Keystore/SharedPreferences 跨重启和本地 API 创建/恢复尚待隔离 emulator 验收；邮箱/手机升级、跨端迁移、PC 扫码授权及桌面客户端未实现。不得清除现有会员设备数据 |
+| M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口、匿名账号幂等恢复及显式退出后关闭自动恢复；Web/扩展可辨识匿名账号并保留权益状态；AndroidX Keystore 状态 instrumentation cases 已纳入 CI 编译 | 恢复代码与测试已合并；本机 assemble/JVM/instrumentation compile/lint 通过；Android 35 arm64 emulator 上的 Keystore/API 创建与恢复执行仍待下载镜像后验收。邮箱/手机升级、跨端恢复、PC 扫码及桌面客户端未实现；不得清除现有会员设备数据 |
 | M10 智能路由 | 加权候选、熔断恢复、探测假 driver、持久化接口及 SQLite CAS 健康状态仓库均有离线测试 | 无真实 probe worker/协议探测、定时调度、`SubscriptionRouteService` 接线或客户端线路 UI；D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt |
 | M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android pinned NDK/Go 下的真实 arm64 Mihomo JNI Debug APK、JVM tests 与 lint；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 已存在 | `d952f78` hosted run `44931113306` 五个 jobs 全部成功，包含 Linux NDK native APK build；后续文档提交 run `44931259879` 也全绿。本地 full assemble/JVM tests/lint 与 actionlint 通过。没有压测基线报告、staging、生产制品/回滚、S3/CDN、监控告警或成本预算 |
 
