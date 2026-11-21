@@ -27,14 +27,14 @@
 | M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试 | Android Keystore bridge 真实接入、Windows CNG/macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成 |
 | M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口、匿名账号幂等恢复及显式退出后关闭自动恢复；Web/扩展可辨识匿名账号并保留权益状态；AndroidX Keystore 状态与 API instrumentation 已在隔离 API 35 arm64 emulator 上通过；Windows Tauri/React 账户壳已合入 `f74c270` | 5 个 Android instrumentation cases 通过；local/testing 沙箱恢复幂等已实测。邮箱/手机升级、跨端登录和 PC 扫码授权仍未实现；Windows 账户壳不含 VPN 数据面，MSVC/凭据库运行时待 Windows 验证；不得清除现有会员设备数据 |
 | M10 智能路由 | 加权候选、熔断恢复、探测 fake driver、持久化接口、SQLite CAS 健康仓库、默认关闭的一次性 worker/命令与默认关闭的 `SubscriptionRouteService` 持久状态过滤均有离线测试（路由过滤合入 `353f46b`） | 尚无真实协议 probe driver、生产定时调度或客户端线路 UI；下一项为受 mTLS/协议范围约束的真实 probe adapter 验证。D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt；假驱动不证明节点在线或稳定 |
-| M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android pinned NDK/Go 下的真实 arm64 Mihomo JNI Debug APK、JVM tests 与 lint；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 已存在；JS 测试依赖已更新至当前修复版本 | `d952f78` hosted run `44931113306` 五个 jobs 全部成功，包含 Linux NDK native APK build；后续文档提交 run `44931259879` 也全绿。本轮本机 pnpm full audit 与 production audit 无已知漏洞，API/Web/Windows tests/build 均通过。本轮 hosted CI 尚待观察。Windows 平台构建/凭据存储验证、压测基线、staging、生产制品/回滚、S3/CDN、监控告警或成本预算仍缺 |
+| M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android pinned NDK/Go 下的真实 arm64 Mihomo JNI Debug APK、JVM tests 与 lint；metadata-only APK manifest hosted run `44943107063` 全绿；本机 loopback 控制面 smoke 已测 | 本轮 pnpm full audit 与 production audit 无已知漏洞，API/Web/Windows tests/build 通过；Android manifest 在 hosted job 实际产出。M11 80 请求/并发1与4的本机结果见验收报告，只是 PHP dev server + 临时 SQLite smoke，不是生产容量门。Windows MSVC hosted run 待核实；staging、生产签名制品/回滚、S3/CDN、监控告警与成本预算仍缺 |
 
 | 发布阶段 | 状态 | 下一退出门 |
 | --- | --- | --- |
 | E0 地基 | 部分完成（Android native APK 检查及 metadata-only 清单 hosted run `44943107063` 全绿） | 补生产制品签名/SBOM、staging/回滚；合规与 D 决策保留为发布门 |
 | E1 会员数据面放行 | 未通过 | 真实 member profile、双真机复用拒绝、节点撤权回执/最终流量和连接验收 |
 | E2 工程化 | 未完成 | 批量编排、常驻受控 worker、实测容量与热备/回收演练 |
-| E3 四端 | 部分完成 | Android 会员真机数据面闭环；Windows 账户壳已合入，接 Mihomo/proof bridge 前先补 MSVC/Credential Manager Windows 验证；macOS/iOS 条件与后续验收 |
+| E3 四端 | 部分完成 | Android 会员真机数据面闭环；Windows 账户壳已合入，路径限定 MSVC/Credential Manager CI 已实现、hosted 结果待核实，再接 Mihomo/proof bridge；macOS/iOS 条件与后续验收 |
 | E4 分发监控 | 未开始 | 用户批准资源/预算后接静态资源 CDN 与可触发告警；CDN 不承载 VPN 数据面 |
 | E5 试运行 | 未开始 | 合规书面门槛、E1–E4、对账/SLO/支持流程均通过后再试点 |
 | E6 多云 / E7 放量 | 未开始 | 第二家厂商 conformance 和蓝绿释放证据；依据容量/成本逐级放量 |
@@ -45,8 +45,8 @@
 | --- | --- | --- |
 | A. M10 probe adapter 验证 | `apps/node-agent/**`、`apps/php-api/**` 分别限定端点/driver 代码与 Feature tests | mTLS `/healthz` 目前证明 Agent 端点存活，不等于 VPN 数据面健康；先用本地 mock/协议契约验证失败关闭和超时行为，真实节点/证书另需批准窗口 |
 | B. E0 制品可追溯性 | `.github/workflows/**`、`ops/build_artifact_manifest.py` | Debug APK 来源/摘要清单及 6 项测试已实现，hosted run `44943107063` 全绿；生产制品签名、SBOM 与发布存储仍未实现，不部署、不签发生产包 |
-| C. M11 本地压测证据 | `loadtest/**`、验收文档 | 先以 loopback/local 沙箱跑有界控制面场景，记录真实 P50/P95/错误率；不把脚本存在当基线，不压公网/生产 |
-| D. E0 Windows 验收通道 | `.github/workflows/**` 与 Windows build/test 文档 | 增加手动触发的 Windows MSVC/Credential Manager 验收入口；未经用户安排不自动消耗 Windows hosted runner，不把 macOS 交叉编译当 Windows 证据 |
+| C. M11 本地负载分层 | `loadtest/**`、验收报告 | 80请求的 loopback smoke 已完成；后续需在获批 staging 测控制面阶梯/长稳并单独审批，现有结果不能外推生产容量或 VPN 节点 |
+| D. E3 Windows 平台验证 | `.github/workflows/windows-client.yml`、`apps/windows/src-tauri/**` | 路径限定 MSVC/Credential Manager job 已实现，hosted run 待核实；成功也只证明账户壳 build 与系统 keyring smoke，不等于 Mihomo/TUN/proof bridge 完成 |
 | E. M6/M8 真机与节点闭环 | Android/Node Agent 契约分开验收 | 两台已有真机身份已绑定，不需要第三台手机；会员 profile、proof bridge、节点回执仍需获批隔离窗口和真实节点参数，未就绪前只完成离线代码/测试 |
 
 M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适用账号级还是逐设备线路）、E1 高可用拓扑/SLO 和 E4 资源费用是需用户拍板的项目决策；各自之外的离线契约、测试和模块工作继续推进。合规书面评估、生产 mTLS/运行身份、真实支付商户资料属于上线外部门槛，不阻止本地实现。每个工作包以最新 `origin/main` 开独立分支，阶段通过后 commit，并由主控运行 `ops/merge-worktree.sh <branch>` 合并推送；禁止提交 `.env`、私钥、数据库和临时产物。
@@ -68,7 +68,7 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 | --- | --- | --- | --- | --- |
 | **P0** | 发布链不完整 | CI 已覆盖 Web/API/PHP/扩展/Go/ops 与 Android native Debug APK；本轮补 Debug APK commit/SHA-256 清单；Dockerfiles 已存在。Windows 原生检查、staging、生产签名制品/回滚流程仍缺 | 开发检查通过仍不能证明生产交付和回滚可靠 | §3 |
 | **P0** | 无批量部署/编排 | `ops/node_lab.py`、`node_manager.py` 是**单节点测试/管理**脚本，无多节点并发编排、无蓝绿一键任务 | 节点上量时手工操作不可控，扩容/缩容慢，故障恢复靠人 | §4 |
-| **P0** | 压测尚无实测基线 | `loadtest/k6/` 和 loopback smoke 脚本已存在，但没有观察到已完成的分级压测报告/容量模型；公网/云端压测须审批 | 不知道系统实际承载量，容量规划不能以目标并发替代测量 | §5 |
+| **P0** | 压测尚无容量基线 | 已有 80 请求 loopback smoke 与本地 P50/P95/错误率记录；它只量 PHP dev server + SQLite，尚无分级 staging 数据、生产数据库/节点容量模型；公网/云端压测须审批 | 本机 smoke 不能用于预测生产承载量，容量规划不能以目标并发替代测量 | §5 |
 | **P1** | 四端实现与验收不平衡 | Android 有 Debug 原型，Web/扩展有本地会话客户端，Windows 有已合入账户壳；Android/Windows 数据面闭环与 macOS/iOS 客户端仍未完成 | 先聚焦 Android/Windows，不把账号 UI 或模拟节点当成隧道验收 | §6 |
 | **P1** | 无上线首日保障 runbook | 发布 checkpoints 有，但没有"上线日 T-1 到 T+1"的具体 checklist、SLO/错误预算、冻结窗口、值班表 | 上线当天手忙脚乱，故障无明确降级/回滚决策 | §7 |
 | **P1** | 多云只有原则无可移植层 | `NodeProvider` 抽象存在但只有 AWS 驱动；无第二家、无可移植构建产物、无跨厂商配置格式 | 换厂商=重写，被单厂商锁定，成本/覆盖受制于人 | §8 |
