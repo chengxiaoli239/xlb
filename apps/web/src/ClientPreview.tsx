@@ -9,7 +9,7 @@ import {
 import './client-preview.css';
 import CompatibilityPanel, { SubscriptionImport } from './SubscriptionTools';
 
-type User = { id: string; name: string; email: string; role: 'admin' | 'member' };
+type User = { id: string; name: string; email: string | null; role: 'admin' | 'member'; account_type: 'anonymous' | 'full' };
 type Plan = { id: string; name: string; period_label: string; duration_days: number; price_cents: number; traffic_gb: number; max_devices: number };
 type Overview = {
   user: User;
@@ -271,7 +271,7 @@ export default function ClientPreview() {
       <div className="client-sidebar-bottom">
         <div className="client-safety"><span className="safety-icon"><Shield size={18} /></span><div><b>连接保护</b><small>客户端内核尚未接入</small></div><span className="status-dot pending" /></div>
         <button type="button" className="client-side-link" onClick={() => { window.location.href = '/account?view=support'; }}><LifeBuoy size={17} />帮助与支持<ArrowUpRight size={15} /></button>
-        <div className="client-profile"><span className="client-avatar">{user.name.slice(0, 1)}</span><span className="client-profile-copy"><b>{user.name}</b><small>{user.email}</small></span><button type="button" className="client-icon-button" title="退出账户" aria-label="退出账户" onClick={() => void logout()}><LogOut size={17} /></button></div>
+        <div className="client-profile"><span className="client-avatar">{user.name.slice(0, 1)}</span><span className="client-profile-copy"><b>{user.name}</b><small>{user.account_type === 'anonymous' ? '匿名账号 · 未绑定邮箱' : user.email ?? '未绑定邮箱'}</small></span><button type="button" className="client-icon-button" title="退出账户" aria-label="退出账户" onClick={() => void logout()}><LogOut size={17} /></button></div>
       </div>
     </aside>
 
@@ -382,7 +382,19 @@ function PlansView({ plans, onOpenMemberCenter }: { plans: Plan[]; onOpenMemberC
 function AccountView({ user, overview, clients, verifiedClients, onOrders, onSupport, onLogout }: {
   user: User; overview: Overview | null; clients: Client[]; verifiedClients: Client[]; onOrders: () => void; onSupport: () => void; onLogout: () => void;
 }) {
-  return <div className="client-view-stack"><PageTitle eyebrow="账户设置" title="账户与设备" description="同一个迅连宝账户，跨端查看套餐、客户端和订单状态。" /><section className="account-profile-band"><span className="account-avatar-large">{user.name.slice(0, 1)}</span><span><small>会员账户</small><b>{user.name}</b><em>{user.email}</em></span><button className="client-secondary" type="button" onClick={onLogout}><LogOut size={16} />退出账户</button></section><div className="account-facts"><div><span className="account-fact-icon"><BadgeCheck size={19} /></span><span><small>当前权益</small><b>{overview?.entitlement?.plan_name ?? '暂无有效会员'}</b></span><ArrowRight size={16} /></div><div><span className="account-fact-icon"><Smartphone size={19} /></span><span><small>客户端目录</small><b>{clients.length} 个 · {verifiedClients.length} 个已验证</b></span><ArrowRight size={16} /></div><button type="button" onClick={onOrders}><span className="account-fact-icon"><CreditCard size={19} /></span><span><small>订单与支付</small><b>进入会员中心查看记录</b></span><ArrowUpRight size={16} /></button><button type="button" onClick={onSupport}><span className="account-fact-icon"><LifeBuoy size={19} /></span><span><small>帮助与支持</small><b>查看帮助工单</b></span><ArrowUpRight size={16} /></button></div><div className="connection-notice"><ShieldCheck size={17} /><span>登录、会员权益、订单和订阅凭证已使用 Laravel 本地会话 API。客户端安装包、内核连接、设备心跳和流量采集尚未上线。</span></div></div>;
+  const anonymous = user.account_type === 'anonymous';
+  return <div className="client-view-stack">
+    <PageTitle eyebrow="账户设置" title="账户与设备" description={anonymous ? '这是尚未绑定邮箱的匿名账号；升级与跨设备恢复入口尚未开放。' : '同一个迅连宝账户，跨端查看套餐、客户端和订单状态。'} />
+    <section className="account-profile-band"><span className="account-avatar-large">{user.name.slice(0, 1)}</span><span><small>{anonymous ? '匿名账号' : '会员账户'}</small><b>{user.name}</b><em>{user.email ?? '未绑定邮箱'}</em></span><button className="client-secondary" type="button" onClick={onLogout}><LogOut size={16} />退出账户</button></section>
+    <div className="account-facts">
+      <div><span className="account-fact-icon"><BadgeCheck size={19} /></span><span><small>当前权益</small><b>{overview?.entitlement?.plan_name ?? '暂无有效会员'}</b></span><ArrowRight size={16} /></div>
+      <div><span className="account-fact-icon"><Smartphone size={19} /></span><span><small>客户端目录</small><b>{clients.length} 个 · {verifiedClients.length} 个已验证</b></span><ArrowRight size={16} /></div>
+      <button type="button" onClick={onOrders}><span className="account-fact-icon"><CreditCard size={19} /></span><span><small>订单与支付</small><b>进入会员中心查看记录</b></span><ArrowUpRight size={16} /></button>
+      <button type="button" onClick={onSupport}><span className="account-fact-icon"><LifeBuoy size={19} /></span><span><small>帮助与支持</small><b>查看帮助工单</b></span><ArrowUpRight size={16} /></button>
+    </div>
+    {anonymous && <div className="connection-notice"><ShieldCheck size={17} /><span>此匿名账号未绑定邮箱，目前不支持通过邮箱在其他设备恢复；账号绑定或升级入口尚未开放。</span></div>}
+    <div className="connection-notice"><ShieldCheck size={17} /><span>登录、会员权益、订单和订阅凭证已使用 Laravel 本地会话 API。客户端安装包、内核连接、设备心跳和流量采集尚未上线。</span></div>
+  </div>;
 }
 
 function ClientDialog({ type, busy, subscription, onClose, onCreate, onRotate }: {
