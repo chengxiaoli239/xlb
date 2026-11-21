@@ -24,9 +24,9 @@
 | M3–M4 会员控制面 | Android Debug 登录、读取权益、设备 challenge 绑定；Laravel 设备、订阅和撤权 outbox 有本地测试 | member profile/真实节点授权、生产凭证和真实数据面尚未接通 |
 | M5 / M7 隔离协议与回收 | 本地并发/额度内核测试；2026-11-21 获批隔离节点上合成 peer 并发、复用拒绝、独立 peer、撤权回执/最终流量测试通过；资源按计划回收核查 | 只证明限定 harness 与隔离节点；不能外推生产数据库、会员客户端或长期容量 |
 | M6 双身份与会员线路 | 两台真机 ALT-AN00、VOG-AL10 的 installation ID 与 P-256 公钥绑定均有 SQLite 实测；合成 peer 隔离协议测试通过 | 会员真机复制拒绝、真实 member profile 隧道、匹配会员撤权回执未完成；当前隔离栈已回收，后续线路验收需重新核对并使用获批窗口 |
-| M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试；Windows 已有默认关闭的 Rust `BridgeSupervisor` 生命周期契约（`ddae7f1`） | Android Keystore bridge 真实接入、Windows CNG proof verifier/真实 process adapter、macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成；本地 bridge `ready` 不表示 VPN connected |
+| M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试；Windows 已有默认关闭的 Rust `BridgeSupervisor` 生命周期契约（`ddae7f1`）及 hosted 通过的 current-user non-exportable CNG P-256 signer（`44959472000`） | Android Keystore bridge 真实接入、Windows CNG signer 到真实 process adapter 的接线、macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成；本地 bridge `ready` 不表示 VPN connected |
 | M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口、匿名账号幂等恢复及显式退出后关闭自动恢复；Web/扩展可辨识匿名账号并保留权益状态；AndroidX Keystore 状态与 API instrumentation 已在隔离 API 35 arm64 emulator 上通过；Windows Tauri/React 账户壳已合入 `f74c270`，Windows MSVC/Credential Manager hosted run `44945777899` 全绿 | 5 个 Android instrumentation cases 通过；local/testing 沙箱恢复幂等已实测。邮箱/手机升级、跨端登录和 PC 扫码授权仍未实现；Windows 账户壳不含 VPN 数据面、签名安装或 WebView2 运行验收；不得清除现有会员设备数据 |
-| M10 智能路由 | 加权候选、熔断恢复、fake driver、SQLite CAS 健康仓库、默认关闭的 worker/route filter、fail-closed PHP mTLS probe contract（`2f9b2b0`）及 Go challenge handler（`7c1c826`）均有离线测试 | Go handler 尚未挂入 runnable Agent，也没有真实 `DataPlaneProbeExecutor`；`/healthz` 仍只代表 Agent liveness。下一项先定义并实现独立 mTLS probe listener 与可验证 transport executor，再以隔离节点证明真实 challenge/echo。D3 自动切换范围待用户定；严格设备线路不得绕过 peer revoke/provision/receipt；fake driver/契约不证明节点在线或稳定 |
+| M10 智能路由 | 加权候选、熔断恢复、SQLite CAS 健康仓库、默认关闭的 worker/route filter、PHP opt-in config HTTPS/mTLS HTTP probe transport 与 Go opt-in loopback TLS 1.3 mTLS probe listener 均有离线/hosted 测试 | Go Agent 尚无真实 `DataPlaneProbeExecutor`，固定返回 `503 probe_unavailable`；PHP fake HTTP 测试未与真实 Go listener 建立 TLS/mTLS 集成，probe/scheduler/route filter 均默认关闭。下一项需真实 node identity/endpoint/cert 配置，并在批准隔离节点验证随机 challenge echo、健康持久化与失败恢复。`/healthz` 仍只代表 liveness；D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt |
 | M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android pinned NDK/Go 下的真实 arm64 Mihomo JNI Debug APK、JVM tests 与 lint；metadata-only APK manifest hosted run `44943107063` 全绿；本机 loopback 控制面 smoke 已测；Windows MSVC/Credential Manager run `44945777899` 全绿 | 本轮 pnpm full audit 与 production audit 无已知漏洞，API/Web/Windows tests/build 通过；Android manifest 在 hosted job 实际产出。M11 80 请求/并发1与4的本机结果见验收报告，只是 PHP dev server + 临时 SQLite smoke，不是生产容量门。staging、生产签名制品/回滚、S3/CDN、监控告警与成本预算仍缺 |
 
 | 发布阶段 | 状态 | 下一退出门 |
@@ -43,17 +43,17 @@
 
 | 工作包 | 文件/模块边界 | 依赖与退出条件 |
 | --- | --- | --- |
-| A. M10 专用 probe listener/transport | `apps/node-agent/**`、`apps/php-api/**` 分别限定端点/driver 代码与 Feature tests | PHP fail-closed mTLS contract 与 Go `POST /v1/node/probe` challenge handler 已有；handler 仅检查已验证客户端证书并调用 executor，当前未注册到 Agent 且没有真实 executor。下一阶段先完成 loopback-only mTLS listener、节点身份映射和 fail-closed executor contract；只有真实 transport 按时回显随机 challenge 才能记 probe success，隔离节点/证书另按批准窗口核验 |
+| A. M10 专用 probe listener/transport | `apps/node-agent/**`、`apps/php-api/**` 分别限定 Agent listener/handler 与 PHP transport/Feature tests | Go opt-in loopback mTLS listener 与 PHP opt-in per-node HTTPS/mTLS transport 已实现；Go Agent 无真实 executor 且会返回 `503 probe_unavailable`，PHP full suite 使用 HTTP fake 未证明 TLS。下一阶段按批准的 node ID/endpoint/server cert/client cert/CA 映射在隔离节点跑真实 challenge echo、超时/证书失败和健康状态对账；开 worker 前确认 fail-closed 与无 liveness 误判 |
 | B. E0 制品可追溯性 | `.github/workflows/**`、`ops/build_artifact_manifest.py` | Debug APK 来源/摘要清单及 6 项测试已实现，hosted run `44943107063` 全绿；生产制品签名、SBOM 与发布存储仍未实现，不部署、不签发生产包 |
 | C. M11 本地负载分层 | `loadtest/**`、验收报告 | 80请求的 loopback smoke 已完成；后续需在获批 staging 测控制面阶梯/长稳并单独审批，现有结果不能外推生产容量或 VPN 节点 |
-| D. Windows CNG verifier/真实 sidecar adapter | `apps/windows/src-tauri/**`，Rust supervisor/lifecycle contract 已合入 | 现有 `keyring` 仅处理会话凭据，不提供 CNG P-256 signer；当前 `Cargo.toml` 没有直接 Windows crypto API binding。先锁定受审 API binding 与 Windows-only 密钥/签名测试，不手写未审 FFI；实现后仍保持 feature flag 关闭，必须保持设备 proof/peer binding 前置，不能把 bridge process ready 当 VPN 已连接 |
+| D. Windows CNG verifier/真实 sidecar adapter | `apps/windows/src-tauri/**`，Rust supervisor/lifecycle contract 与 CNG signer 已合入 | Windows CNG P-256 signer 已用 Windows hosted `cargo test --locked` 29/29 与 MSVC build 验收（`44959472000`）；existing key 每次打开均复核 signing-only/zero-export/P-256。下一项再接服务端设备 proof 与撤权校验、opaque capability 和 process adapter；bridge 仍默认关闭，不得将 CNG 签名能力外推为 Mihomo/TUN/会员线路/严格限设备验收 |
 | E. M6/M8 真机与节点闭环 | Android/Node Agent 契约分开验收 | 两台已有真机身份已绑定，不需要第三台手机；会员 profile、proof bridge、节点回执仍需获批隔离窗口和真实节点参数，未就绪前只完成离线代码/测试 |
 
 M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适用账号级还是逐设备线路）、E1 高可用拓扑/SLO 和 E4 资源费用是需用户拍板的项目决策；各自之外的离线契约、测试和模块工作继续推进。合规书面评估、生产 mTLS/运行身份、真实支付商户资料属于上线外部门槛，不阻止本地实现。每个工作包以最新 `origin/main` 开独立分支，阶段通过后 commit，并由主控运行 `ops/merge-worktree.sh <branch>` 合并推送；禁止提交 `.env`、私钥、数据库和临时产物。
 
 ### 0.2 近期依赖顺序与并行边界（2026-11-22）
 
-本次规划记录时主线为 `origin/main=ee5748e`。全量 worktree 核对中，14 个已登记功能分支的提交均能在主线找到等效补丁，没有等待合并的独有提交；`android-native-ci` 仍有未提交的 Gradle/instrumentation 用户改动，必须保留并单独审查，不能混入其他阶段。
+本次规划最初记录的主线基准为 `origin/main=ee5748e`；截至 2026-11-22，本地 `main` 与 `origin/main` 同步在 `324b4cc`。本轮核对了 14 个附属 worktree：分支各有 1–3 个旧提交，但 `git cherry -v origin/main HEAD` 均显示补丁已等效进入主线，不存在独有待合并阶段。`android-native-ci` 另有用户未提交的 `apps/android/app/build.gradle` 改动和 `apps/android/app/src/androidTest/` 新文件，必须原样保留并单独审查，不能混入其他阶段。主 worktree 还有总体规划文档修改及 `.playwright-cli/`、Android `*.hprof`、`output/` 临时产物；临时产物不提交。
 
 近期按“共用契约先锁定、平台实现并行、真实节点串行验收”推进：
 
@@ -63,7 +63,16 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 4. **M6 会员节点阶段（外部条件满足后串行）**：两台既有 Android 真机的独立 installation ID 与 P-256 绑定已满足，不需要第三台手机；仍缺可用隔离 member profile 隧道、两机同时/错峰复制拒绝、匹配 node/peer/request/generation 的真实撤权回执与最终流量单调证据。执行云端步骤前必须经 `ops/aws-cli` 只读复核当前账户/资源，复核已批准 plan 后才可 `--apply`；无节点回执不能宣称断流。
 5. **E1–E7 放行链**：真实 mTLS/密钥注入、合规书面意见、staging/签名与回滚、分级容量数据、监控与成本预算、多云 conformance、试运行均为独立放行门；不得用本机 smoke、CI 绿灯、fake worker 或 M6 合成 peer 替代。
 
-建议同一时间最多两个独立 worktree：第一批 Android Keystore instrumentation 与 Windows CNG API binding 研究/契约；第二批再让 M10 listener 与客户端 bridge 分开推进。主控负责共用 wire 契约审查、逐阶段测试与串行 merge/push。任何阶段碰到外部门时，继续执行其他无依赖离线工作。
+**下一轮执行波次**（最多两个独立 worktree 同时开发；共享的 `xlb-proof-v1` 身份语义保持一致，主控逐阶段验收和串行 merge/push）：
+
+| 波次 | 并行工作 | 文件边界 | 独立退出条件 | 外部门 |
+| --- | --- | --- | --- | --- |
+| 1A | Android Keystore proof signer 到 Mihomo loopback bridge 的离线 adapter/失败关闭接线 | `apps/android/**` | 缺少有效签名、绑定 peer 或 bridge 时不启动 TUN；定向 JVM/Instrumentation 测试通过；不能把本地 ready 标成 VPN connected | 真实 member profile 与两机隧道验收仍需隔离节点 |
+| 1B | Windows CNG signer 到 verified-proof/sidecar adapter 的离线合同 | `apps/windows/**` | 普通字符串不能构造 verified capability；默认关闭；Windows hosted 测试与 build 通过；不宣称 sidecar/TUN 已运行 | Windows 真实系统运行和签名另验 |
+| 2 | M10 runnable Agent 的 probe executor 注入与 loopback mTLS 集成测试 | `apps/node-agent/**`，PHP transport 单独提交 | 没有真实数据面执行器时保持 `503 probe_unavailable`；本地 loopback 测试明确标 test-only；Go race/vet/build 通过 | node ID、节点/客户端证书和隔离节点 challenge echo 需要获批环境 |
+| 3 | M6 两台现有会员真机数据面验收 | Android/API/验收记录，云资源另按计划 | 两机同时/错峰复制均拒绝；有效会员连接成功；退款撤权有匹配回执且最终流量单调 | 需要 member profile、获批隔离节点窗口与当前 AWS 会话；两台设备身份已具备，不需要第三台手机 |
+
+M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求、并发 1/4、loopback-only、临时 SQLite、无 Cookie 重放及 health preflight。它只形成开发机控制面基线，不得外推到生产容量或 VPN 隧道稳定性。D2 跨端登录方式、D3 智能线路范围、高可用拓扑/SLO 与 E4 资源费用仍需用户决策；可并行的离线工作不因此暂停。任何阶段碰到外部门时，继续执行其他无依赖离线工作。
 
 ## 1. 与既有文档的关系（不重复）
 
