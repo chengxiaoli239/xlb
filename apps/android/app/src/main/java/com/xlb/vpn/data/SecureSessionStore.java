@@ -24,6 +24,7 @@ import javax.crypto.spec.GCMParameterSpec;
 
 public final class SecureSessionStore {
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
+    private static final String ANONYMOUS_RECOVERY_CONSENTED = "anonymous_recovery_consented";
     private static final String ANONYMOUS_RECOVERY_SECRET = "anonymous_recovery_secret";
     private static final String COOKIES = "cookies";
     private static final int GCM_IV_SIZE = 12;
@@ -60,6 +61,7 @@ public final class SecureSessionStore {
         try {
             state.put(INSTALLATION_ID, UUID.randomUUID().toString());
             state.remove(ANONYMOUS_RECOVERY_SECRET);
+            state.remove(ANONYMOUS_RECOVERY_CONSENTED);
         } catch (JSONException exception) {
             throw new IllegalStateException("无法更新设备标识", exception);
         }
@@ -82,6 +84,24 @@ public final class SecureSessionStore {
         writeState(state);
 
         return created;
+    }
+
+    public synchronized void recordAnonymousRecoveryConsent() {
+        JSONObject state = readState();
+        try {
+            state.put(ANONYMOUS_RECOVERY_CONSENTED, true);
+        } catch (JSONException exception) {
+            throw new IllegalStateException("无法保存匿名账号授权状态", exception);
+        }
+        writeState(state);
+    }
+
+    public synchronized boolean hasAnonymousRecoveryConsent() {
+        JSONObject state = readState();
+        return new AnonymousRecoveryCredential.RecoveryState(
+                state.optString(ANONYMOUS_RECOVERY_SECRET, ""),
+                state.optBoolean(ANONYMOUS_RECOVERY_CONSENTED, false)
+        ).canRestore();
     }
 
     public synchronized String cookieHeader() {
@@ -126,8 +146,16 @@ public final class SecureSessionStore {
 
     public synchronized void clearSession() {
         JSONObject state = readState();
+        AnonymousRecoveryCredential.RecoveryState recoveryState = new AnonymousRecoveryCredential.RecoveryState(
+                state.optString(ANONYMOUS_RECOVERY_SECRET, ""),
+                state.optBoolean(ANONYMOUS_RECOVERY_CONSENTED, false)
+        ).afterExplicitLogout();
         try {
             state.put(COOKIES, new JSONObject());
+            if (!recoveryState.secret.isEmpty()) {
+                state.put(ANONYMOUS_RECOVERY_SECRET, recoveryState.secret);
+            }
+            state.remove(ANONYMOUS_RECOVERY_CONSENTED);
         } catch (JSONException exception) {
             throw new IllegalStateException("无法清理会话", exception);
         }

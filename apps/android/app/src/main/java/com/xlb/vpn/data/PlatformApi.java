@@ -69,6 +69,8 @@ public final class PlatformApi {
 
         JSONObject payload = new JSONObject();
         try {
+            sessionStore.anonymousRecoverySecret();
+            sessionStore.recordAnonymousRecoveryConsent();
             payload.put("installation_id", sessionStore.installationId());
             payload.put("recovery_secret", sessionStore.anonymousRecoverySecret());
             payload.put("consent", true);
@@ -90,6 +92,14 @@ public final class PlatformApi {
         }
 
         return account;
+    }
+
+    public MemberAccount restoreAnonymousAccount() throws PlatformApiException {
+        if (!sessionStore.hasAnonymousRecoveryConsent()) {
+            return null;
+        }
+
+        return registerAnonymousAccount(true);
     }
 
     public ClientSnapshot synchronize(MemberAccount account) throws PlatformApiException {

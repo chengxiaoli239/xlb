@@ -27,4 +27,26 @@ final class AnonymousRecoveryCredential {
             return false;
         }
     }
+
+    static boolean canRestore(boolean consented, String value) {
+        return consented && isValid(value);
+    }
+
+    static final class RecoveryState {
+        final String secret;
+        final boolean consented;
+
+        RecoveryState(String secret, boolean consented) {
+            this.secret = secret;
+            this.consented = consented;
+        }
+
+        RecoveryState afterExplicitLogout() {
+            return new RecoveryState(secret, false);
+        }
+
+        boolean canRestore() {
+            return AnonymousRecoveryCredential.canRestore(consented, secret);
+        }
+    }
 }

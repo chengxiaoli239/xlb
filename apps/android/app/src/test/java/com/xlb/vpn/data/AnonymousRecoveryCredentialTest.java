@@ -37,4 +37,27 @@ public class AnonymousRecoveryCredentialTest {
         assertFalse(AnonymousRecoveryCredential.isValid("short"));
         assertFalse(AnonymousRecoveryCredential.isValid("B".repeat(43)));
     }
+
+    @Test
+    public void recoveryRequiresPriorConsentAndValidCredential() {
+        String secret = AnonymousRecoveryCredential.generate(new SecureRandom());
+
+        assertFalse(AnonymousRecoveryCredential.canRestore(false, secret));
+        assertFalse(AnonymousRecoveryCredential.canRestore(true, "invalid"));
+        assertTrue(AnonymousRecoveryCredential.canRestore(true, secret));
+    }
+
+    @Test
+    public void explicitLogoutKeepsCredentialButDisablesStartupRestore() {
+        String secret = AnonymousRecoveryCredential.generate(new SecureRandom());
+        AnonymousRecoveryCredential.RecoveryState consented =
+                new AnonymousRecoveryCredential.RecoveryState(secret, true);
+        AnonymousRecoveryCredential.RecoveryState afterLogout = consented.afterExplicitLogout();
+
+        assertTrue(AnonymousRecoveryCredential.isValid(secret));
+        assertTrue(consented.canRestore());
+        assertEquals(secret, afterLogout.secret);
+        assertFalse(afterLogout.consented);
+        assertFalse(afterLogout.canRestore());
+    }
 }

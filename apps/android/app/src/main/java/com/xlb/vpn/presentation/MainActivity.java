@@ -123,6 +123,9 @@ public final class MainActivity extends Activity {
             PlatformApi.ClientSnapshot result = null;
             try {
                 PlatformApi.MemberAccount account = api.currentAccount();
+                if (account == null && BuildConfig.DEBUG) {
+                    account = api.restoreAnonymousAccount();
+                }
                 if (account != null) {
                     result = api.synchronize(account);
                 }
@@ -349,10 +352,10 @@ public final class MainActivity extends Activity {
 
     private void showAnonymousAccountConsent() {
         new AlertDialog.Builder(this)
-                .setTitle("创建匿名账号")
-                .setMessage("账号将绑定当前应用安装。恢复密钥由 Android Keystore 加密保存在本机，服务端只保存摘要。当前开发版本不会自动开通会员权益，邮箱/手机号升级和跨端迁移尚未开放；卸载应用或清除数据后可能无法恢复。是否继续？")
+                .setTitle("创建或恢复匿名账号")
+                .setMessage("账号将绑定当前应用安装。已有匿名账号时会尝试恢复原账号。恢复密钥由 Android Keystore 加密保存在本机，服务端只保存摘要。当前开发版本不会自动开通会员权益，邮箱/手机号升级和跨端迁移尚未开放；卸载应用或清除数据后可能无法恢复。是否继续？")
                 .setNegativeButton("取消", null)
-                .setPositiveButton("同意并创建", (dialog, which) -> perform("正在创建匿名账号…", false, () -> {
+                .setPositiveButton("同意并继续", (dialog, which) -> perform("正在创建或恢复匿名账号…", false, () -> {
                     PlatformApi.MemberAccount account = api.registerAnonymousAccount(true);
                     return api.synchronize(account);
                 }))
