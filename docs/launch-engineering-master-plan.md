@@ -26,7 +26,7 @@
 | M6 双身份与会员线路 | 两台真机 ALT-AN00、VOG-AL10 的 installation ID 与 P-256 公钥绑定均有 SQLite 实测；合成 peer 隔离协议测试通过 | 会员真机复制拒绝、真实 member profile 隧道、匹配会员撤权回执未完成；当前隔离栈已回收，后续线路验收需重新核对并使用获批窗口 |
 | M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试 | Android Keystore bridge 真实接入、Windows CNG/macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成 |
 | M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口、匿名账号幂等恢复及显式退出后关闭自动恢复；Web/扩展可辨识匿名账号并保留权益状态；AndroidX Keystore 状态与 API instrumentation 已在隔离 API 35 arm64 emulator 上通过；Windows Tauri/React 账户壳已合入 `f74c270`，Windows MSVC/Credential Manager hosted run `44945777899` 全绿 | 5 个 Android instrumentation cases 通过；local/testing 沙箱恢复幂等已实测。邮箱/手机升级、跨端登录和 PC 扫码授权仍未实现；Windows 账户壳不含 VPN 数据面、签名安装或 WebView2 运行验收；不得清除现有会员设备数据 |
-| M10 智能路由 | 加权候选、熔断恢复、探测 fake driver、持久化接口、SQLite CAS 健康仓库、默认关闭的一次性 worker/命令与默认关闭的 `SubscriptionRouteService` 持久状态过滤均有离线测试（路由过滤合入 `353f46b`） | 尚无真实协议 probe driver、生产定时调度或客户端线路 UI；下一项为受 mTLS/协议范围约束的真实 probe adapter 验证。D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt；假驱动不证明节点在线或稳定 |
+| M10 智能路由 | 加权候选、熔断恢复、fake driver、SQLite CAS 健康仓库、默认关闭的 worker/route filter、fail-closed mTLS 数据面探测契约均有离线测试（probe contract 合入 `2f9b2b0`） | 无真实 transport/专用 probe endpoint、生产 scheduler 或客户端线路 UI；`/healthz` 只代表 Agent liveness。下一项设计真实端点和受控 transport，再用隔离节点验证。D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt；fake driver/契约不证明节点在线或稳定 |
 | M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android pinned NDK/Go 下的真实 arm64 Mihomo JNI Debug APK、JVM tests 与 lint；metadata-only APK manifest hosted run `44943107063` 全绿；本机 loopback 控制面 smoke 已测；Windows MSVC/Credential Manager run `44945777899` 全绿 | 本轮 pnpm full audit 与 production audit 无已知漏洞，API/Web/Windows tests/build 通过；Android manifest 在 hosted job 实际产出。M11 80 请求/并发1与4的本机结果见验收报告，只是 PHP dev server + 临时 SQLite smoke，不是生产容量门。staging、生产签名制品/回滚、S3/CDN、监控告警与成本预算仍缺 |
 
 | 发布阶段 | 状态 | 下一退出门 |
@@ -43,7 +43,7 @@
 
 | 工作包 | 文件/模块边界 | 依赖与退出条件 |
 | --- | --- | --- |
-| A. M10 probe adapter 验证 | `apps/node-agent/**`、`apps/php-api/**` 分别限定端点/driver 代码与 Feature tests | mTLS `/healthz` 目前证明 Agent 端点存活，不等于 VPN 数据面健康；先用本地 mock/协议契约验证失败关闭和超时行为，真实节点/证书另需批准窗口 |
+| A. M10 专用 probe endpoint/transport | `apps/node-agent/**`、`apps/php-api/**` 分别限定端点/driver 代码与 Feature tests | PHP fail-closed mTLS/data-plane probe interface 已合入；当前 Agent `/healthz` 只是 liveness，`/v1/tunnel/connect` 不是 health probe。下一阶段定义专用 challenge/echo endpoint 和 certificate identity binding；真实节点/证书另需批准窗口 |
 | B. E0 制品可追溯性 | `.github/workflows/**`、`ops/build_artifact_manifest.py` | Debug APK 来源/摘要清单及 6 项测试已实现，hosted run `44943107063` 全绿；生产制品签名、SBOM 与发布存储仍未实现，不部署、不签发生产包 |
 | C. M11 本地负载分层 | `loadtest/**`、验收报告 | 80请求的 loopback smoke 已完成；后续需在获批 staging 测控制面阶梯/长稳并单独审批，现有结果不能外推生产容量或 VPN 节点 |
 | D. Windows proof bridge/TUN 设计与离线契约 | `apps/windows/**`，独立账户壳之外的新阶段 | 账户壳与 Windows keyring smoke 已通过 hosted；先定 Rust bridge interface/credential ownership/lifecycle tests，再接 Windows Mihomo sidecar；不做账号级凭证绕过严格设备绑定 |

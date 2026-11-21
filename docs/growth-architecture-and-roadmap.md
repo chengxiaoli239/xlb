@@ -169,7 +169,7 @@
 
 - M9 匿名注册 API、Android 明确同意与匿名恢复已在隔离 API 35 arm64 emulator 上完成 Keystore/API instrumentation；Web 和扩展能呈现匿名账号权益。邮箱/手机升级、扫码 PC 授权和真实跨端恢复仍缺。
 - Windows `apps/windows` 已有 Tauri/React 账户壳，明确不含 VPN 数据面。路径限定 MSVC/Credential Manager workflow `44945777899` 正在运行，完成前不宣称 Windows 原生验证通过。
-- M10 已有 SQLite CAS 健康状态仓库、默认关闭且缺 driver 时 fail closed 的一次性 worker，以及默认关闭的 `SubscriptionRouteService` 持久探测状态过滤。没有真实协议 probe driver 或 production scheduler；不能将 Agent `/healthz` 单独当作数据面健康。
+- M10 已有 SQLite CAS 健康状态仓库、默认关闭且缺 driver 时 fail closed 的一次性 worker、默认关闭的持久状态路由过滤，以及要求 mTLS 服务端/节点身份验证和随机 challenge echo 的 PHP data-plane probe contract（`2f9b2b0`）。没有真实 transport 实现、专用 Agent probe endpoint 或 production scheduler；不能将 Agent `/healthz` 单独当作数据面健康。
 - M11 已完成本机临时 SQLite / PHP 开发服务器 80 请求、并发 1/4 smoke，P95 约 3.7–3.9ms / 13.7–14.1ms、错误率 0%；此结果不代表生产容量、3000 并发、节点稳定或 VPN 可用。
 
 历史目标中的每 15 秒协议探测、3000 并发、CDN/S3、CloudWatch/SNS、生产 scheduler 和负载阈值仍是待实施/审批事项，不能因有离线原型而标成完成。M6 两台真机的独立 P-256 身份已满足；线路下复制拒绝和节点撤权回执仍未验收，不需要第三台实体手机。完整状态见会员 PRD 顶部和上线工程总体规划 §0.1。
