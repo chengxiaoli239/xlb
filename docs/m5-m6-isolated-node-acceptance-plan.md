@@ -119,8 +119,8 @@ ops/aws-cli --profile xlb-ops --region us-west-2 ssm start-session \
 
 1. local/testing 隔离会员会话可由仓库沙箱自给，不再是外部依赖；真机会员链路要覆盖退款/撤权时仍需有效测试权益与线路，账号凭据不得进入报告或仓库。
 2. 生产专用 mTLS client cert/key/CA 的受控密钥注入条件（不进仓库或聊天）；隔离节点使用一次性 test CA。
-3. 两个真机安装均需各自完成设备 challenge 签名绑定后，才能做 M6 会员身份验收。用户已提供两台安卓真机；已知 VOG-AL10 已绑定 P-256，ALT-AN00 旧记录的 `public_key` / `bound_at` 为空，需按客户端既有设备流程重新绑定。普通 Clash Verge 不满足挑战签名条件。本次云端 bridge harness 的两个不同密钥身份只证明隔离协议拒绝复制身份，不替代会员实机证据。
+3. 两个真机安装均需各自完成设备 challenge 签名绑定后，才能做 M6 会员身份验收。2026-11-21 中午快照曾显示 VOG-AL10 已绑定 P-256、ALT-AN00 旧记录 `public_key` / `bound_at` 为空；后续按客户端设备流程触发 challenge，并由 SQLite 核实两台 installation ID 均不同且各自已有绑定 P-256 公钥。故双 proof-capable 身份前置现已满足，但尚未完成会员真机凭证复制拒绝、隔离会员线路隧道和真实会员撤权回执验收。普通 Clash Verge 不满足挑战签名条件；云端 bridge harness 的两个合成密钥只证明隔离协议拒绝复制身份，不替代会员实机证据。
 4. 若验收目标扩展到公网 VPN/TUN 或运营商质量，另行确认测试源 IP /32、协议端口和开放时限；本计划的 SSM-only 节点没有公网入站。
 5. iOS 验收范围、真机和代码签名/分发条件。
 
-2026-11-21 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 实测有效，返回 `arn:aws:iam::289069331089:root`。本次节点栈和实验 IAM 栈均已回收，未发现残留；这不代表账单最终结算。剩余会员真机依赖是 ALT-AN00 完成独立 P-256 challenge 绑定，并在有可用隔离线路时复测会员会话；生产 mTLS 凭证、安全区适配和 iOS 验收仍未完成。生产签发保持关闭；合成测试回执不代表真实会员节点撤权；未取得对应真实节点回执前不宣称断流或严格限制真实客户端设备，不宣称可以发布。
+2026-11-21 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 实测有效，返回 `arn:aws:iam::289069331089:root`。本次节点栈和实验 IAM 栈均已回收，未发现残留；这不代表账单最终结算。2026-11-21 后续 SQLite 实测已确认 ALT-AN00 与 VOG-AL10 各自有 P-256 challenge 绑定；剩余会员真机依赖是在可用隔离线路下复测身份复制拒绝、隧道与会员撤权回执。生产 mTLS 凭证、安全区适配和 iOS 验收仍未完成。生产签发保持关闭；合成测试回执不代表真实会员节点撤权；未取得对应真实节点回执前不宣称断流或严格限制真实客户端设备，不宣称可以发布。
