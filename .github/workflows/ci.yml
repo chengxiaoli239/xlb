@@ -79,6 +79,9 @@ jobs:
 
       - name: Run Laravel tests
         run: pnpm test
+        env:
+          # Deterministic test-only encryption key; never used by an app runtime.
+          APP_KEY: base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 
   node-agent:
     name: Isolated node agent tests and build
@@ -136,6 +139,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install pinned compile SDK
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
