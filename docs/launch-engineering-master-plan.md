@@ -27,7 +27,7 @@
 | M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试 | Android Keystore bridge 真实接入、Windows CNG/macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成 |
 | M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口；Web/扩展可辨识匿名账号并保留权益状态 | Android 真机只验到打开并取消同意对话框，未验成功创建/恢复；邮箱验证升级、跨端恢复、PC 扫码授权及桌面客户端未实现。验证注册不必新增实体手机：可用隔离 emulator/profile；不得清除现有会员设备数据 |
 | M10 智能路由 | 加权候选原型、熔断恢复状态机、注入探测契约/假驱动、进程内状态仓库均有单测 | 无持久化状态、真实 probe worker/协议探测、`SubscriptionRouteService` 接线或客户端线路 UI；D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt |
-| M11 与 E0 工程基础 | GitHub Actions 现覆盖 Web/API 构建、API/PHP/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android JVM tests/lint（显式跳过当前只支持 macOS NDK 的 Mihomo native build）；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 也已存在 | 本地各模块检查和 actionlint 通过；首个 hosted run 暴露 Laravel CI 缺 `APP_KEY`、Android setup-android v3 默认请求已下架的 `tools` 包，修复已写入下一提交，需看新 run 证实。没有压测基线报告、staging、生产制品/回滚、S3/CDN、监控告警或成本预算 |
+| M11 与 E0 工程基础 | GitHub Actions 现覆盖 Web/API 构建、API/PHP/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android JVM tests/lint（显式跳过当前只支持 macOS NDK 的 Mihomo native build）；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 也已存在 | 本地各模块检查和 actionlint 通过；首个 hosted run 暴露 Laravel CI 缺 `APP_KEY`、Android setup-android v3 默认请求已下架的 `tools` 包。第二个 hosted run 确认前两处已修复、Android/Go/ops/build job 通过，但 Go→PHP CGI 子进程的显式环境白名单仍漏 `APP_KEY`；测试 harness 已修复并本地通过，等待 hosted 重跑。没有压测基线报告、staging、生产制品/回滚、S3/CDN、监控告警或成本预算 |
 
 | 发布阶段 | 状态 | 下一退出门 |
 | --- | --- | --- |

@@ -199,6 +199,7 @@ final class NodePeerTrafficQuotaTest extends TestCase
         $environment = [
             'PATH' => (string) getenv('PATH'),
             'HOME' => (string) (getenv('HOME') ?: sys_get_temp_dir()),
+            'XLB_LARAVEL_APP_KEY' => (string) config('app.key'),
             'XLB_LARAVEL_CGI_INTEGRATION' => '1',
             'XLB_LARAVEL_PHP_API_ROOT' => base_path(),
             'XLB_LARAVEL_DB_PATH' => $this->databasePath,

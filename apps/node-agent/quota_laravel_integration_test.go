@@ -28,6 +28,7 @@ func TestHTTPQuotaAuthorityAgainstLaravelCGI(t *testing.T) {
 	clientCertificatePath := requiredIntegrationEnv(t, "XLB_LARAVEL_CLIENT_CERT")
 	clientKeyPath := requiredIntegrationEnv(t, "XLB_LARAVEL_CLIENT_KEY")
 	requestID := requiredIntegrationEnv(t, "XLB_LARAVEL_REQUEST_ID")
+	appKey := requiredIntegrationEnv(t, "XLB_LARAVEL_APP_KEY")
 	if !filepath.IsAbs(phpRoot) || !filepath.IsAbs(databasePath) {
 		t.Fatal("Laravel root and SQLite database path must be absolute")
 	}
@@ -50,6 +51,7 @@ func TestHTTPQuotaAuthorityAgainstLaravelCGI(t *testing.T) {
 	scriptPath := filepath.Join(phpRoot, "public", "index.php")
 	baseCGIEnvironment := []string{
 		"REDIRECT_STATUS=200",
+		"APP_KEY=" + appKey,
 		"APP_ENV=testing",
 		"DB_CONNECTION=sqlite",
 		"DB_DATABASE=" + databasePath,
