@@ -13,7 +13,10 @@ final class PersistentPaymentEventLedger
     public function register(MerchantOrder $order): void
     {
         $sourceOrder = DB::table('orders')->where('id', $order->merchantOrderId)->where('is_test', true)->first();
-        if (! app()->environment(['local', 'testing']) || ! $sourceOrder || (int) $sourceOrder->total_cents !== $order->amountMinor) {
+        if (! app()->environment(['local', 'testing']) || ! $sourceOrder
+            || $sourceOrder->status !== 'pending_test'
+            || (int) $sourceOrder->total_cents !== $order->amountMinor
+            || $sourceOrder->expires_at !== $order->expiresAt->format(DATE_ATOM)) {
             throw new LogicException('Only matching local and testing orders can enter the provider ledger.');
         }
 

@@ -9,6 +9,7 @@ use App\Http\Controllers\NodeQuotaController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PlatformController;
 use App\Http\Controllers\SandboxPaymentController;
+use App\Http\Controllers\SandboxProviderWebhookController;
 use App\Http\Controllers\SubscriptionRouteController;
 use App\Http\Controllers\TicketController;
 use App\Http\Middleware\AuthenticateNodeAgentCertificate;
@@ -23,6 +24,8 @@ Route::post('/api/v1/auth/logout', [PlatformController::class, 'logout']);
 Route::post('/api/v1/client/heartbeat', [MemberDeviceController::class, 'heartbeat'])->middleware(['auth', 'throttle:60,1']);
 Route::get('/api/v1/catalog/plans', [PlatformController::class, 'catalog']);
 Route::get('/subscribe/{token}', [PlatformController::class, 'subscriptionProfile'])->middleware('throttle:60,1');
+Route::post('/api/v1/payments/sandbox/webhook', [SandboxProviderWebhookController::class, 'receive'])
+    ->withoutMiddleware(PreventRequestForgery::class)->middleware('throttle:60,1');
 
 Route::prefix('/v1/node-quota')->middleware(AuthenticateNodeAgentCertificate::class)->group(function (): void {
     Route::post('/reservations', [NodeQuotaController::class, 'reserve'])
@@ -40,6 +43,7 @@ Route::prefix('api/v1/me')->middleware('auth')->group(function (): void {
     Route::post('/orders', [OrderController::class, 'create'])->middleware('throttle:20,1');
     Route::post('/orders/{id}/cancel', [OrderController::class, 'cancel']);
     Route::post('/orders/{id}/sandbox-payment', [SandboxPaymentController::class, 'simulate'])->middleware('throttle:10,1');
+    Route::post('/orders/{id}/sandbox-provider-session', [SandboxPaymentController::class, 'createProviderSession'])->middleware('throttle:10,1');
     Route::get('/devices', [MemberDeviceController::class, 'index']);
     Route::post('/devices', [MemberDeviceController::class, 'store'])->middleware('throttle:10,1');
     Route::post('/devices/{id}/subscription', [MemberDeviceSubscriptionController::class, 'store'])->middleware('throttle:10,1');

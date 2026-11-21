@@ -7,11 +7,13 @@ use App\Payments\MerchantOrder;
 use App\Payments\PaymentDecision;
 use App\Payments\PaymentEventType;
 use App\Payments\PersistentPaymentEventLedger;
+use App\Payments\PersistentSandboxPaymentProvider;
 use App\Payments\ProviderPaymentEvent;
 use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use LogicException;
 use Tests\TestCase;
 
@@ -116,6 +118,84 @@ class ProviderPaymentEventLedgerTest extends TestCase
         $ledger->register($order);
     }
 
+    public function test_signed_local_webhook_is_idempotent_and_worker_grants_sandbox_entitlement(): void
+    {
+        $orderId = $this->createOrder();
+        $session = $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')
+            ->assertOk()->json('data');
+        $signed = $this->signedPaidEvent($session);
+        (new PersistentSandboxPaymentProvider((string) config('app.key'), new PersistentPaymentEventLedger))
+            ->verifyWebhook($signed['body'], $signed['headers'], now()->utc()->toDateTimeImmutable());
+
+        $this->webhook($signed)->assertOk()->assertJsonPath('data.decision', 'apply');
+        $this->webhook($signed)
+            ->assertOk()->assertJsonPath('data.decision', 'duplicate');
+        $this->assertDatabaseCount('provider_payment_events', 1);
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'pending_test']);
+        $this->assertDatabaseCount('entitlement_grants', 0);
+
+        $this->artisan('payments:process-sandbox-fulfillments')->assertSuccessful();
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'paid_test']);
+        $this->assertDatabaseHas('entitlement_grants', ['order_id' => $orderId, 'status' => 'granted_test']);
+        $this->assertDatabaseHas('provider_payment_orders', ['merchant_order_id' => $orderId, 'status' => 'paid', 'entitlement_granted' => true]);
+        $this->assertDatabaseHas('provider_payment_fulfillments', ['merchant_order_id' => $orderId, 'status' => 'fulfilled', 'attempts' => 1]);
+        $this->assertDatabaseCount('entitlements', 2);
+    }
+
+    public function test_bad_signature_and_expired_timestamp_do_not_create_payment_events(): void
+    {
+        $orderId = $this->createOrder();
+        $session = $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')->assertOk()->json('data');
+        $signed = $this->signedPaidEvent($session);
+        (new PersistentSandboxPaymentProvider((string) config('app.key'), new PersistentPaymentEventLedger))
+            ->verifyWebhook($signed['body'], $signed['headers'], now()->utc()->toDateTimeImmutable());
+
+        $badHeaders = [...$signed['headers'], 'X-Sandbox-Signature' => str_repeat('0', 64)];
+        $this->webhook(['body' => $signed['body'], 'headers' => $badHeaders])->assertBadRequest();
+
+        $expiredTimestamp = (string) (now()->utc()->getTimestamp() - 301);
+        $expiredHeaders = [
+            'X-Sandbox-Timestamp' => $expiredTimestamp,
+            'X-Sandbox-Signature' => hash_hmac('sha256', $expiredTimestamp.'.'.$signed['body'], (string) config('app.key')),
+        ];
+        $this->webhook(['body' => $signed['body'], 'headers' => $expiredHeaders])->assertBadRequest();
+        $this->assertDatabaseCount('provider_payment_events', 0);
+        $this->assertDatabaseCount('entitlement_grants', 0);
+    }
+
+    public function test_fulfillment_failure_is_retained_for_retry_then_succeeds_once(): void
+    {
+        $orderId = $this->createOrder();
+        $session = $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')->assertOk()->json('data');
+        $signed = $this->signedPaidEvent($session);
+        $this->webhook($signed)
+            ->assertOk()->assertJsonPath('data.decision', 'apply');
+
+        DB::table('orders')->where('id', $orderId)->update(['status' => 'cancelled_test']);
+        $this->artisan('payments:process-sandbox-fulfillments')->assertSuccessful();
+        $this->assertDatabaseHas('provider_payment_fulfillments', [
+            'merchant_order_id' => $orderId,
+            'status' => 'pending',
+            'attempts' => 1,
+            'last_error_code' => 'sandbox_fulfillment_failed',
+        ]);
+        $this->assertDatabaseCount('entitlement_grants', 0);
+
+        DB::table('orders')->where('id', $orderId)->update(['status' => 'pending_test']);
+        $this->artisan('payments:process-sandbox-fulfillments')->assertSuccessful();
+        $this->assertDatabaseHas('provider_payment_fulfillments', ['merchant_order_id' => $orderId, 'status' => 'fulfilled', 'attempts' => 2]);
+        $this->assertDatabaseCount('entitlement_grants', 1);
+        $this->assertDatabaseCount('entitlements', 2);
+    }
+
+    public function test_sandbox_webhook_route_is_disabled_outside_local_and_testing(): void
+    {
+        $this->app->instance('env', 'production');
+
+        $this->postJson('/api/v1/payments/sandbox/webhook', [])->assertForbidden();
+        $this->assertDatabaseCount('provider_payment_events', 0);
+    }
+
     private function createOrder(): string
     {
         return $this->withHeader('Idempotency-Key', (string) Str::uuid())
@@ -151,5 +231,41 @@ class ProviderPaymentEventLedgerTest extends TestCase
             $type,
             new DateTimeImmutable($occurredAt ?? now()->utc()->format(DATE_ATOM)),
         );
+    }
+
+    /** @return array{body:string,headers:array<string,string>} */
+    private function signedPaidEvent(array $session): array
+    {
+        $timestamp = (string) now()->utc()->getTimestamp();
+        $body = json_encode([
+            'provider' => $session['provider'],
+            'event_id' => 'event-'.Str::uuid(),
+            'merchant_order_id' => $session['merchantOrderId'],
+            'transaction_id' => $session['channelTransactionId'],
+            'amount_minor' => 2980,
+            'currency' => 'CNY',
+            'event_type' => 'paid',
+            'occurred_at' => now()->utc()->format(DATE_ATOM),
+        ], JSON_THROW_ON_ERROR);
+
+        return [
+            'body' => $body,
+            'headers' => [
+                'X-Sandbox-Timestamp' => $timestamp,
+                'X-Sandbox-Signature' => hash_hmac('sha256', $timestamp.'.'.$body, (string) config('app.key')),
+            ],
+        ];
+    }
+
+    /** @param array{body:string,headers:array<string,string>} $signed */
+    private function webhook(array $signed): TestResponse
+    {
+        $server = [
+            'CONTENT_TYPE' => 'application/json',
+            'HTTP_X_SANDBOX_TIMESTAMP' => $signed['headers']['X-Sandbox-Timestamp'],
+            'HTTP_X_SANDBOX_SIGNATURE' => $signed['headers']['X-Sandbox-Signature'],
+        ];
+
+        return $this->call('POST', '/api/v1/payments/sandbox/webhook', [], [], [], $server, $signed['body']);
     }
 }
