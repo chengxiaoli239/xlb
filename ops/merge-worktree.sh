@@ -7,7 +7,7 @@
 # 流程（每个阶段完成即执行，避免并行成果滞留未提交）:
 #   1. 校验分支对应 worktree 存在且工作区干净（无未提交改动）。
 #   2. 在 main 上 fetch 远程最新，确认 origin/main 是 main 的祖先。
-#   3. 把该分支相对 merge-base 的提交按序 cherry-pick 到 main（保留逐阶段历史）。
+#   3. 拒绝含 merge commit 的功能分支，按序合入尚未等效存在的线性提交。
 #   4. push main 到 origin。
 #
 # 前置条件：开发分支应已在自己的 worktree 内 commit 完本阶段改动。
@@ -49,10 +49,10 @@ echo "[2/4] fetch 远程并校验 main ..."
 git checkout main -q
 git fetch origin -q
 git merge-base --is-ancestor origin/main main || die "main 与 origin/main 分叉，请先人工 rebase"
+[ -z "$(git rev-list --merges main.."$BRANCH")" ] || die "功能分支含 merge commit；此工具仅支持线性提交，请先人工审查"
 
 # 收集相对 main 的提交，并排除 patch 已等效存在于 main 的提交。
 ALL_COMMITS="$(git rev-list --reverse main.."$BRANCH")"
-[ -n "$ALL_COMMITS" ] || die "分支 $BRANCH 没有相对 main 的新提交"
 PATCHABLE_COMMITS="$(git cherry main "$BRANCH" | awk '$1 == "+" { printf "%s ", $2 }')"
 COMMITS="$(printf '%s\n' "$ALL_COMMITS" | awk -v patchable="$PATCHABLE_COMMITS" '
   BEGIN {
@@ -62,7 +62,8 @@ COMMITS="$(printf '%s\n' "$ALL_COMMITS" | awk -v patchable="$PATCHABLE_COMMITS" 
   unique[$0] { print }
 ')"
 if [ -z "$COMMITS" ]; then
-  echo "分支 $BRANCH 的提交均已以等效 patch 存在于 main，无需合并。"
+  echo "分支 $BRANCH 没有待合并 patch，确认 main 已推送 ..."
+  git push origin main
   exit 0
 fi
 
