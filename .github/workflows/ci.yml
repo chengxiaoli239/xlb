@@ -154,6 +154,6 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK and run JVM tests and lint
+      - name: Build debug APK, compile instrumentation tests, run JVM tests and lint
         working-directory: apps/android
-        run: ./gradlew assembleDebug testDebugUnitTest lintDebug --no-daemon
+        run: ./gradlew assembleDebug testDebugUnitTest compileDebugAndroidTestJavaWithJavac lintDebug --no-daemon
