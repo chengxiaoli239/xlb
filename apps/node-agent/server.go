@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -140,6 +142,66 @@ func NewHTTPHandler(store *PeerStore, dataPlanes ...*DataPlane) http.Handler {
 		}
 		mux.ServeHTTP(writer, request)
 	})
+}
+
+// NewDataPlaneProbeHandler is an opt-in handler for a separately configured
+// probe listener. It is intentionally not mounted by NewHTTPHandler or the
+// runnable isolated node-agent command.
+func NewDataPlaneProbeHandler(nodeID string, executor DataPlaneProbeExecutor) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+nodeProbePath, func(writer http.ResponseWriter, request *http.Request) {
+		if request.TLS == nil || len(request.TLS.PeerCertificates) == 0 || len(request.TLS.VerifiedChains) == 0 {
+			writeJSON(writer, http.StatusUnauthorized, apiResponse{
+				Error: &apiError{Code: "client_certificate_required", Message: "A trusted client certificate is required."},
+			})
+			return
+		}
+		if executor == nil || strings.TrimSpace(nodeID) == "" {
+			writeProbeFailure(writer, http.StatusServiceUnavailable, "probe_unavailable")
+			return
+		}
+
+		var payload NodeDataPlaneProbeRequest
+		if !decodeRequest(writer, request, &payload) {
+			return
+		}
+		challenge, err := decodeNodeProbeChallenge(payload.Challenge)
+		if err != nil {
+			writeFailure(writer, ErrInvalid)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(request.Context(), nodeProbeTimeout)
+		defer cancel()
+		echo, err := executor.Exchange(ctx, challenge)
+		if err != nil || ctx.Err() != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+				writeProbeFailure(writer, http.StatusGatewayTimeout, "probe_timeout")
+				return
+			}
+			writeProbeFailure(writer, http.StatusServiceUnavailable, "probe_failed")
+			return
+		}
+		if !equalProbeChallenge(challenge, echo) {
+			writeProbeFailure(writer, http.StatusServiceUnavailable, "probe_failed")
+			return
+		}
+
+		writeJSON(writer, http.StatusOK, apiResponse{Data: NodeDataPlaneProbeResponse{
+			NodeID: nodeID, Challenge: payload.Challenge,
+		}})
+	})
+	return mux
+}
+
+func writeProbeFailure(writer http.ResponseWriter, status int, code string) {
+	message := "Data-plane probe is unavailable."
+	if code == "probe_timeout" {
+		message = "Data-plane probe timed out."
+	} else if code == "probe_failed" {
+		message = "Data-plane probe failed."
+	}
+	writeJSON(writer, status, apiResponse{Error: &apiError{Code: code, Message: message}})
 }
 
 func NewMTLSServer(address, certificatePath, privateKeyPath, clientCAPath string, handler http.Handler) (*http.Server, error) {

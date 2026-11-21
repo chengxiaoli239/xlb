@@ -2,14 +2,17 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -23,6 +26,12 @@ import (
 	"testing"
 	"time"
 )
+
+type probeExecutorFunc func(context.Context, []byte) ([]byte, error)
+
+func (executor probeExecutorFunc) Exchange(ctx context.Context, challenge []byte) ([]byte, error) {
+	return executor(ctx, challenge)
+}
 
 func TestMTLSHTTPAPIEnforcesCapacityForConcurrentAuthorizations(t *testing.T) {
 	store, err := OpenPeerStore(filepath.Join(t.TempDir(), "agent-state.json"), "node-test", 3)
@@ -240,6 +249,192 @@ func TestHTTPHandlerRejectsPlainHTTP(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("plain HTTP status=%d; want %d", response.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+func TestNodeProbeDefaultsToUnavailableWithoutExecutor(t *testing.T) {
+	for name, handler := range map[string]http.Handler{
+		"executor missing": NewDataPlaneProbeHandler("node-test", nil),
+		"node identity missing": NewDataPlaneProbeHandler("", probeExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+			return nil, errors.New("executor must not run without node identity")
+		})),
+	} {
+		t.Run(name, func(t *testing.T) {
+			client, server, _ := newMTLSTestClient(t, handler)
+			defer server.Close()
+
+			response := postRawJSON(t, client, server.URL+nodeProbePath, `{"challenge":"0000000000000000000000000000000000000000000000000000000000000000"}`)
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("unconfigured probe status=%d; want %d", response.StatusCode, http.StatusServiceUnavailable)
+			}
+			assertProbeError(t, response, "probe_unavailable")
+		})
+	}
+}
+
+func TestNodeProbeRequiresVerifiedClientCertificate(t *testing.T) {
+	executor := probeExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+		return nil, errors.New("executor must not run without a verified client certificate")
+	})
+	handler := NewDataPlaneProbeHandler("node-test", executor)
+
+	for name, state := range map[string]*tls.ConnectionState{
+		"no TLS":             nil,
+		"no client cert":     {},
+		"no verified chains": {PeerCertificates: []*x509.Certificate{{}}, VerifiedChains: nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, nodeProbePath, strings.NewReader(`{"challenge":"0000000000000000000000000000000000000000000000000000000000000000"}`))
+			request.TLS = state
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("unverified request status=%d; want %d", recorder.Code, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
+func TestNodeProbeRejectsMalformedChallenge(t *testing.T) {
+	executor := probeExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+		return nil, errors.New("executor must not run with a malformed challenge")
+	})
+	client, server, _ := newMTLSTestClient(t, NewDataPlaneProbeHandler("node-test", executor))
+	defer server.Close()
+
+	for _, challenge := range []string{"", "abcd", strings.Repeat("z", 64), strings.Repeat("0", 62)} {
+		t.Run(fmt.Sprintf("length-%d", len(challenge)), func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"challenge": challenge})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := postRawJSON(t, client, server.URL+nodeProbePath, string(body))
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("malformed challenge status=%d; want %d", response.StatusCode, http.StatusBadRequest)
+			}
+			assertProbeError(t, response, "invalid_request")
+		})
+	}
+}
+
+func TestNodeProbeTimesOutWithoutReturningChallenge(t *testing.T) {
+	executor := probeExecutorFunc(func(ctx context.Context, _ []byte) ([]byte, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	client, server, _ := newMTLSTestClient(t, NewDataPlaneProbeHandler("node-test", executor))
+	defer server.Close()
+
+	challenge := strings.Repeat("a", 64)
+	response := postRawJSON(t, client, server.URL+nodeProbePath, fmt.Sprintf(`{"challenge":%q}`, challenge))
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("timed out probe status=%d; want %d", response.StatusCode, http.StatusGatewayTimeout)
+	}
+	assertProbeError(t, response, "probe_timeout")
+}
+
+func TestNodeProbeExecutorFailureDoesNotReturnChallenge(t *testing.T) {
+	executor := probeExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+		return nil, errors.New("sensitive executor detail")
+	})
+	client, server, _ := newMTLSTestClient(t, NewDataPlaneProbeHandler("node-test", executor))
+	defer server.Close()
+
+	challenge := strings.Repeat("b", 64)
+	response := postRawJSON(t, client, server.URL+nodeProbePath, fmt.Sprintf(`{"challenge":%q}`, challenge))
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("failed probe status=%d; want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		Error *apiError `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "probe_failed" {
+		t.Fatalf("probe error=%+v; want code probe_failed", envelope.Error)
+	}
+	if strings.Contains(string(body), "sensitive executor detail") || strings.Contains(string(body), challenge) {
+		t.Fatalf("failed probe exposed executor details or challenge: %s", body)
+	}
+}
+
+func TestNodeProbeReturnsNodeIdentityAndChallengeOnlyAfterExecutorEcho(t *testing.T) {
+	var gotChallenge []byte
+	executor := probeExecutorFunc(func(_ context.Context, challenge []byte) ([]byte, error) {
+		gotChallenge = append([]byte(nil), challenge...)
+		return append([]byte(nil), challenge...), nil
+	})
+	client, server, _ := newMTLSTestClient(t, NewDataPlaneProbeHandler("node-canary-17", executor))
+	defer server.Close()
+
+	challenge := strings.Repeat("c", 64)
+	response := postRawJSON(t, client, server.URL+nodeProbePath, fmt.Sprintf(`{"challenge":%q}`, challenge))
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("successful fake probe status=%d; want %d", response.StatusCode, http.StatusOK)
+	}
+	var envelope struct {
+		Data struct {
+			NodeID    string `json:"node_id"`
+			Challenge string `json:"challenge"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.NodeID != "node-canary-17" || envelope.Data.Challenge != challenge || hex.EncodeToString(gotChallenge) != challenge {
+		t.Fatalf("probe response=%+v executorChallenge=%x; expected configured identity and exact challenge", envelope.Data, gotChallenge)
+	}
+}
+
+func TestNodeProbeRejectsExecutorEchoMismatch(t *testing.T) {
+	executor := probeExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+		return bytes.Repeat([]byte{0xff}, nodeProbeChallengeBytes), nil
+	})
+	client, server, _ := newMTLSTestClient(t, NewDataPlaneProbeHandler("node-test", executor))
+	defer server.Close()
+
+	response := postRawJSON(t, client, server.URL+nodeProbePath, fmt.Sprintf(`{"challenge":%q}`, strings.Repeat("d", 64)))
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("mismatched echo status=%d; want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+	assertProbeError(t, response, "probe_failed")
+}
+
+func postRawJSON(t *testing.T, client *http.Client, endpoint, body string) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
+
+func assertProbeError(t *testing.T, response *http.Response, expected string) {
+	t.Helper()
+	var envelope struct {
+		Error *apiError `json:"error"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != expected {
+		t.Fatalf("probe error=%+v; want code %q", envelope.Error, expected)
 	}
 }
 
