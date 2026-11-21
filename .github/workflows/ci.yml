@@ -157,3 +157,10 @@ jobs:
       - name: Build debug APK, compile instrumentation tests, run JVM tests and lint
         working-directory: apps/android
         run: ./gradlew assembleDebug testDebugUnitTest compileDebugAndroidTestJavaWithJavac lintDebug --no-daemon
+
+      - name: Generate checksummed debug APK manifest
+        run: |
+          python3 ops/build_artifact_manifest.py \
+            --output apps/android/app/build/outputs/apk/debug/build-manifest.json \
+            apps/android/app/build/outputs/apk/debug/app-debug.apk
+          cat apps/android/app/build/outputs/apk/debug/build-manifest.json >> "$GITHUB_STEP_SUMMARY"

@@ -31,7 +31,7 @@
 
 | 发布阶段 | 状态 | 下一退出门 |
 | --- | --- | --- |
-| E0 地基 | 部分完成（Android native APK 检查已纳入） | 观察 GitHub Actions Linux native run；补制品可追溯、staging/回滚；合规与 D 决策保留为发布门 |
+| E0 地基 | 部分完成（Android native APK 检查已纳入；构建清单本地检查通过） | 核实构建清单 hosted run；补生产制品签名/SBOM、staging/回滚；合规与 D 决策保留为发布门 |
 | E1 会员数据面放行 | 未通过 | 真实 member profile、双真机复用拒绝、节点撤权回执/最终流量和连接验收 |
 | E2 工程化 | 未完成 | 批量编排、常驻受控 worker、实测容量与热备/回收演练 |
 | E3 四端 | 部分完成 | Android 会员真机数据面闭环；Windows 账户壳已合入，接 Mihomo/proof bridge 前先补 MSVC/Credential Manager Windows 验证；macOS/iOS 条件与后续验收 |
@@ -44,7 +44,7 @@
 | 工作包 | 文件/模块边界 | 依赖与退出条件 |
 | --- | --- | --- |
 | A. M10 路由健康过滤 | `apps/php-api/**` 的 `SubscriptionRouteService`、health state reader 与 Feature tests | worker/持久仓库已合入；本阶段只让路由排除熔断和过期节点，假驱动/数据库测试，不引入生产调度或自动跨 peer 切换 |
-| B. E0 制品可追溯性 | `.github/workflows/**`、构建脚本与文档 | 离线生成/校验 commit、版本和 SHA-256 元数据；不上传外部制品库、不部署、不签发生产包 |
+| B. E0 制品可追溯性 | `.github/workflows/**`、`ops/build_artifact_manifest.py` | Debug APK 来源/摘要清单及 6 项测试已实现，待 hosted CI 验证；生产制品签名、SBOM 与发布存储仍未实现，不部署、不签发生产包 |
 | C. M11 本地压测证据 | `loadtest/**`、验收文档 | 先以 loopback/local 沙箱跑有界控制面场景，记录真实 P50/P95/错误率；不把脚本存在当基线，不压公网/生产 |
 | D. E0 Windows 验收通道 | `.github/workflows/**` 与 Windows build/test 文档 | 增加手动触发的 Windows MSVC/Credential Manager 验收入口；未经用户安排不自动消耗 Windows hosted runner，不把 macOS 交叉编译当 Windows 证据 |
 | E. M6/M8 真机与节点闭环 | Android/Node Agent 契约分开验收 | 两台已有真机身份已绑定，不需要第三台手机；会员 profile、proof bridge、节点回执仍需获批隔离窗口和真实节点参数，未就绪前只完成离线代码/测试 |
@@ -66,10 +66,10 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 
 | 优先级 | 缺口 | 现状证据 | 风险 | 本文方案 |
 | --- | --- | --- | --- | --- |
-| **P0** | CI/CD 覆盖与发布链不完整 | `.github/workflows/ci.yml` 已覆盖 Web/API build 与 API/Laravel tests；`docker/Dockerfile.php`、`docker/Dockerfile.web` 已存在；Android/Go/extension 检查是否纳入统一放行仍不足，尚无 staging/制品/回滚流程 | 某些平台变化不受 CI 保护，发布产物和环境不可追溯 | §3 |
+| **P0** | 发布链不完整 | CI 已覆盖 Web/API/PHP/扩展/Go/ops 与 Android native Debug APK；本轮补 Debug APK commit/SHA-256 清单；Dockerfiles 已存在。Windows 原生检查、staging、生产签名制品/回滚流程仍缺 | 开发检查通过仍不能证明生产交付和回滚可靠 | §3 |
 | **P0** | 无批量部署/编排 | `ops/node_lab.py`、`node_manager.py` 是**单节点测试/管理**脚本，无多节点并发编排、无蓝绿一键任务 | 节点上量时手工操作不可控，扩容/缩容慢，故障恢复靠人 | §4 |
 | **P0** | 压测尚无实测基线 | `loadtest/k6/` 和 loopback smoke 脚本已存在，但没有观察到已完成的分级压测报告/容量模型；公网/云端压测须审批 | 不知道系统实际承载量，容量规划不能以目标并发替代测量 | §5 |
-| **P1** | 四端实现与验收不平衡 | Android 有 Debug 原型，Web/扩展有本地会话客户端；Windows/macOS/iOS 尚无对应端到端客户端，Android 会员真实节点链路未通过 | 先聚焦 Android/Windows，不把账号 UI 或模拟节点当成隧道验收 | §6 |
+| **P1** | 四端实现与验收不平衡 | Android 有 Debug 原型，Web/扩展有本地会话客户端，Windows 有已合入账户壳；Android/Windows 数据面闭环与 macOS/iOS 客户端仍未完成 | 先聚焦 Android/Windows，不把账号 UI 或模拟节点当成隧道验收 | §6 |
 | **P1** | 无上线首日保障 runbook | 发布 checkpoints 有，但没有"上线日 T-1 到 T+1"的具体 checklist、SLO/错误预算、冻结窗口、值班表 | 上线当天手忙脚乱，故障无明确降级/回滚决策 | §7 |
 | **P1** | 多云只有原则无可移植层 | `NodeProvider` 抽象存在但只有 AWS 驱动；无第二家、无可移植构建产物、无跨厂商配置格式 | 换厂商=重写，被单厂商锁定，成本/覆盖受制于人 | §8 |
 
@@ -99,6 +99,18 @@ push/PR → ①静态检查 → ②单元/集成测试 → ③构建不可变产
 - **配置与密钥不进镜像**：密钥走 secrets manager（AWS Secrets Manager / SSM Parameter Store），镜像只含代码；UserData/Git/工单禁止写密钥（沿用 runbook 口径）。
 - **数据库迁移 expand/contract**：先加兼容字段，发布读写，观察后移除旧结构；迁移可回滚性单独验证（沿用业务路线图 §4）。
 - **不可变 + 可回滚**：每次发布保留上一版本产物与配置，回滚=切回已验证产物版本，不是现场改代码。
+
+### 3.4 Debug APK 来源清单（2026-11-22，已实现，hosted 待核实）
+
+`ops/build_artifact_manifest.py` 仅接受没有已跟踪修改或非忽略未跟踪文件的 checkout，制品须在仓库内；输出必须不存在且位于 Git 忽略目录。Android CI 在构建后执行以下命令，并把 JSON 追加到该次 workflow summary：
+
+```sh
+python3 ops/build_artifact_manifest.py \
+  --output apps/android/app/build/outputs/apk/debug/build-manifest.json \
+  apps/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+清单记录 commit、ref、CI run ID/attempt、UTC 时间、相对路径、字节数及 SHA-256。不读取 env 凭据、不上传 APK、不创建 release；工作目录有既存未跟踪产物时拒绝执行，使用干净 checkout 验证，不能为了生成清单清理用户文件。该工具不能证明构建可复现或代码可信，也不能代替依赖许可证/SBOM、制品签名、受信构建环境和发布审批。回归覆盖摘要、来源状态、越界路径与输出覆盖保护；ops 34 项通过。
 
 ## 4. 批量部署与节点快速上下线（补 P0-2）
 
@@ -166,7 +178,7 @@ push/PR → ①静态检查 → ②单元/集成测试 → ③构建不可变产
 | 优先级 | 端 | 定位 | 关键依赖/门槛 | 排期（阶段，非日历） |
 | --- | --- | --- | --- | --- |
 | P0 | **Android 自有 App** | 主力移动端，已有 Java Debug 原型和固定 Mihomo 核心 | 登录/权益/设备 challenge/Keystore cookie 和匿名 Debug 同意入口已实现；待隔离 member profile 下真实逐设备授权、proof bridge/撤权回执、断线与 DNS/UDP 等真机全路径 | 第一批：从本地登录到真实节点的闭环；当前阻塞需隔离线路/节点侧 member profile |
-| P0 | **Windows 自有/桌面桥接** | 主力桌面端；仓库当前没有 Windows 应用工程 | Mihomo sidecar + proof bridge 与 CNG 等本机安全存储；安装更新签名、TUN 权限、崩溃恢复、卸载清理均待建 | 第一批：先独立工程骨架和 bridge/API 契约，再真机全路径 |
+| P0 | **Windows 自有/桌面桥接** | `apps/windows` 已有 Tauri/React 账户壳（登录、恢复、退出、权益与设备摘要），本机 UI/Rust 测试通过 | MSVC/Credential Manager Windows 运行时、Mihomo sidecar/proof bridge/CNG、签名更新、TUN 权限、崩溃恢复与卸载清理未验收 | 第一批：先补 Windows 平台构建/账户验证，再接 bridge 与真机数据面 |
 | P1 | **macOS** | 次主力桌面 | 与 Windows 共用桥接内核，差异在系统权限/签名/配置迁移 | 第二批：复用 Windows 成果适配 |
 | P1 | **iPhone / iOS** | 次主力移动 | Network Extension entitlement、开发者账号/签名、系统连接审批、后台恢复、App Store 审核 | 第二批：条件明确后再进设备联调 |
 
