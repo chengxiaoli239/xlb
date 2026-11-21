@@ -50,9 +50,21 @@ git checkout main -q
 git fetch origin -q
 git merge-base --is-ancestor origin/main main || die "main 与 origin/main 分叉，请先人工 rebase"
 
-# 收集该分支相对 main 的独有提交（按时间正序）
-COMMITS="$(git rev-list --reverse main.."$BRANCH")"
-[ -n "$COMMITS" ] || die "分支 $BRANCH 没有相对 main 的新提交"
+# 收集相对 main 的提交，并排除 patch 已等效存在于 main 的提交。
+ALL_COMMITS="$(git rev-list --reverse main.."$BRANCH")"
+[ -n "$ALL_COMMITS" ] || die "分支 $BRANCH 没有相对 main 的新提交"
+PATCHABLE_COMMITS="$(git cherry main "$BRANCH" | awk '$1 == "+" { printf "%s ", $2 }')"
+COMMITS="$(printf '%s\n' "$ALL_COMMITS" | awk -v patchable="$PATCHABLE_COMMITS" '
+  BEGIN {
+    count = split(patchable, hashes, " ")
+    for (i = 1; i <= count; i++) if (hashes[i] != "") unique[hashes[i]] = 1
+  }
+  unique[$0] { print }
+')"
+if [ -z "$COMMITS" ]; then
+  echo "分支 $BRANCH 的提交均已以等效 patch 存在于 main，无需合并。"
+  exit 0
+fi
 
 echo "[3/4] cherry-pick $(echo "$COMMITS" | wc -l | tr -d ' ') 个提交到 main ..."
 for c in $COMMITS; do
