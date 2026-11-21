@@ -101,29 +101,29 @@ M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求�
 ### 3.1 目标
 任何上线产物都从**代码审查通过的不可变版本**构建，携带可追溯元数据（commit、依赖锁文件、产物 SHA256、配置版本、迁移版本、审批人），一键部署、一键回滚。
 
-### 3.2 流水线设计（建议 GitHub Actions + 自托管 runner 或云构建）
+### 3.2 流水线设计与现状（2026-11-22）
 
 ```
 push/PR → ①静态检查 → ②单元/集成测试 → ③构建不可变产物 → ④制品入库 → ⑤预发布部署 → ⑥冒烟+契约测试 → ⑦人工审批门 → ⑧生产灰度发布
 ```
 
-| 阶段 | 内容 | 现有基础 | 需新增 |
+| 阶段 | 内容 | 现有基础 | 剩余工作 |
 | --- | --- | --- | --- |
-| ① 静态 | `pnpm build`、`php artisan test`、Pint、TypeScript 类型、依赖扫描 | `package.json` scripts、Pint 已用 | CI workflow 文件、composer/npm audit |
-| ② 测试 | PHP 单元/集成、Go `go test -race`/`go vet`（node-agent）、Mihomo 配置解析测试 | 已有测试，本地跑 | 串进 CI；`XLB_MIHOMO_BINARY` 固定版本核心 |
-| ③ 构建 | Web 静态产物、PHP 镜像、node-agent 二进制（Linux/amd64 + arm64）、Android APK | 本地构建命令 | **Dockerfile**（php-fpm/nginx/web）、`goreleaser` 或交叉编译、产物签名与 SBOM |
-| ④ 制品 | 推到不可变制品库（ECR/GHCR/S3），打 SHA256 + commit tag | 无 | 制品库、保留策略、签名验证（cosign） |
-| ⑤ 预发布 | 自动部署到 staging（隔离账号/域名/DB/支付沙箱） | 无 staging 环境 | staging 环境 + 部署脚本 |
-| ⑥ 冒烟 | 登录、`/me/overview`、订阅拉取、下单沙箱、节点健康、客户端导入冒烟 | 部分手工 | 自动化冒烟套件 |
-| ⑦ 审批门 | 生产发布需人工批准（双人复核高风险操作） | 无 | GitHub Environment protection / 审批流 |
-| ⑧ 灰度 | §4 的受控发布 + §7 的 SLO 门禁 | 有线路版本灰度基础 | 与 CI 打通，发布记录回写 |
+| ① 静态 | Web/API/PHP、Pint、TypeScript、依赖扫描 | `.github/workflows/ci.yml` 已跑多模块检查；依赖审计和构建已有本地/CI 证据 | 固化发布分支保护与审计策略 |
+| ② 测试 | PHP 单元/集成、Go race/vet、Mihomo profile、Android JVM/instrumentation 编译、Windows hosted tests | 相关测试已进入 CI；Android Keystore AVD、Windows CNG 与 Node Agent 阶段有各自 hosted 证据 | 继续补真实 Android/Windows bridge、跨进程和数据面集成覆盖 |
+| ③ 构建 | Web/API/Agent、Android Debug APK、Windows 客户端检查 | Android pinned NDK/Go 下 native Mihomo arm64 Debug APK 已构建；Windows MSVC build 已在 hosted job 验证 | 生产平台镜像/多架构制品、签名、SBOM 与可回滚发布制品 |
+| ④ 制品 | 来源、摘要、入库与签名 | `ops/build_artifact_manifest.py` 生成 commit/ref/run/path/size/SHA-256 元数据并写入 CI summary；不上传 APK、不创建 release | 不可变制品库、保留策略、依赖 SBOM、生产签名与验证 |
+| ⑤ 预发布 | 隔离账号/域名/数据库/支付沙箱 staging | 当前未配置 staging，不执行部署 | 经批准的 staging 环境与可重复部署脚本 |
+| ⑥ 冒烟 | 登录、权益、订阅、支付沙箱、节点探测、客户端连接 | API/Web/支付沙箱有离线自动化；本机控制面 smoke 和 isolated harness 已有记录 | 自动化 staging 端到端套件；真实节点探测/会员数据面仍单独验收 |
+| ⑦ 审批门 | 生产发布人工批准、高风险双人复核 | 尚未配置生产环境保护或审批流 | GitHub Environment protection/等价审批与审计记录 |
+| ⑧ 灰度 | 线路/应用灰度与 SLO 门禁 | 控制面有线路版本灰度基础，尚无生产部署链 | 与受审 CI/CD 打通，并验证灰度、停止和回滚 |
 
 ### 3.3 关键原则
 - **配置与密钥不进镜像**：密钥走 secrets manager（AWS Secrets Manager / SSM Parameter Store），镜像只含代码；UserData/Git/工单禁止写密钥（沿用 runbook 口径）。
 - **数据库迁移 expand/contract**：先加兼容字段，发布读写，观察后移除旧结构；迁移可回滚性单独验证（沿用业务路线图 §4）。
 - **不可变 + 可回滚**：每次发布保留上一版本产物与配置，回滚=切回已验证产物版本，不是现场改代码。
 
-### 3.4 Debug APK 来源清单（2026-11-22，已实现，hosted 待核实）
+### 3.4 Debug APK 来源清单（2026-11-22，hosted 全绿）
 
 `ops/build_artifact_manifest.py` 仅接受没有已跟踪修改或非忽略未跟踪文件的 checkout，制品须在仓库内；输出必须不存在且位于 Git 忽略目录。Android CI 在构建后执行以下命令，并把 JSON 追加到该次 workflow summary：
 
@@ -167,8 +167,8 @@ python3 ops/build_artifact_manifest.py \
 ## 5. 压测与负载均衡（补 P0-3）
 
 ### 5.1 压测现状与缺口
-- 现状：`loadtest/k6/` 已有登录/overview、订阅和显式沙箱 callback 场景，`loadtest/smoke.sh` 只做 loopback 冒烟；已有脚本不是已完成的压测报告。
-- 缺口：没有可观察到的阶梯运行数据、P95/错误率实测基线、生产数据库/节点容量模型。默认目标值仍只是待校准建议。
+- 现状：`loadtest/k6/` 有登录/overview、订阅和显式沙箱 callback 场景；`loadtest/smoke.sh` 做 loopback 冒烟；`loadtest/reports/local-control-baseline-2026-11-22.md` 记录 PHP 开发服务器 + 临时 SQLite 的 80 请求、并发 1/4 控制面基线，错误率均为 0%，P95 约 3.7–3.9ms / 13.7–14.1ms。该报告不含登录态、生产数据库或 VPN 节点数据面。
+- 缺口：没有 staging 阶梯运行数据、生产数据库/节点容量模型，也没有可外推的容量门。默认目标值仍只是待校准建议。
 
 ### 5.2 压测计划（k6，脚本入库）
 
@@ -201,7 +201,7 @@ python3 ops/build_artifact_manifest.py \
 | 优先级 | 端 | 定位 | 关键依赖/门槛 | 排期（阶段，非日历） |
 | --- | --- | --- | --- | --- |
 | P0 | **Android 自有 App** | 主力移动端，已有 Java Debug 原型和固定 Mihomo 核心 | 登录/权益/设备 challenge/Keystore cookie 和匿名 Debug 同意入口已实现；待隔离 member profile 下真实逐设备授权、proof bridge/撤权回执、断线与 DNS/UDP 等真机全路径 | 第一批：从本地登录到真实节点的闭环；当前阻塞需隔离线路/节点侧 member profile |
-| P0 | **Windows 自有/桌面桥接** | `apps/windows` 已有 Tauri/React 账户壳（登录、恢复、退出、权益与设备摘要），本机 UI/Rust 测试通过 | MSVC/Credential Manager Windows 运行时、Mihomo sidecar/proof bridge/CNG、签名更新、TUN 权限、崩溃恢复与卸载清理未验收 | 第一批：先补 Windows 平台构建/账户验证，再接 bridge 与真机数据面 |
+| P0 | **Windows 自有/桌面桥接** | `apps/windows` 已有 Tauri/React 账户壳、Credential Manager hosted 验收和 current-user CNG P-256 signer hosted 验收 | verified-proof/peer binding 到真实 sidecar、Mihomo/TUN 接线、签名更新、崩溃恢复与卸载清理未验收 | 第一批：离线接好默认关闭的 proof adapter，再做 Windows 运行与隔离节点数据面验收 |
 | P1 | **macOS** | 次主力桌面 | 与 Windows 共用桥接内核，差异在系统权限/签名/配置迁移 | 第二批：复用 Windows 成果适配 |
 | P1 | **iPhone / iOS** | 次主力移动 | Network Extension entitlement、开发者账号/签名、系统连接审批、后台恢复、App Store 审核 | 第二批：条件明确后再进设备联调 |
 
@@ -218,9 +218,9 @@ python3 ops/build_artifact_manifest.py \
 - 每条记录含：设备、OS 版本、客户端/核心版本、配置版本、节点 ID、时间、脱敏错误码、证据链接。
 
 ### 6.3 自动化支撑
-- 订阅配置解析测试已可接 `XLB_MIHOMO_BINARY` 固定核心（已有）；
-- 新增：Android instrumentation 冒烟、桌面桥接 sidecar 生命周期单测、四端兼容矩阵自动化登记表（已有手工"验收"页，逐步接设备证据）。
-- "已验证"必须独立审批 + 设备证据；格式能解析 ≠ 可连接（沿用既有红线）。
+- Node Agent renderer 与 Mihomo `v1.19.34` 的共享 fixture 有解析测试；这是格式证据，不是连接证据。
+- Android Keystore instrumentation 已在隔离 API 35 AVD 验收；Windows CNG signer 与 bridge lifecycle contract 各有 hosted/离线测试；这两条都尚未证明真实 sidecar、TUN 或会员节点连接。
+- 四端兼容矩阵继续按真实设备与核心版本记录；"已验证"必须有对应平台的设备证据，格式能解析 ≠ 可连接。
 
 ## 7. 上线首日不崩塌保障（补 P1-5）
 
