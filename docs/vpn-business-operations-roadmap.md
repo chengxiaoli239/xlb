@@ -117,7 +117,7 @@ Android 自有客户端需要评估 `VpnService` 权限、前台服务/断线恢
 ### 下一批：真实支付沙箱接入准备
 
 1. 先固定业务规则：续费是延长到期日还是生成独立权益；同套餐续费时流量是否重置；是否允许跨套餐升级；设备数限制如何执行；退款是否按剩余时长/流量折算。未确认前，先做独立的本地事件处理和账本，不自动合并真实权益。
-2. **离线适配器与状态机准备已完成两阶段（2026-11-21）**：`apps/php-api/app/Payments/PaymentProvider.php` 固定 provider-neutral 创建支付、验签回调、主动查单和分页对账契约；规范化事件绑定商户订单、渠道交易号、金额/币种和发生时间。`SignedSandboxPaymentProvider` 仅驻留内存，以注入测试密钥验证签名与 5 分钟窗口；`PaymentEventProcessor` + `InMemoryPaymentEventStore` 证明付款/权益和退款补偿状态机可幂等处理，并把未知订单、金额不符、超时及乱序事实送待核验。它们尚未接入真实 HTTP 回调、持久化事件账本、异步重试或商户渠道。下一阶段应实现隔离环境的持久化事件接收和可重试权益发放/退款补偿，然后用 local/testing 集成测试证明重复和乱序回调。拿到真实商户沙箱资料与回调契约后，才实现对应 provider adapter。不能以浏览器“支付成功”跳转或管理员改状态代替渠道确认。
+2. **离线适配器、状态机与持久化账本准备已完成三阶段（2026-11-21）**：`apps/php-api/app/Payments/PaymentProvider.php` 固定 provider-neutral 创建支付、验签回调、主动查单和分页对账契约；`SignedSandboxPaymentProvider` 仅驻留内存，以注入测试密钥验证签名与 5 分钟窗口；规范化事件状态机覆盖重复、金额不符、超时付款和乱序退款。`PersistentPaymentEventLedger` 在 local/testing 持久化规范化渠道事实，以唯一事件键防重，并对已确认付款创建订单唯一 fulfillment outbox、对已发放订单退款创建唯一 compensation outbox；失败重试与成功确认有定向测试。尚未接 webhook 路由、worker/queue、实际权益写入与补偿账本，也未连接任何商户渠道。下一阶段可离线接入本地 webhook handler 与 outbox worker，将确认事件接入现有 local/testing 权益/退款账本并测试失败重试、去重与乱序；真实商户资料和契约到位后再实现渠道 adapter。不能以浏览器“支付成功”跳转或管理员改状态代替渠道确认。
 3. 将现有测试发放账本扩展为生产级可重试发放：一笔确认付款最多发放一次；订单、支付事实和发放结果分别记录；过期订单收到延迟付款进入待核验；退款/拒付采用补偿流水。
 4. 完成前后台状态：付款中、失败、待核验、待发放、已生效、退款中及异常工单入口；高风险操作需审计与权限控制。
 
