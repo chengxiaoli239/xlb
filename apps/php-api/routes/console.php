@@ -3,6 +3,7 @@
 use App\Services\DisabledNodePeerProvisioningDriver;
 use App\Services\DisabledNodePeerRevocationDriver;
 use App\Services\DisabledNodePeerUsageDriver;
+use App\Services\NodeHealthProbeDriver;
 use App\Services\NodePeerProvisioningDriver;
 use App\Services\NodePeerRevocationDriver;
 use App\Services\NodePeerSubscriptionBindingDriver;
@@ -45,3 +46,7 @@ Schedule::command('node-access:reconcile-expired')->everyMinute()->withoutOverla
 // Reclamation continues when new provisioning is disabled.
 Schedule::command('nodes:reconcile')->everyTenSeconds()->withoutOverlapping(10);
 Schedule::command('subscription-routes:reconcile')->everyMinute()->withoutOverlapping(60);
+
+if (config('node_health_probe.enabled') && app()->bound(NodeHealthProbeDriver::class)) {
+    Schedule::command('nodes:probe-health')->everyFifteenSeconds()->withoutOverlapping(60);
+}
