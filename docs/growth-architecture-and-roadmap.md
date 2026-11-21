@@ -160,7 +160,7 @@
 - **D3 智能线路口径**：(a) 仅账号级兼容线路支持 url-test 自动选路，严格设备线路保持单 peer 受控切换；(b) 全部线路都做自动选路（需重做设备绑定语义）。推荐 a，避免绕过严格设备限制。
 - **D4 资源批准**：是否批准 S3/CloudFront/监控/压测资源的创建与费用（第 4 节）？是否沿用 `xlb-ops` root 身份操作（root 不受权限边界限制，但有安全考量）？
 
-2026-11-21 离线进度：`apps/php-api/app/Services/NodeRoutingPolicy.php` 提供 M10 候选排序算法原型，默认健康 TTL 30 秒、70% 容量水位熔断，并按管理权重、容量、延迟、丢包与 CPU headroom 做 affinity 加权排序；4,096 affinity key 的 1:3 权重模拟通过 2% 分配误差门。纯状态 `NodeHealthCircuitBreaker` 也通过连续 3 次失败熔断、连续 3 次成功恢复和乱序 probe 忽略测试。两者均尚未接入 `SubscriptionRouteService`、probe worker 或客户端，不能代表生产调度或节点稳定性验收。D3 的严格设备线路自动选路范围仍需用户拍板；没有因此改变设备绑定策略。
+2026-11-21 离线进度：`apps/php-api/app/Services/NodeRoutingPolicy.php` 提供 M10 候选排序算法原型，默认健康 TTL 30 秒、70% 容量水位熔断，并按管理权重、容量、延迟、丢包与 CPU headroom 做 affinity 加权排序；4,096 affinity key 的 1:3 权重模拟通过 2% 分配误差门。纯状态 `NodeHealthCircuitBreaker` 通过连续 3 次失败熔断、连续 3 次成功恢复和乱序 probe 忽略测试；路由算法现可注入熔断状态，并排除熔断打开、无探测时间或探测过期的节点。两者仍未接入持久化、probe worker、`SubscriptionRouteService` 或客户端，不能代表生产调度或节点稳定性验收。D3 的严格设备线路自动选路范围仍需用户拍板；没有因此改变设备绑定策略。
 
 ## 6. 风险与红线
 

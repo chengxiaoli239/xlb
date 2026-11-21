@@ -10,6 +10,7 @@ final class NodeRoutingPolicy
     /**
      * @param  list<array{id:string,status:string,health_status:string,last_health_check_at:string,max_sessions:int,active_sessions:int,weight:int,latency_ms:int,packet_loss_pct:float,cpu_pct:float}>  $nodes
      * @param  list<string>  $acceptedHealthStatuses
+     * @param  array<string, NodeHealthState>  $circuitStatesByNodeId
      * @return list<NodeRoutingCandidateScore>
      */
     public function rankCandidates(
@@ -19,14 +20,29 @@ final class NodeRoutingPolicy
         array $acceptedHealthStatuses,
         int $healthTtlSeconds = 30,
         float $maxLoad = 0.7,
+        array $circuitStatesByNodeId = [],
     ): array {
         if ($affinityKey === '' || $healthTtlSeconds < 1 || ! is_finite($maxLoad) || $maxLoad <= 0 || $maxLoad > 1) {
             throw new InvalidArgumentException('Routing policy inputs are invalid.');
         }
 
+        foreach ($circuitStatesByNodeId as $nodeId => $state) {
+            if (! is_string($nodeId) || $nodeId === '' || ! $state instanceof NodeHealthState) {
+                throw new InvalidArgumentException('Node circuit state inputs are invalid.');
+            }
+        }
+
         $candidates = [];
         foreach ($nodes as $node) {
-            $candidate = $this->scoreCandidate($node, $affinityKey, $now, $acceptedHealthStatuses, $healthTtlSeconds, $maxLoad);
+            $candidate = $this->scoreCandidate(
+                $node,
+                $affinityKey,
+                $now,
+                $acceptedHealthStatuses,
+                $healthTtlSeconds,
+                $maxLoad,
+                $circuitStatesByNodeId[$node['id']] ?? null,
+            );
             if ($candidate !== null) {
                 $candidates[] = $candidate;
             }
@@ -47,6 +63,7 @@ final class NodeRoutingPolicy
         array $acceptedHealthStatuses,
         int $healthTtlSeconds,
         float $maxLoad,
+        ?NodeHealthState $circuitState,
     ): ?NodeRoutingCandidateScore {
         if ($node['id'] === '' || $node['status'] !== 'available'
             || ! in_array($node['health_status'], $acceptedHealthStatuses, true)
@@ -57,6 +74,17 @@ final class NodeRoutingPolicy
             || $node['packet_loss_pct'] < 0 || $node['packet_loss_pct'] > 100
             || $node['cpu_pct'] < 0 || $node['cpu_pct'] > 100) {
             return null;
+        }
+
+        if ($circuitState !== null) {
+            if ($circuitState->status !== 'healthy' || $circuitState->lastProbeAt === null) {
+                return null;
+            }
+
+            $probeAge = $now->getTimestamp() - $circuitState->lastProbeAt->getTimestamp();
+            if ($probeAge < 0 || $probeAge > $healthTtlSeconds) {
+                return null;
+            }
         }
 
         try {

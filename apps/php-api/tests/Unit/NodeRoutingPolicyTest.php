@@ -2,8 +2,10 @@
 
 namespace Tests\Unit;
 
+use App\Services\NodeHealthState;
 use App\Services\NodeRoutingPolicy;
 use DateTimeImmutable;
+use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 
 class NodeRoutingPolicyTest extends TestCase
@@ -46,8 +48,43 @@ class NodeRoutingPolicyTest extends TestCase
 
     public function test_invalid_health_window_and_load_threshold_are_rejected(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
+        $this->expectException(InvalidArgumentException::class);
         (new NodeRoutingPolicy)->rankCandidates([$this->node('node-1')], 'session', new DateTimeImmutable('2026-11-21T10:00:00Z'), ['healthy'], 30, 1.2);
+    }
+
+    public function test_open_circuit_and_missing_or_stale_probe_evidence_are_excluded(): void
+    {
+        $now = new DateTimeImmutable('2026-11-21T10:00:00Z');
+        $nodes = [
+            $this->node('open'),
+            $this->node('unobserved'),
+            $this->node('stale-probe'),
+            $this->node('healthy-probe'),
+        ];
+        $states = [
+            'open' => new NodeHealthState('unhealthy', 3, 0, $now->modify('-1 second')),
+            'unobserved' => new NodeHealthState('healthy', 0, 0),
+            'stale-probe' => new NodeHealthState('healthy', 0, 0, $now->modify('-31 seconds')),
+            'healthy-probe' => new NodeHealthState('healthy', 0, 0, $now->modify('-15 seconds')),
+        ];
+
+        $ranked = (new NodeRoutingPolicy)->rankCandidates($nodes, 'device-1', $now, ['healthy'], 30, 0.7, $states);
+
+        $this->assertSame(['healthy-probe'], array_map(static fn ($candidate): string => $candidate->nodeId, $ranked));
+    }
+
+    public function test_invalid_circuit_state_map_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        (new NodeRoutingPolicy)->rankCandidates(
+            [$this->node('node-1')],
+            'device-1',
+            new DateTimeImmutable('2026-11-21T10:00:00Z'),
+            ['healthy'],
+            30,
+            0.7,
+            ['node-1' => 'healthy'],
+        );
     }
 
     public function test_weighted_rendezvous_distribution_tracks_configured_one_to_three_weights(): void
