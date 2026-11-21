@@ -8,7 +8,7 @@ use windows_sys::Win32::Security::Cryptography::{
     BCRYPT_ECCKEY_BLOB, BCRYPT_ECDSA_PUBLIC_P256_MAGIC, BCRYPT_HASH_HANDLE,
     NCryptCreatePersistedKey, NCryptDeleteKey, NCryptExportKey, NCryptFinalizeKey,
     NCryptFreeObject, NCryptOpenKey, NCryptOpenStorageProvider,
-    NCryptGetProperty, NCryptSetProperty, NCryptSignHash, NCryptVerifySignature,
+    NCryptGetProperty, NCryptSetProperty, NCryptSignHash,
     NCRYPT_ALLOW_SIGNING_FLAG, NCRYPT_EXPORT_POLICY_PROPERTY, NCRYPT_KEY_HANDLE,
     NCRYPT_KEY_USAGE_PROPERTY, NCRYPT_PERSIST_FLAG, NCRYPT_PROV_HANDLE,
     NCRYPT_SILENT_FLAG,
@@ -50,7 +50,7 @@ impl DeviceKey {
         }
         let digest = sha256(challenge)?;
         let mut size = 0u32;
-        status(NCryptSignHash(
+        status(unsafe { NCryptSignHash(
             self.key,
             ptr::null(),
             digest.as_ptr(),
@@ -59,9 +59,9 @@ impl DeviceKey {
             0,
             &mut size,
             NCRYPT_SILENT_FLAG,
-        ), "query ECDSA signature size")?;
+        ) }, "query ECDSA signature size")?;
         let mut raw = vec![0; size as usize];
-        status(NCryptSignHash(
+        status(unsafe { NCryptSignHash(
             self.key,
             ptr::null(),
             digest.as_ptr(),
@@ -70,7 +70,7 @@ impl DeviceKey {
             size,
             &mut size,
             NCRYPT_SILENT_FLAG,
-        ), "sign device challenge")?;
+        ) }, "sign device challenge")?;
         raw.truncate(size as usize);
         Ok(base64url(&raw_signature_to_der(&raw)?))
     }
