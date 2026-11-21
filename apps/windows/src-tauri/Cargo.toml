@@ -21,5 +21,8 @@ tauri = { version = "2", features = [] }
 tokio = { version = "1", features = ["sync"] }
 url = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Security_Cryptography"] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

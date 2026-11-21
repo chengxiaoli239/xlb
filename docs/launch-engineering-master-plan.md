@@ -58,7 +58,7 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 近期按“共用契约先锁定、平台实现并行、真实节点串行验收”推进：
 
 1. **Android M8 离线证明阶段（2026-11-22 已完成）**：专用隔离 AVD instrumentation 已验证同 installation ID 稳定复用 P-256 公钥、不同 installation ID 得到不同公钥、challenge 签名可由对应公钥验证、私钥不可导出；完整 instrumentation 6/6 通过。此阶段不证明硬件 backed provenance，也未接入会员隧道。
-2. **Windows M8 平台密钥阶段（可与 Android 分支并行）**：固定 Windows CNG API binding 和 key-handle 契约，验证非导出 P-256 签名后再实现 supervisor adapter；当前账户 `keyring` 不是设备签名器，未经审查不得手写 FFI。两个平台只共享 `xlb-proof-v1` wire/身份语义，不共享私钥或把一个平台的测试结果外推到另一个平台。
+2. **Windows M8 平台密钥阶段（实现待 hosted 验证）**：新增 Windows-only CNG P-256 signer 和离线测试，使用直接 `windows-sys 0.61.2` bindings，existing key 每次打开均核对 signing-only/zero-export/P-256，bridge 仍关闭；本机无 Cargo/Rust，需现存 Windows MSVC hosted workflow 完成 locked test/build 后才能标记通过。两个平台只共享 `xlb-proof-v1` wire/身份语义，不共享私钥或把一个平台的测试结果外推到另一个平台。
 3. **M10 Agent probe 阶段（listener 已离线接入，transport 未完成）**：现有 challenge handler 已通过 opt-in `NODE_AGENT_PROBE_LISTEN` 接到独立 loopback TLS 1.3 mTLS listener，且端口与管理/数据监听隔离；runnable Agent 不提供真实 executor，因此响应 `503 probe_unavailable`。下一步实现节点证书身份映射与真实协议 transport，并保持缺输入失败关闭；不得让 liveness、fake executor 或订阅拉取刷新健康时间。transport 契约稳定后，再连接 PHP health repository/route filter 并补受控节点验收。
 4. **M6 会员节点阶段（外部条件满足后串行）**：两台既有 Android 真机的独立 installation ID 与 P-256 绑定已满足，不需要第三台手机；仍缺可用隔离 member profile 隧道、两机同时/错峰复制拒绝、匹配 node/peer/request/generation 的真实撤权回执与最终流量单调证据。执行云端步骤前必须经 `ops/aws-cli` 只读复核当前账户/资源，复核已批准 plan 后才可 `--apply`；无节点回执不能宣称断流。
 5. **E1–E7 放行链**：真实 mTLS/密钥注入、合规书面意见、staging/签名与回滚、分级容量数据、监控与成本预算、多云 conformance、试运行均为独立放行门；不得用本机 smoke、CI 绿灯、fake worker 或 M6 合成 peer 替代。

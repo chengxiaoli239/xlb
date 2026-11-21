@@ -4,6 +4,8 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use url::Url;
 
 mod proof_bridge;
+#[cfg(windows)]
+mod cng_device_key;
 
 const KEYRING_SERVICE: &str = "com.xlb.vpn.windows";
 const KEYRING_USER_PREFIX: &str = "api-session-cookies";
