@@ -41,6 +41,17 @@ class PlatformApiTest extends TestCase
             ->assertOk()->assertJsonPath('data.id', 'user-member')->assertJsonPath('data.email', 'member@xlb.local');
     }
 
+    public function test_login_rejects_attempts_after_the_configured_rate_limit(): void
+    {
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->postJson('/api/v1/auth/login', ['email' => 'member@xlb.local', 'password' => 'wrong'])
+                ->assertUnauthorized();
+        }
+
+        $this->postJson('/api/v1/auth/login', ['email' => 'member@xlb.local', 'password' => 'wrong'])
+            ->assertStatus(429);
+    }
+
     public function test_admin_can_version_and_unpublish_plans_without_changing_historical_rights(): void
     {
         $this->actingAs(User::findOrFail('user-admin'));
