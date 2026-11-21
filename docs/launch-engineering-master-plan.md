@@ -31,7 +31,7 @@
 
 | 发布阶段 | 状态 | 下一退出门 |
 | --- | --- | --- |
-| E0 地基 | 部分完成（Android native APK 检查已纳入；构建清单本地检查通过） | 核实构建清单 hosted run；补生产制品签名/SBOM、staging/回滚；合规与 D 决策保留为发布门 |
+| E0 地基 | 部分完成（Android native APK 检查及 metadata-only 清单 hosted run `44943107063` 全绿） | 补生产制品签名/SBOM、staging/回滚；合规与 D 决策保留为发布门 |
 | E1 会员数据面放行 | 未通过 | 真实 member profile、双真机复用拒绝、节点撤权回执/最终流量和连接验收 |
 | E2 工程化 | 未完成 | 批量编排、常驻受控 worker、实测容量与热备/回收演练 |
 | E3 四端 | 部分完成 | Android 会员真机数据面闭环；Windows 账户壳已合入，接 Mihomo/proof bridge 前先补 MSVC/Credential Manager Windows 验证；macOS/iOS 条件与后续验收 |
@@ -44,7 +44,7 @@
 | 工作包 | 文件/模块边界 | 依赖与退出条件 |
 | --- | --- | --- |
 | A. M10 probe adapter 验证 | `apps/node-agent/**`、`apps/php-api/**` 分别限定端点/driver 代码与 Feature tests | mTLS `/healthz` 目前证明 Agent 端点存活，不等于 VPN 数据面健康；先用本地 mock/协议契约验证失败关闭和超时行为，真实节点/证书另需批准窗口 |
-| B. E0 制品可追溯性 | `.github/workflows/**`、`ops/build_artifact_manifest.py` | Debug APK 来源/摘要清单及 6 项测试已实现，待 hosted CI 验证；生产制品签名、SBOM 与发布存储仍未实现，不部署、不签发生产包 |
+| B. E0 制品可追溯性 | `.github/workflows/**`、`ops/build_artifact_manifest.py` | Debug APK 来源/摘要清单及 6 项测试已实现，hosted run `44943107063` 全绿；生产制品签名、SBOM 与发布存储仍未实现，不部署、不签发生产包 |
 | C. M11 本地压测证据 | `loadtest/**`、验收文档 | 先以 loopback/local 沙箱跑有界控制面场景，记录真实 P50/P95/错误率；不把脚本存在当基线，不压公网/生产 |
 | D. E0 Windows 验收通道 | `.github/workflows/**` 与 Windows build/test 文档 | 增加手动触发的 Windows MSVC/Credential Manager 验收入口；未经用户安排不自动消耗 Windows hosted runner，不把 macOS 交叉编译当 Windows 证据 |
 | E. M6/M8 真机与节点闭环 | Android/Node Agent 契约分开验收 | 两台已有真机身份已绑定，不需要第三台手机；会员 profile、proof bridge、节点回执仍需获批隔离窗口和真实节点参数，未就绪前只完成离线代码/测试 |
