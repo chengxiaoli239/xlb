@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "XLB 会员客户端",
+  "version": "0.1.0",
+  "identifier": "com.xlb.vpn.windows",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://127.0.0.1:5175",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "XLB 会员客户端",
+        "width": 1080,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 620,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "../../php-api/public/favicon.ico",
+      "../../android/app/src/main/res/drawable-nodpi/xlb_light_logo.png"
+    ],
+    "targets": "all"
+  }
+}

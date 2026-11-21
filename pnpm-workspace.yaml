@@ -1,6 +1,7 @@
 packages:
   - apps/api
   - apps/web
+  - apps/windows
 allowBuilds:
   better-sqlite3: true
   esbuild: true
