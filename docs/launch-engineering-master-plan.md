@@ -27,11 +27,11 @@
 | M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试 | Android Keystore bridge 真实接入、Windows CNG/macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成 |
 | M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口、匿名账号幂等恢复及显式退出后关闭自动恢复；Web/扩展可辨识匿名账号并保留权益状态 | Android 恢复实现已合并，但真实 Keystore/SharedPreferences 跨重启和本地 API 创建/恢复尚待隔离 emulator 验收；邮箱/手机升级、跨端迁移、PC 扫码授权及桌面客户端未实现。不得清除现有会员设备数据 |
 | M10 智能路由 | 加权候选、熔断恢复、探测假 driver、持久化接口及 SQLite CAS 健康状态仓库均有离线测试 | 无真实 probe worker/协议探测、定时调度、`SubscriptionRouteService` 接线或客户端线路 UI；D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt |
-| M11 与 E0 工程基础 | GitHub Actions 现覆盖 Web/API 构建、API/PHP/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android JVM tests/lint（显式跳过当前只支持 macOS NDK 的 Mihomo native build）；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 也已存在 | `1f4f4ff` 的 hosted run `44928503271` 全部成功；本地 Laravel 221 项中 220 项通过/1 项既有条件跳过，Web/扩展/Go/ops/Android 检查通过。CI 仍不构建 Mihomo/JNI APK。没有压测基线报告、staging、生产制品/回滚、S3/CDN、监控告警或成本预算 |
+| M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android pinned NDK/Go 下的真实 arm64 Mihomo JNI Debug APK、JVM tests 与 lint；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 已存在 | 上一阶段 `1f4f4ff` hosted run `44928503271` 全部成功；本地最新 `d952f78` 的 `assembleDebug + testDebugUnitTest + lintDebug`、workflow actionlint 和 diff check 通过；GitHub hosted Linux NDK native build 尚待本提交运行结果。没有压测基线报告、staging、生产制品/回滚、S3/CDN、监控告警或成本预算 |
 
 | 发布阶段 | 状态 | 下一退出门 |
 | --- | --- | --- |
-| E0 地基 | 部分完成（离线 CI 检查面已扩展） | 观察 GitHub Actions 实际 run；补制品可追溯、staging/回滚；合规与 D 决策保留为发布门 |
+| E0 地基 | 部分完成（Android native APK 检查已纳入） | 观察 GitHub Actions Linux native run；补制品可追溯、staging/回滚；合规与 D 决策保留为发布门 |
 | E1 会员数据面放行 | 未通过 | 真实 member profile、双真机复用拒绝、节点撤权回执/最终流量和连接验收 |
 | E2 工程化 | 未完成 | 批量编排、常驻受控 worker、实测容量与热备/回收演练 |
 | E3 四端 | 部分完成 | Android 首批端到端；Windows 桌面客户端建立；macOS/iOS 条件与后续验收 |
