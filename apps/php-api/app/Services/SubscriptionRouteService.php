@@ -12,6 +12,8 @@ class SubscriptionRouteService
 {
     public const SCOPES = ['test', 'production'];
 
+    public function __construct(private readonly NodeHealthRouteStateReader $probeStateReader) {}
+
     /** @return array<int, array<string, mixed>> */
     public function list(string $scope): array
     {
@@ -151,6 +153,15 @@ class SubscriptionRouteService
             ->get(['n.id', 'n.name', 'n.endpoint_host', 'n.endpoint_port', 'n.agent_endpoint', 'n.max_sessions', 'n.active_sessions', 'n.last_health_check_at'])
             ->filter(fn (object $node): bool => $this->hasFreshHealthCheck($node->last_health_check_at));
 
+        if (config('node_health_probe.route_filter_enabled')) {
+            $freshProbeStates = $this->probeStateReader->freshHealthyNodeIds(
+                $nodes->pluck('id')->all(),
+                now()->toDateTimeImmutable(),
+                (int) config('node_health_probe.route_state_ttl_seconds', 30),
+            );
+            $nodes = $nodes->filter(fn (object $node): bool => isset($freshProbeStates[$node->id]))->values();
+        }
+
         return $nodes->isEmpty() ? null : ['version' => $selected, 'nodes' => $nodes->all()];
     }
 
@@ -200,6 +211,17 @@ class SubscriptionRouteService
             if ($node->status !== 'available' || ! in_array($node->health_status, $healthyStatuses, true)
                 || ! $this->hasFreshHealthCheck($node->last_health_check_at)
                 || ($scope === 'production' && (bool) $node->is_test) || ($scope === 'test' && ! (bool) $node->is_test)) {
+                throw new RuntimeException('线路节点尚未通过范围和健康校验', 422);
+            }
+        }
+
+        if (config('node_health_probe.route_filter_enabled')) {
+            $freshProbeStates = $this->probeStateReader->freshHealthyNodeIds(
+                $nodeIds,
+                now()->toDateTimeImmutable(),
+                (int) config('node_health_probe.route_state_ttl_seconds', 30),
+            );
+            if (count($freshProbeStates) !== count(array_unique($nodeIds))) {
                 throw new RuntimeException('线路节点尚未通过范围和健康校验', 422);
             }
         }

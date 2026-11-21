@@ -3,9 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\DatabaseNodeHealthStateStore;
+use App\Services\NodeHealthState;
 use App\Services\SubscriptionRouteService;
+use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class SubscriptionRouteTest extends TestCase
@@ -78,6 +82,63 @@ class SubscriptionRouteTest extends TestCase
         $this->postJson('/api/v1/admin/subscription-routes', [
             'scope' => 'test', 'node_ids' => ['node-test-1'],
         ])->assertStatus(422)->assertJsonPath('error.code', 'route_nodes_not_ready');
+    }
+
+    public function test_route_probe_filter_is_disabled_by_default(): void
+    {
+        $this->assertSame(false, config('node_health_probe.route_filter_enabled', false));
+
+        $route = app(SubscriptionRouteService::class)->resolve('user-member', 'test');
+
+        $this->assertSame(['node-test-1'], array_map(
+            static fn (object $node): string => $node->id,
+            $route['nodes'],
+        ));
+    }
+
+    public function test_route_resolution_excludes_missing_stale_and_open_probe_states(): void
+    {
+        config([
+            'node_health_probe.route_filter_enabled' => true,
+            'node_health_probe.route_state_ttl_seconds' => 30,
+        ]);
+        $this->addTestRouteCandidate('node-test-2');
+        $this->addTestRouteCandidate('node-test-3');
+        $this->addTestRouteCandidate('node-test-4');
+
+        $now = new DateTimeImmutable;
+        $store = new DatabaseNodeHealthStateStore;
+        $store->put('node-test-1', new NodeHealthState('healthy', 0, 0, $now->modify('-10 seconds')));
+        $store->put('node-test-2', new NodeHealthState('unhealthy', 3, 0, $now->modify('-10 seconds')));
+        $store->put('node-test-3', new NodeHealthState('healthy', 0, 0, $now->modify('-31 seconds')));
+
+        $route = app(SubscriptionRouteService::class)->resolve('user-member', 'test');
+
+        $this->assertSame(['node-test-1'], array_map(
+            static fn (object $node): string => $node->id,
+            $route['nodes'],
+        ));
+        $this->assertSame('verified_test', DB::table('nodes')->where('id', 'node-test-1')->value('health_status'));
+        $this->assertSame('verified_test', DB::table('nodes')->where('id', 'node-test-2')->value('health_status'));
+    }
+
+    public function test_admin_cannot_add_route_candidate_without_a_fresh_probe_state_when_filter_is_enabled(): void
+    {
+        config(['node_health_probe.route_filter_enabled' => true]);
+        $this->actingAs(User::findOrFail('user-admin'));
+
+        $this->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'test', 'node_ids' => ['node-test-1'],
+        ])->assertStatus(422)->assertJsonPath('error.code', 'route_nodes_not_ready');
+
+        (new DatabaseNodeHealthStateStore)->put(
+            'node-test-1',
+            new NodeHealthState('healthy', 0, 0, new DateTimeImmutable),
+        );
+
+        $this->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'test', 'node_ids' => ['node-test-1'],
+        ])->assertCreated()->assertJsonPath('data.status', 'draft');
     }
 
     public function test_first_production_route_cannot_start_a_partial_canary(): void
@@ -184,5 +245,19 @@ class SubscriptionRouteTest extends TestCase
         $this->travel(901)->seconds();
         $this->assertSame(1, app(SubscriptionRouteService::class)->reconcile());
         $this->assertDatabaseHas('subscription_route_versions', ['id' => 'route-test-v1', 'status' => 'retired']);
+    }
+
+    private function addTestRouteCandidate(string $nodeId): void
+    {
+        DB::table('nodes')->insert([
+            'id' => $nodeId, 'name' => $nodeId, 'region' => '测试区域', 'protocol' => 'SOCKS5',
+            'endpoint_host' => '198.51.100.20', 'endpoint_port' => 1080, 'status' => 'available', 'is_test' => true,
+            'max_sessions' => 100, 'active_sessions' => 0, 'latency_ms' => 40, 'health_status' => 'verified_test',
+            'last_health_check_at' => now()->toIso8601String(), 'config_version' => 1, 'updated_at' => now()->toIso8601String(),
+        ]);
+        DB::table('subscription_route_nodes')->insert([
+            'id' => (string) Str::uuid(), 'route_version_id' => 'route-test-v1', 'node_id' => $nodeId,
+            'weight' => 100, 'created_at' => now()->toIso8601String(),
+        ]);
     }
 }
