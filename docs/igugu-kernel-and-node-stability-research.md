@@ -1,0 +1,101 @@
+# iGuge 内核边界与节点稳定性研究
+
+日期：2026-11-21。范围：根据仓库现有设计/验收记录、用户提供的 Clash Verge 截图和本地代码做桌面研究；本轮未访问 iGuge 私有插件数据、未查询生产节点、未做云端操作。本文描述证据能支持的结论，不把代码存在等同于生产部署。
+
+## 结论摘要
+
+- **客户端内核决策已定：维持 Mihomo。** 用户提供的 Clash Verge 设置截图显示 `alpha-69c1631 Mihomo`；这指向用户安装的 Clash Verge 客户端内核，不是 iGuge 服务端内核。它与本项目锁定验证的 Mihomo `v1.19.34` 属同一 Mihomo 家族。用户已明确选择继续使用 Mihomo。仅凭截图换内核没有收益，却会改变平台封装、proof bridge、配置、许可证与验收体系。
+- **内核由客户端软件决定，不由订阅 URL 决定。** 订阅返回节点、规则和代理组等配置数据，不携带或安装内核。同一订阅可由 Clash Verge/Mihomo 解析，也可由 v2rayN 所使用的 Xray 或 sing-box 客户端解析，前提是格式和协议兼容。看到 Mihomo 是因为 Clash Verge 带有 Mihomo 核心，与 iGuge 返回的订阅内容无关。
+- **iGuge 扩展不是 VPN 内核载体。** 项目既有材料只记录其可见账户、VIP、订阅分发和兼容客户端导入路径；无法据此核实扩展内部实现，更不能宣称扩展承担隧道数据面。iGuge 桌面/移动客户端使用何种服务端协议或节点内核，当前没有直接证据。
+- **节点稳定性暂无生产结论。** 仓库里的 Node Access Agent 明确拒绝 production mode；历史证据证明少量隔离 TCP 请求、一次 Android 代理重连和临时资源到期回收，不证明生产会员节点长期稳定。最直接的改进机会是补齐可观测性、真正持续运行的健康探测和节点故障后的受控选路；封锁/抗审查原因目前只是待证假设。
+
+## A. 内核与产品形态
+
+### 术语与证据边界
+
+| 项目 | 结论 | 证据强度 |
+| --- | --- | --- |
+| Clash Verge 截图中的 `alpha-69c1631 Mihomo` | 用户侧 Clash Verge 客户端选用 Mihomo alpha 构建；`alpha` 是发布通道标签，`69c1631` 是构建提交标识，`Mihomo` 是核心名称 | 用户提供截图，直接用户侧证据；不代表本项目对该构建做过验收 |
+| 本项目内核 | Mihomo `v1.19.34` 已用于本地配置解析联验；客户端运行和系统隧道仍有平台适配及实机放行门 | 仓库锁定版本、配置解析测试记录；不是全平台生产验收 |
+| 订阅地址 | 传递配置数据，不决定使用何种核心 | 配置格式/客户端分层及现有订阅接口契约 |
+| V2rayN | 开源图形客户端，不是协议，也不自带节点；按导入格式调用可用核心（如 Xray/sing-box）。所谓“iGuge 可用 V2rayN”通常指订阅可导入兼容客户端 | 通用产品术语与项目兼容性文档；没有据此证明某个 iGuge 节点协议 |
+| iGuge 浏览器扩展 | 既有对标记录描述账户识别、VIP/付款入口和订阅分发。浏览器扩展负责分发不等于有 VPN 数据面内核 | 项目既有用户可见行为记录；本机 CLI 不能读取用户浏览器安装的闭源插件，也未核验其后台 |
+| iGuge 服务端/节点内核与传输 | 从 Clash Verge 截图和订阅可导入 V2rayN 都无法推断。不要把客户端核心名称归因给 iGuge 服务端 | 无直接服务端证据 |
+
+### 用户侧客户端内核与节点侧实现对照
+
+| 层次 | Mihomo / Clash Verge | 本项目当前证据 | 判断 |
+| --- | --- | --- | --- |
+| 客户端外壳 | Clash Verge 管理配置、系统代理/TUN 和内置 Mihomo | 自有 App 计划以 Mihomo core-native + 原生平台隧道接口提供客户端；iGuge 扩展属于账户与分发层 | 外壳、核心、订阅和服务端协议分别验收 |
+| 用户侧配置核心 | Mihomo；截图显示的 alpha commit 与项目 `v1.19.34` 同家族 | renderer fixture 已由 Mihomo `v1.19.34` 解析；未证明所有系统代理/TUN、DNS、UDP 或多端体验 | 沿用 Mihomo，固定版本矩阵；不因别的产品可导入 V2rayN 就换核心 |
+| 节点传输/服务端 | 截图不包含服务端信息 | 2026-11-14 隔离公网节点用 sing-box `1.14.4` + Shadowsocks 2022，macOS/Android 指定客户端完成有限 HTTPS/TCP 验收；另有自研 Go Node Access Agent 的 TLS 1.3/HTTP2+mTLS proof 数据面隔离测试 | 这是两条不同测试路径；不能据此声称已有生产节点，也不能断言 iGuge 使用其中任一方案 |
+| 设备授权 | 通用 Clash/Mihomo/V2rayN 导入本身不能签本项目的设备 challenge | 自研 proof bridge 用设备证书和不可导出 signer 证明设备身份；Agent 只允许 `isolated-test` | 严格限设备仍是核心要求；普通客户端不得标记为严格限设备已支持 |
+
+### 已决的内核选择
+
+**决策：本项目维持 Mihomo，不切换内核。** 依据是用户提供的 Clash Verge 截图显示 Mihomo，和仓库当前锁定的 Mihomo `v1.19.34` 同属 MetaCubeX/Mihomo 家族，且用户明确拍板继续使用。换内核会牵动 Android/桌面系统隧道适配、profile renderer、proof bridge 路由、依赖许可和整套回归验收；目前没有可验证收益。本决策关闭当前“是否换内核”研究项。
+
+现有《客户端兼容、订阅分发与节点运维方案》的内核决策门仍适用于未来重大版本升级或新增平台：届时可做小型可替换验证，比较跨平台能力、系统隧道接口、更新维护、崩溃恢复、许可证与二进制分发义务；评审通过前不把多个内核同时嵌入正式客户端，不自行发明服务端加密/混淆协议，也不改变设备证明和撤权门槛。
+
+## B. 节点频繁异常：根因清单
+
+当前没有已发布的生产会员节点可供归因，因此下表把可证事实、可能影响和待验证假设分开。所谓“节点异常”必须进一步区分：订阅拉取、设备授权、隧道握手、会话续租、DNS/UDP、出口网络、撤权回执和客户端系统隧道，不能只用一个“连接失败”状态覆盖。
+
+| 优先级 / 可能原因 | 已验证事实与证据 | 尚未验证 / 对体验的可能影响 | 下一步与验证方式 |
+| --- | --- | --- | --- |
+| P0：生产服务尚未部署完整 | `apps/node-agent/cmd/node-agent` 启动时强制 `NODE_AGENT_MODE=isolated-test`，否则退出；PRD 记 production mode、生产 mTLS 与 bridge 安全区交付未完成 | 因此仓库不能解释或保证某个真实会员生产节点的稳定性；若用户报告来自另一套服务，需要取得其版本/部署和脱敏事件才能归因 | 先建立节点/线路/客户端关联的故障事件，不把本地隔离测试等同生产诊断；需要正式接入前置外部材料和放行门 |
+| P0：实验节点 TTL 到期 | `ops/aws-node-lab.template.json` 创建带 `ExpiresAt` 标签和 EventBridge Scheduler 的限时测试实例；runbook 明确到期终止实例、调度可能延迟、Scheduler 终止实例不自动删除整栈。2026-11-08 和 11-14 实验记录分别实际观察过终止/整栈回收 | 这是隔离实验资源生命周期，不是生产会员节点 TTL。若把实验线路当长期线路，连接中断是预期结果；目前没有证据显示 TTL 造成生产用户故障 | 离线：在 API/客户端区分测试线路和会员线路并展示截止时间。真实部署：核实资源标签、实例状态和 CloudTrail，不从旧资源记录推断当前状态 |
+| P0：AWS 运维会话过期 | 历史上 `xlb-ops` 曾返回 `ExpiredToken`，AWS CLI 写操作未被服务端接受；本轮 STS 仍有效返回目标账号 root ARN | 会话过期会阻止管理面查询/部署/回收，不等于已运行节点的数据隧道自动断开；没有因该错误造成节点中断的证据 | CLI 始终用 `ops/aws-cli`；控制面区分“凭据失效”和“节点不健康”，不要把一个映射成另一个。真实节点故障时另查节点事件和客户端握手 |
+| P1：健康状态新鲜度/缺少持续探测 | `health_check_ttl_seconds` 默认 300 秒；订阅解析与 peer provisioning 会拒绝超过 TTL 的健康记录。`NodeAutomation` 在管理员测试节点完成一次协议验收时写入 `last_health_check_at`。代码检索未发现对会员节点持续探测的已部署 worker | 若健康记录没有持续更新，达到 300 秒后线路会变为不可选，表现为暂不可用；它通常解释“不分配新线路”，不能单独证明已有 TCP 流为何断开 | 离线：为健康采样定义独立 provider-neutral 结果、错误类别、单测及 freshness 状态；实施要明确持续 worker 所属环境。真实节点：探测节点 Agent/握手和受控 HTTPS 出口并验证 false-positive 阈值 |
+| P1：故障切换、线路调度不足 | `SubscriptionRouteService` 支持固定版本、canary/published、fresh health 过滤、draining 和回滚；运维文档指出当前订阅配置为单一 `select`，AUTO/远程规则尚未实现。现有代码只在 `subscription-routes:reconcile` 收口到期的 drain 版本，不等于节点探测器 | 单节点、单线路或无 fallback 时，短暂故障会直接暴露给用户；未证实已有跨节点自动故障切换 | 离线：先完善多节点 route fixture/状态转换测试。真实环境：同线路至少两台健康节点做故障注入和切换时延验收；每次切换仍经逐设备 peer 授权/撤权，不允许客户端直跳绕过设备绑定 |
+| P1：会话租约或网络抖动 | Node Agent 隔离实现的 challenge 和 session lease 为 2 分钟；bridge 心跳间隔 20 秒，续租由 Agent 校验设备证书并检查 peer 状态。隔离代码的心跳失败会关闭空闲连接，但没有用户生产环境长时/断网恢复证据 | 短时丢包、进程休眠、证书/时钟问题可能导致租约过期，重连被拒；是否发生在用户环境未知。当前没有跨平台长时运行与断网恢复验收 | 离线：测试连续心跳、短时中断、重启/过期、服务端拒绝后的错误分类和重连退避；真实设备/节点：前后台切换、Wi-Fi/蜂窝切换、时钟偏差和节点重启场景留证 |
+| P1：容量或资源耗尽 | peer-store 在本地跨进程状态锁内原子检查容量；记录有 12 个进程竞争 3 个并发名额恰好 3 个成功。容量不足会返回明确拒绝。隔离协议 harness 的早期 M6 拒绝曾因未证明有空位而不能归因身份 | 该测试证明原子名额边界，不证明小规格实例长时 CPU/内存/连接数、文件描述符、带宽、连接跟踪表或真实并发行为；容量耗尽会表现为拒连但不是身份复制防护 | 离线：补有界压力模型、资源使用指标契约和稳定容量拒绝。真实节点：按目标容量做分阶段持续测试，记录 CPU、RSS、FD、活跃 peer、建立成功率与 p95/p99，不超 `$1` 已批准单小时窗口 |
+| P2：协议被识别/出口或运营商质量 | 已有隔离 TCP/SS2022 的指定网络请求成功；没有国内多运营商、跨时段、UDP、IPv6、持续丢包或协议封锁测试 | DPI/主动探测、端口封锁、丢包、运营商互联、节点出口限速均是可能性，**当前无证据确认**。也不能由“某次连不上”推导被审查封锁 | 先测跨运营商 TCP/TLS 握手、丢包和出口；若证据指向协议阻断，再按兼容性决策门比较候选协议。Reality/uTLS 不在当前稳定性首要投入，不自研混淆 |
+| P2：DNS/UDP/IPv6 与系统 VPN 集成 | 2026-11-14 实机记录明确未覆盖 UDP、IPv6、DNS 泄漏和自有 VPNService/TUN；本地 Mihomo 配置解析只验证 YAML/配置结构 | 特定应用失败可能是 DNS、UDP 或系统隧道，不一定是节点崩溃；当前未测不能视为支持 | 离线：完善客户端分层错误状态。真机：按 Android/Windows/macOS 分别验证 DNS、IPv4/6、UDP、系统代理/TUN 与失败恢复 |
+| P2：探测链自身间歇超时 | pd02 维护验收共 310 次检查中 307 通过、3 次超时，全部发生在恢复健康后的收尾采样，后续 6 次重测通过；报告明确原因未完全定位。此为 Web/ALB 探测，不是 VPN 节点 | 它证明外部探测自身会间歇超时，不能归因 VPN 节点，也不能证明用户不可用 | 探测需记录 DNS、TCP connect、TLS、HTTP 分层耗时和目标，再与服务端指标关联；避免单次探针失败立刻引发线路抖动 |
+
+## C. 稳定性改进优先级
+
+| 优先级 | 改进 | 可离线推进 | 需真实节点/额外条件 |
+| --- | --- | --- | --- |
+| P0 | 统一故障分类与证据链：`auth_denied`、`capacity`、`health_stale`、`connect_timeout`、`tls_handshake`、`target_unavailable`、`quota_unavailable`、`client_tunnel`；关联脱敏 node/route/config/request ID 与时间 | 事件模型、日志脱敏规则、模拟错误映射、Feature/Go 单测 | 真实生产事件字段和监控接入需部署审查 |
+| P0 | 把“看起来不稳定”拆成订阅、授权、握手、出口、DNS、流量和撤权状态；未知仍显示未知，不把健康探针通过等同隧道健康 | 文案/状态机/诊断摘要 | 用真实用户同意的脱敏事件验证可诊断性 |
+| P1 | 建立持续健康探测与熔断恢复策略，增加连续失败阈值、连续恢复观察、滞回，避免单次超时就切线路 | 探测契约、状态机、假 driver、阈值与抖动单测可离线开发 | 目标节点的探测端口、来源网络、延迟/丢包基线和假阳性阈值需实测 |
+| P1 | route failover：`AUTO/url-test`、`fallback`、手动选择按版本化线路发布；故障节点停止新分配，旧线路受控 drain/rollback | YAML/profile renderer、route versions 关联、确定性模拟与测试 | 最少两台隔离节点、持续故障注入、切换时延与 peer 撤销回执 |
+| P1 | 确认生产 scheduler/worker 常驻、积压/租约/失败告警和资源逾期盘点；现在本地 worker 关闭不等于线上运行 | 部署清单、健康状态 API 与 worker 心跳测试 | 需专用受审环境和运维身份，不在本轮创建云资源 |
+| P1 | 对本机 bridge 的心跳/重连增加有界指数退避与抖动，区分离线、凭据过期、peer 撤权、节点不可达；保持撤权/配额未知时失败关闭 | 可在 fake Agent 测断线/恢复/续租边界并 race-test | 真机前后台、网络切换、真实节点重启的跨平台验收 |
+| P2 | 建立长稳/容量验收：分阶段增加连接和时长，固定请求速率与数据量，观测 CPU/RSS/FD/握手成功率/流量结算 | 可先扩展本地 fake load harness 和指标接口 | 真实节点规格及成本授权；不以小型本地测试推导生产容量 |
+| P3 | 仅在多运营商证据支持时评估抗识别协议/传输 | 可做许可证/兼容性桌面研究 | 要用户明确产品方向、法务/供应商审查和独立隔离网络试验；不作为默认方案 |
+
+## D. 后续放行界线
+
+1. 不能以单次 HTTPS、M5 12 争 3、YAML parse、Mihomo UI 可启动或服务端 `health_status=healthy` 单独宣称“稳定”。
+2. 稳定性验收至少包含持续探测、长时流量、主动断网/恢复、DNS/UDP/IPv6（支持时）、容量边界、两台 proof 身份、撤权最终回执和故障切换；未覆盖项明确标未验证。
+3. AWS 创建前重新只读核对资源，再审查 `ops/node_lab.py` plan；只执行已批准的 us-west-2、单台 t3.small、最长 60 分钟和 `$1` 预算。测试后删栈并逐项核对，不扩大、不过期延长、不以 Scheduler 终止实例等同整栈回收。
+4. 无匹配节点撤权回执不宣称已断流；账号级订阅、test Agent、管理员线路和 CDN 均不能替代严格设备证明或 VPN 数据通道。
+
+## E. iGuge 式体验与本项目差距
+
+状态基于本仓库代码/文档，不表示线上已开放。iGuge 侧仅对照项目记录的用户可见流程和用户截图；没有直接读取用户浏览器插件或验证 iGuge 后台。
+
+| 用户可见维度 | iGuge 式体验参考 | 本项目状态 | 对应位置 | 可离线推进的下一步 |
+| --- | --- | --- | --- | --- |
+| 注册、扫码登录、跨端同账号 | 账户可在扩展/网站/客户端识别；扫码可用于设备间授权 | 部分：邮箱会话登录存在；扩展明确是账户/分发，扫码账号授权流程仍属路线图 | `docs/growth-architecture-and-roadmap.md`；`apps/php-api/routes/web.php`；`apps/android/app/src/main/java/com/xlb/vpn/data/PlatformApi.java` | 先明确扫码用于订阅导入还是账号授权；不把二维码用途混为一谈，补账号授权威胁模型和状态图 |
+| 购买后长期固定订阅凭证 | 购买后稳定地址，续费只延长权益 | 部分：Laravel 有按设备固定凭证、轮换 outbox 与本地沙箱生命周期；真实支付未接入，生产签发保持关闭 | `apps/php-api/app/Services/SubscriptionCredentialService.php`；`docs/node-access-agent-contract.md` | 用沙箱覆盖建单、续费、轮换、迟到回执；商户资料到位前不宣称真实支付通过 |
+| 订阅码/二维码导入多客户端、多格式 | 复制/二维码进入兼容客户端 | 部分：Web 有复制、二维码和 Clash Verge 深链；profile service 仅开放 Clash/Mihomo，Sing-box 被明确拒绝，生产 profile 不可用 | `apps/web/src/SubscriptionTools.tsx`；`apps/php-api/app/Services/SubscriptionProfileService.php` | 逐格式补 schema/parser 离线测试和教程；真实客户端按版本做导入、刷新、轮换验收 |
+| 智能线路/手动切换 | 自动低延迟选择、故障切换、手动选择 | 部分：线路版本、权重、canary、rollback、draining 和新鲜健康筛选存在；当前生成配置主要为 `select`，没有已验收的 AUTO/fallback，也没有可用生产节点 | `apps/php-api/app/Services/SubscriptionRouteService.php`；`apps/php-api/app/Services/SubscriptionProfileService.php`；`docs/growth-architecture-and-roadmap.md` | 先做 fake route harness 与 `url-test/fallback` profile 验证；严格 peer 线路切换必须先撤旧 peer、重开新 peer并取得回执 |
+| 扩展识别账号与 VIP 付款入口 | 扩展显示当前账号、VIP/套餐和付款入口 | 部分/未开放：架构文档有入口设计；扩展 manifest/本地实现仍是开发态，没有商店发布与真实支付 | `docs/client-compatibility-and-node-operations.md`；`apps/extension/manifest.json`；`apps/extension/popup.js` | 按最小权限实现账户摘要、会员中心深链和支付跳转；只接当前登录主体，支付回调后重拉权益 |
+| 续费只延权益，不换订阅 | 固定订阅地址继续有效 | 部分：本地权益/凭证逻辑和轮换 outbox 已覆盖部分场景；真实商户续费、跨端刷新与第三方客户端实导入未验收 | `apps/php-api/app/Services/SubscriptionCredentialService.php`；`docs/member-connection-prd.md` | 扩展续费前后状态机测试，证明 entitlement 改变时凭证保持不变；独立测试轮换时旧链接失效 |
+| 网站/扩展/客户端同一状态 | 账号、套餐、订阅和设备状态一致 | 部分：共享 API 与账号模型已有；扩展未上架、生产支付/节点未接入、旧设备端列表有已记录快照差异 | `apps/php-api/routes/web.php`；`apps/web/src/`；`apps/extension/`；`apps/android/app/src/main/java/` | 为 overview/设备/订阅状态定义统一版本与刷新点；补跨端契约测试，不用静态 UI 预览冒充线上一致 |
+
+### 产品边界与待确认范围
+
+用户已经要求自有及第三方设备都严格限额，并确认本项目继续 Mihomo；这些决定不是待重新表决项。待确认的产品范围仅是“iGuge 式体验”要复用哪些流程和格式，以及普通通用客户端是否作为需要本机 proof bridge 的兼容入口。账号级通用订阅会削弱设备证明、逐设备撤权和断流可证明性，不能为追求外观相似而开放账号级凭证；普通 Clash/V2rayN 在没有 proof bridge 时不能标为严格限设备已支持。严格限设备是既定约束，不作为可放宽的待决项。
+
+## 证据索引
+
+- [客户端兼容、订阅分发与节点运维方案](client-compatibility-and-node-operations.md)：内核/协议决策门、Clash Verge 观察、兼容矩阵与 11-14 实机范围。
+- [节点运维手册](node-operations-runbook.md)：测试节点 TTL、实例自动终止与整栈回收责任分离、排空及 worker 运行要求。
+- [美国节点与 macOS/Android 实机验收](aws-client-acceptance-2026-11-14.md)：指定 sing-box/SS2022/TCP 请求、一次重连和明确未覆盖项。
+- [pd02 降配验收](pd02-downsize-acceptance-2026-11-08.md)：310 个 Web 采样中的 3 次未定位超时，非 VPN 节点证据。
+- [M5/M6 隔离节点计划](m5-m6-isolated-node-acceptance-plan.md) 与 [PRD](member-connection-prd.md)：M5 并发与 M6 失败/待复测边界；历史 AWS 资源记录以 PRD 中最新只读核验为准。
