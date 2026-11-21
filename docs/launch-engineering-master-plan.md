@@ -25,16 +25,16 @@
 | M5 / M7 隔离协议与回收 | 本地并发/额度内核测试；2026-11-21 获批隔离节点上合成 peer 并发、复用拒绝、独立 peer、撤权回执/最终流量测试通过；资源按计划回收核查 | 只证明限定 harness 与隔离节点；不能外推生产数据库、会员客户端或长期容量 |
 | M6 双身份与会员线路 | 两台真机 ALT-AN00、VOG-AL10 的 installation ID 与 P-256 公钥绑定均有 SQLite 实测；合成 peer 隔离协议测试通过 | 会员真机复制拒绝、真实 member profile 隧道、匹配会员撤权回执未完成；当前隔离栈已回收，后续线路验收需重新核对并使用获批窗口 |
 | M8 proof bridge | Mihomo renderer/解析 fixture、`crypto.Signer` bridge 合同和本地隔离数据面有测试 | Android Keystore bridge 真实接入、Windows CNG/macOS Keychain、生产 runtime/mTLS 交付和端到端节点握手未完成 |
-| M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口、匿名账号幂等恢复及显式退出后关闭自动恢复；Web/扩展可辨识匿名账号并保留权益状态；AndroidX Keystore 状态与 API instrumentation 已在隔离 API 35 arm64 emulator 上通过 | 5 个 instrumentation cases 通过；local/testing 沙箱的账号恢复幂等已实测。邮箱/手机升级、跨端恢复、PC 扫码及桌面客户端未实现；不得清除现有会员设备数据 |
-| M10 智能路由 | 加权候选、熔断恢复、探测假 driver、持久化接口及 SQLite CAS 健康状态仓库均有离线测试 | 无真实 probe worker/协议探测、定时调度、`SubscriptionRouteService` 接线或客户端线路 UI；D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt |
-| M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android pinned NDK/Go 下的真实 arm64 Mihomo JNI Debug APK、JVM tests 与 lint；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 已存在 | `d952f78` hosted run `44931113306` 五个 jobs 全部成功，包含 Linux NDK native APK build；后续文档提交 run `44931259879` 也全绿。本地 full assemble/JVM tests/lint 与 actionlint 通过。没有压测基线报告、staging、生产制品/回滚、S3/CDN、监控告警或成本预算 |
+| M9 账号统一 | 匿名注册 API（明确同意、恢复密钥哈希、幂等与限流）；Android Debug 同意入口、匿名账号幂等恢复及显式退出后关闭自动恢复；Web/扩展可辨识匿名账号并保留权益状态；AndroidX Keystore 状态与 API instrumentation 已在隔离 API 35 arm64 emulator 上通过 | 5 个 instrumentation cases 通过；local/testing 沙箱恢复幂等已实测。邮箱/手机升级、跨端登录和 PC 扫码授权仍未实现；Windows 账户壳正在独立阶段中，不能当作跨端恢复或 VPN 连接完成；不得清除现有会员设备数据 |
+| M10 智能路由 | 加权候选、熔断恢复、探测假 driver、持久化接口及 SQLite CAS 健康状态仓库均有离线测试；可注入的假驱动 worker/命令正在独立分支实现 | 尚无真实 probe worker/协议探测、生产定时调度、`SubscriptionRouteService` 接线或客户端线路 UI；D3 自动切换范围待用户定，严格设备线路不得绕过 peer revoke/provision/receipt。假驱动只验收状态机与接线，不证明节点在线或稳定 |
+| M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试，以及 Android pinned NDK/Go 下的真实 arm64 Mihomo JNI Debug APK、JVM tests 与 lint；PHP/Web Dockerfiles、k6 场景和 loopback-only smoke 已存在 | `d952f78` hosted run `44931113306` 五个 jobs 全部成功，包含 Linux NDK native APK build；后续文档提交 run `44931259879` 也全绿。本地 full assemble/JVM tests/lint 与 actionlint 通过。Windows 平台构建/凭据存储验证、压测基线、staging、生产制品/回滚、S3/CDN、监控告警或成本预算仍缺 |
 
 | 发布阶段 | 状态 | 下一退出门 |
 | --- | --- | --- |
 | E0 地基 | 部分完成（Android native APK 检查已纳入） | 观察 GitHub Actions Linux native run；补制品可追溯、staging/回滚；合规与 D 决策保留为发布门 |
 | E1 会员数据面放行 | 未通过 | 真实 member profile、双真机复用拒绝、节点撤权回执/最终流量和连接验收 |
 | E2 工程化 | 未完成 | 批量编排、常驻受控 worker、实测容量与热备/回收演练 |
-| E3 四端 | 部分完成 | Android 首批端到端；Windows 桌面客户端建立；macOS/iOS 条件与后续验收 |
+| E3 四端 | 部分完成 | Android 会员真机数据面闭环；Windows 账户壳安全与 Windows 原生构建验证后，再接 Mihomo/proof bridge；macOS/iOS 条件与后续验收 |
 | E4 分发监控 | 未开始 | 用户批准资源/预算后接静态资源 CDN 与可触发告警；CDN 不承载 VPN 数据面 |
 | E5 试运行 | 未开始 | 合规书面门槛、E1–E4、对账/SLO/支持流程均通过后再试点 |
 | E6 多云 / E7 放量 | 未开始 | 第二家厂商 conformance 和蓝绿释放证据；依据容量/成本逐级放量 |
@@ -43,11 +43,11 @@
 
 | 工作包 | 文件/模块边界 | 依赖与退出条件 |
 | --- | --- | --- |
-| A. Android 匿名创建/恢复验收 | `apps/android/**`；真机之外先用 emulator 或隔离 Android profile，不能重置已有会员安装 | 新 installation ID；同意后匿名会话成功、Keystore 密钥跨进程重启可复用；不要求第三台实体手机 |
-| B. M10 探测持久化原型 | `apps/php-api/**` 对应 node health service/测试；与客户端工作分开 | 存储/命令仍使用假驱动和本地数据库；证明重启后熔断状态及过期策略，不连接 AWS/真实节点，不宣称实时稳定 |
-| C. Web/扩展 M9 真实会话联调 | 分别 `apps/web/**`、`apps/extension/**` | API 契约不改；用本地沙箱核对 null email/account_type、权益、下单入口权限和退出状态；不得把 mock 测试称为真实联调 |
-| D. Windows 客户端前期 | 新 `apps/windows/**` 需先做独立设计/构建验证，后续单独分支 | 沿用 Mihomo + proof bridge，设备凭证进 Windows 安全存储；不复用账号级通配订阅冒充严格限设备 |
-| E. CI/压测工程 | `.github/workflows/**`、`loadtest/**` | 只跑本地或获批 staging；不以脚本存在代替基线报告，不向生产或公网压测 |
+| A. Windows 账户壳安全收口 | `apps/windows/**`，分支 `codex/windows-account-shell` | 收紧 Release API origin、定向测试与 Windows 构建/凭据边界；本阶段不含 Mihomo/TUN 或严格限设备验收 |
+| B. M10 本地 probe worker | `apps/php-api/**` 的 health probe 服务、命令和测试，分支 `codex/m10-health-state` | 只用注入假驱动与本地数据库，验证可重复执行、持久熔断状态和过期排除；真实 driver/节点、生产调度另列阶段 |
+| C. E0 制品可追溯性 | `.github/workflows/**`、构建脚本与文档 | 离线生成/校验 commit、版本和 SHA-256 元数据；不上传外部制品库、不部署、不签发生产包 |
+| D. M11 本地压测证据 | `loadtest/**`、验收文档 | 先以 loopback/local 沙箱跑有界控制面场景，记录真实 P50/P95/错误率；不把脚本存在当基线，不压公网/生产 |
+| E. M6/M8 真机与节点闭环 | Android/Node Agent 契约分开验收 | 两台已有真机身份已绑定，不需要第三台手机；会员 profile、proof bridge、节点回执仍需获批隔离窗口和真实节点参数，未就绪前只完成离线代码/测试 |
 
 M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适用账号级还是逐设备线路）、E1 高可用拓扑/SLO 和 E4 资源费用是需用户拍板的项目决策；各自之外的离线契约、测试和模块工作继续推进。合规书面评估、生产 mTLS/运行身份、真实支付商户资料属于上线外部门槛，不阻止本地实现。每个工作包以最新 `origin/main` 开独立分支，阶段通过后 commit，并由主控运行 `ops/merge-worktree.sh <branch>` 合并推送；禁止提交 `.env`、私钥、数据库和临时产物。
 
