@@ -396,6 +396,19 @@ func TestNodeProbeReturnsNodeIdentityAndChallengeOnlyAfterExecutorEcho(t *testin
 	}
 }
 
+func TestNodeProbeWithoutTransportNeverReportsHealthy(t *testing.T) {
+	client, server, _ := newMTLSTestClient(t, NewDataPlaneProbeHandler("node-test", nil))
+	defer server.Close()
+
+	response := postRawJSON(t, client, server.URL+nodeProbePath,
+		`{"challenge":"0000000000000000000000000000000000000000000000000000000000000000"}`)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("probe without a real transport status=%d; want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+	assertProbeError(t, response, "probe_unavailable")
+}
+
 func TestNodeProbeRejectsExecutorEchoMismatch(t *testing.T) {
 	executor := probeExecutorFunc(func(context.Context, []byte) ([]byte, error) {
 		return bytes.Repeat([]byte{0xff}, nodeProbeChallengeBytes), nil

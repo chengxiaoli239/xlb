@@ -67,3 +67,44 @@ func TestRuntimeConfigPathIsRequiredAtStartup(t *testing.T) {
 		t.Fatalf("run() error = %v; want required runtime config error", err)
 	}
 }
+
+func TestProbeListenerMustBeDistinctLoopback(t *testing.T) {
+	tests := []struct {
+		name    string
+		address string
+		wantErr bool
+	}{
+		{name: "disabled by default"},
+		{name: "loopback IP", address: "127.0.0.1:9445"},
+		{name: "localhost", address: "localhost:9445"},
+		{name: "wildcard bind", address: "0.0.0.0:9445", wantErr: true},
+		{name: "public bind", address: "203.0.113.7:9445", wantErr: true},
+		{name: "management address collision", address: "127.0.0.1:9443", wantErr: true},
+		{name: "normalized management port collision", address: "localhost:09443", wantErr: true},
+		{name: "data plane address collision", address: "127.0.0.1:9444", wantErr: true},
+		{name: "invalid address", address: "not-an-address", wantErr: true},
+		{name: "invalid port", address: "127.0.0.1:94450", wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateProbeListenerAddress(test.address, "127.0.0.1:9443", "127.0.0.1:9444")
+			if test.wantErr && err == nil {
+				t.Fatal("expected probe listener address to be rejected")
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("probe listener address rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestProbeServerIsNotConstructedWhenDisabled(t *testing.T) {
+	server, err := newDataPlaneProbeServer("", "node-a", "", "", "")
+	if err != nil {
+		t.Fatalf("disabled probe listener returned error: %v", err)
+	}
+	if server != nil {
+		t.Fatal("disabled probe listener unexpectedly constructed a server")
+	}
+}

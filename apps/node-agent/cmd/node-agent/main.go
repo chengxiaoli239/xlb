@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -66,6 +67,10 @@ func run() error {
 	if err := validateLoopbackAddress(dataAddress); err != nil {
 		return err
 	}
+	probeAddress := os.Getenv("NODE_AGENT_PROBE_LISTEN")
+	if err := validateProbeListenerAddress(probeAddress, address, dataAddress); err != nil {
+		return err
+	}
 	dataPlane, err := agent.NewDataPlane(store, agent.NewPublicTargetDialer())
 	if err != nil {
 		return err
@@ -78,37 +83,86 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	probeServer, err := newDataPlaneProbeServer(probeAddress, nodeID, certificatePath, privateKeyPath, clientCAPath)
+	if err != nil {
+		return err
+	}
 
-	serveError := make(chan error, 1)
-	go func() {
-		serveError <- server.ListenAndServeTLS("", "")
-	}()
-	go func() {
-		serveError <- dataServer.ListenAndServeTLS("", "")
-	}()
+	servers := []*http.Server{server, dataServer}
+	if probeServer != nil {
+		servers = append(servers, probeServer)
+	}
+	serveError := make(chan error, len(servers))
+	for _, httpServer := range servers {
+		go func(server *http.Server) {
+			serveError <- server.ListenAndServeTLS("", "")
+		}(httpServer)
+	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	select {
 	case err := <-serveError:
+		shutdownErr := shutdownServers(servers)
+		if shutdownErr != nil {
+			return shutdownErr
+		}
 		if errors.Is(err, net.ErrClosed) {
 			return nil
 		}
 		return err
 	case <-signals:
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		adminErr := server.Shutdown(ctx)
-		dataErr := dataServer.Shutdown(ctx)
-		if adminErr != nil {
-			_ = server.Close()
-			return adminErr
-		}
-		if dataErr != nil {
-			_ = dataServer.Close()
-			return dataErr
-		}
+		return shutdownServers(servers)
+	}
+}
+
+func newDataPlaneProbeServer(address, nodeID, certificatePath, privateKeyPath, clientCAPath string) (*http.Server, error) {
+	if strings.TrimSpace(address) == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(nodeID) == "" {
+		return nil, errors.New("probe listener requires a node identity")
+	}
+	return agent.NewMTLSServer(address, certificatePath, privateKeyPath, clientCAPath,
+		agent.NewDataPlaneProbeHandler(nodeID, nil))
+}
+
+func validateProbeListenerAddress(address, managementAddress, dataAddress string) error {
+	if strings.TrimSpace(address) == "" {
 		return nil
 	}
+	if err := validateLoopbackAddress(address); err != nil {
+		return errors.New("NODE_AGENT_PROBE_LISTEN must be a distinct loopback address")
+	}
+	_, probePortValue, err := net.SplitHostPort(address)
+	if err != nil {
+		return errors.New("NODE_AGENT_PROBE_LISTEN must be a distinct loopback address")
+	}
+	probePort, err := strconv.Atoi(probePortValue)
+	if err != nil || probePort < 1 || probePort > 65535 {
+		return errors.New("NODE_AGENT_PROBE_LISTEN must be a distinct loopback address")
+	}
+	for _, existingAddress := range []string{managementAddress, dataAddress} {
+		_, existingPortValue, splitErr := net.SplitHostPort(existingAddress)
+		existingPort, portErr := strconv.Atoi(existingPortValue)
+		if splitErr != nil || portErr != nil || probePort == existingPort {
+			return errors.New("NODE_AGENT_PROBE_LISTEN must use a port distinct from the management and data listeners")
+		}
+	}
+	return nil
+}
+
+func shutdownServers(servers []*http.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, server := range servers {
+		if err := server.Shutdown(ctx); err != nil {
+			for _, remaining := range servers {
+				_ = remaining.Close()
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 func validateRuntimeConfig(path, nodeID string) error {
