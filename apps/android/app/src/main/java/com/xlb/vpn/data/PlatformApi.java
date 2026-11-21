@@ -62,6 +62,36 @@ public final class PlatformApi {
         return account;
     }
 
+    public MemberAccount registerAnonymousAccount(boolean userConsented) throws PlatformApiException {
+        if (!userConsented) {
+            throw new PlatformApiException("需要先确认匿名账号使用说明");
+        }
+
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("installation_id", sessionStore.installationId());
+            payload.put("recovery_secret", sessionStore.anonymousRecoverySecret());
+            payload.put("consent", true);
+        } catch (Exception exception) {
+            throw new PlatformApiException("匿名账号注册请求格式不正确", exception);
+        }
+
+        JSONObject data = request("POST", "/api/v1/auth/register-anonymous", payload).optJSONObject("data");
+        MemberAccount account = toMemberAccount(data);
+        if (account == null || account.id.isEmpty() || !"anonymous".equals(account.accountType)) {
+            throw new PlatformApiException("匿名账号注册响应格式不正确");
+        }
+
+        JSONObject session = request("GET", "/api/v1/auth/session", null).optJSONObject("data");
+        if (session == null || !account.id.equals(session.optString("id"))
+                || !"anonymous".equals(session.optString("account_type"))) {
+            sessionStore.clearSession();
+            throw new PlatformApiException("无法恢复匿名账号会话");
+        }
+
+        return account;
+    }
+
     public ClientSnapshot synchronize(MemberAccount account) throws PlatformApiException {
         try {
             ClientSnapshot overview = withOverview(new ClientSnapshot(account, null, null));
@@ -287,18 +317,25 @@ public final class PlatformApi {
         if (object == null || object.isNull("id")) {
             return null;
         }
-        return new MemberAccount(object.optString("id"), object.optString("name"), object.optString("email"));
+        return new MemberAccount(
+                object.optString("id"),
+                object.optString("name"),
+                object.isNull("email") ? "" : object.optString("email"),
+                object.optString("account_type")
+        );
     }
 
     public static final class MemberAccount {
         public final String id;
         public final String name;
         public final String email;
+        public final String accountType;
 
-        public MemberAccount(String id, String name, String email) {
+        public MemberAccount(String id, String name, String email, String accountType) {
             this.id = id;
             this.name = name;
             this.email = email;
+            this.accountType = accountType;
         }
     }
 

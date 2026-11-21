@@ -11,6 +11,7 @@ import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -23,6 +24,7 @@ import javax.crypto.spec.GCMParameterSpec;
 
 public final class SecureSessionStore {
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
+    private static final String ANONYMOUS_RECOVERY_SECRET = "anonymous_recovery_secret";
     private static final String COOKIES = "cookies";
     private static final int GCM_IV_SIZE = 12;
     private static final int GCM_TAG_BITS = 128;
@@ -57,10 +59,29 @@ public final class SecureSessionStore {
         JSONObject state = readState();
         try {
             state.put(INSTALLATION_ID, UUID.randomUUID().toString());
+            state.remove(ANONYMOUS_RECOVERY_SECRET);
         } catch (JSONException exception) {
             throw new IllegalStateException("无法更新设备标识", exception);
         }
         writeState(state);
+    }
+
+    public synchronized String anonymousRecoverySecret() {
+        JSONObject state = readState();
+        String existing = state.optString(ANONYMOUS_RECOVERY_SECRET, "");
+        if (AnonymousRecoveryCredential.isValid(existing)) {
+            return existing;
+        }
+
+        String created = AnonymousRecoveryCredential.generate(new SecureRandom());
+        try {
+            state.put(ANONYMOUS_RECOVERY_SECRET, created);
+        } catch (JSONException exception) {
+            throw new IllegalStateException("无法保存匿名账号恢复凭据", exception);
+        }
+        writeState(state);
+
+        return created;
     }
 
     public synchronized String cookieHeader() {

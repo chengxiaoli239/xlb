@@ -446,7 +446,8 @@ public final class MainActivity extends Activity {
         addSettingsSectionTitle("账户", 0);
         LinearLayout account = card();
         account.addView(text(current.account.name, 17, COLOR_INK, true));
-        account.addView(text(current.account.email, 13, COLOR_MUTED, false), spacedParams(5, 0));
+        String accountLabel = "anonymous".equals(current.account.accountType) ? "匿名账号" : current.account.email;
+        account.addView(text(accountLabel, 13, COLOR_MUTED, false), spacedParams(5, 0));
         content.addView(account, spacedParams(0, 0));
 
         addSettingsSectionTitle("连接偏好", 18);
