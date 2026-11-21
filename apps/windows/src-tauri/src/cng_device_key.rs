@@ -484,7 +484,20 @@ mod tests {
             )
         }, "import public key").unwrap();
         let raw = der_signature_to_raw(&signature).unwrap();
-        assert_eq!(unsafe { NCryptVerifySignature(imported, ptr::null(), digest.as_ptr(), digest.len() as u32, raw.as_ptr(), raw.len() as u32, 0) }, 0);
+        assert_eq!(
+            unsafe {
+                windows_sys::Win32::Security::Cryptography::NCryptVerifySignature(
+                    imported,
+                    ptr::null(),
+                    digest.as_ptr(),
+                    digest.len() as u32,
+                    raw.as_ptr(),
+                    raw.len() as u32,
+                    0,
+                )
+            },
+            0
+        );
         unsafe { NCryptFreeObject(imported); NCryptFreeObject(provider); }
     }
 
