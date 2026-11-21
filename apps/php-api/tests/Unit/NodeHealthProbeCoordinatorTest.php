@@ -75,6 +75,72 @@ class NodeHealthProbeCoordinatorTest extends TestCase
         $this->assertSame($observedAt, $assessment->transition->state->lastProbeAt);
     }
 
+    public function test_probe_sequence_requires_recovery_streak_after_open_circuit(): void
+    {
+        $start = new DateTimeImmutable('2026-11-21T10:00:01Z');
+        $results = [];
+        foreach ([false, false, false, true, true, false, true, true, true] as $index => $succeeded) {
+            $observedAt = $start->modify('+'.($index * 15).' seconds');
+            $results[] = $succeeded
+                ? new NodeHealthProbeResult(true, $observedAt, latencyMs: 35)
+                : new NodeHealthProbeResult(false, $observedAt, failureCode: 'timeout');
+        }
+        $driver = new class($results) implements NodeHealthProbeDriver
+        {
+            /** @var list<NodeHealthProbeResult> */
+            private array $results;
+
+            /**
+             * @param  list<NodeHealthProbeResult>  $results
+             */
+            public function __construct(array $results)
+            {
+                $this->results = $results;
+            }
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                return array_shift($this->results) ?? throw new InvalidArgumentException('No scripted probe result remains.');
+            }
+        };
+        $coordinator = new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker);
+        $state = new NodeHealthState('healthy', 0, 0);
+        $transitions = [];
+        foreach ($results as $_) {
+            $assessment = $coordinator->probe('node-1', $state);
+            $state = $assessment->transition->state;
+            $transitions[] = $assessment->transition;
+        }
+
+        $this->assertSame('unhealthy', $transitions[2]->state->status);
+        $this->assertSame(2, $transitions[4]->state->successStreak);
+        $this->assertSame('unhealthy', $transitions[5]->state->status);
+        $this->assertSame(0, $transitions[5]->state->successStreak);
+        $this->assertSame('unhealthy', $transitions[7]->state->status);
+        $this->assertSame('healthy', $transitions[8]->state->status);
+        $this->assertTrue($transitions[8]->recoveredCircuit);
+    }
+
+    public function test_late_probe_result_does_not_overwrite_newer_circuit_state(): void
+    {
+        $observedAt = new DateTimeImmutable('2026-11-21T10:00:09Z');
+        $driver = new class($observedAt) implements NodeHealthProbeDriver
+        {
+            public function __construct(private readonly DateTimeImmutable $observedAt) {}
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                return new NodeHealthProbeResult(false, $this->observedAt, failureCode: 'timeout');
+            }
+        };
+        $state = new NodeHealthState('unhealthy', 3, 1, $observedAt->modify('+1 second'));
+
+        $assessment = (new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker))->probe('node-1', $state);
+
+        $this->assertTrue($assessment->transition->ignoredAsStale);
+        $this->assertSame($state, $assessment->transition->state);
+    }
+
     public function test_probe_result_rejects_invalid_metrics_and_outcomes(): void
     {
         $this->expectException(InvalidArgumentException::class);
