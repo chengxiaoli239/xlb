@@ -37,6 +37,26 @@ adb -s <设备序列号> shell monkey -p com.xlb.vpn.debug 1
 
 Release 构建的默认 API 地址是保留的 `https://api.xlb.invalid`，在正式 API 域名、证书和移动端认证联调通过之前不会连接旧站。
 
+## 匿名恢复隔离验收
+
+在 Apple Silicon Mac 上创建并启动名为 `xlb-m9-recovery` 的 Android API 35 ARM64 AVD 后，可运行隔离的 Keystore/匿名恢复 instrumentation。脚本要求显式 `EMULATOR_SERIAL`，校验该 serial 是 emulator 且 AVD 名恰好为专用测试名，只对它安装 APK/设置 ADB reverse；会在 `/tmp` 新建 SQLite，拒绝复用已占用的 API 端口 `4181`，传入 `disposable_avd=true` 与 `isolated_api=true`，结束后停止自身 API 并删除本次创建的临时目录。
+
+```sh
+cd apps/android
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+"$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+  --name xlb-m9-recovery \
+  --package 'system-images;android-35;google_apis;arm64-v8a' \
+  --device pixel_2
+"$ANDROID_HOME/emulator/emulator" -avd xlb-m9-recovery -no-window -no-audio &
+adb -s emulator-5554 wait-for-device
+until [ "$(adb -s emulator-5554 shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; do sleep 1; done
+EMULATOR_SERIAL=emulator-5554 \
+  ./scripts/test-anonymous-recovery-emulator.sh
+```
+
+该验收会清除专用 emulator 应用的 `secure_client_state` 偏好，因此只能指向 disposable AVD；物理设备会在清理前被拒绝。它使用 local/testing seed 和临时数据库，只证明隔离 Android Keystore/会话恢复流程，不证明真实支付、会员线路、严格设备限额或生产节点可用。不要通过 `adb devices` 自动选择目标 serial。
+
 构建要求 Go 1.24、Android NDK `29.0.14206865`、JDK 21 和 Android SDK 35。Mihomo 版本固定在 `core-native/go.mod`，下载内容按 `go.sum` 校验。当前只构建 arm64-v8a，其他 CPU 架构尚未配置。
 
 ## 验收边界
