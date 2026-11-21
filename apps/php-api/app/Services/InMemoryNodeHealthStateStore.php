@@ -26,4 +26,15 @@ final class InMemoryNodeHealthStateStore implements NodeHealthStateStore
 
         $this->states[$nodeId] = $state;
     }
+
+    public function compareAndSwap(string $nodeId, ?NodeHealthState $expected, NodeHealthState $next): bool
+    {
+        if ($this->get($nodeId) != $expected) {
+            return false;
+        }
+
+        $this->put($nodeId, $next);
+
+        return true;
+    }
 }

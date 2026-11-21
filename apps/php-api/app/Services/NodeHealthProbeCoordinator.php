@@ -18,13 +18,16 @@ final class NodeHealthProbeCoordinator
             throw new InvalidArgumentException('Node ID is required for health probing.');
         }
 
-        $currentState = $this->stateStore->get($nodeId) ?? new NodeHealthState('healthy', 0, 0);
         $result = $this->driver->probe($nodeId);
-        $transition = $this->circuitBreaker->record($currentState, $result->succeeded, $result->observedAt);
-        if (! $transition->ignoredAsStale) {
-            $this->stateStore->put($nodeId, $transition->state);
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $storedState = $this->stateStore->get($nodeId);
+            $currentState = $storedState ?? new NodeHealthState('healthy', 0, 0);
+            $transition = $this->circuitBreaker->record($currentState, $result->succeeded, $result->observedAt);
+            if ($transition->ignoredAsStale || $this->stateStore->compareAndSwap($nodeId, $storedState, $transition->state)) {
+                return new NodeHealthProbeAssessment($result, $transition);
+            }
         }
 
-        return new NodeHealthProbeAssessment($result, $transition);
+        throw new \RuntimeException('Node health state could not be updated after concurrent changes.');
     }
 }
