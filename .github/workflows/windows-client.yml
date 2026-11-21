@@ -1,0 +1,61 @@
+name: Windows account shell
+
+on:
+  push:
+    paths:
+      - .github/workflows/windows-client.yml
+      - apps/windows/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+  pull_request:
+    paths:
+      - .github/workflows/windows-client.yml
+      - apps/windows/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  windows-account-shell:
+    name: MSVC build and Credential Manager smoke
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust MSVC toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test and build account shell UI
+        run: |
+          pnpm --filter @xlb/windows test
+          pnpm --filter @xlb/windows build
+
+      - name: Test Windows native credential store
+        run: cargo test --locked --target x86_64-pc-windows-msvc --manifest-path apps/windows/src-tauri/Cargo.toml
+
+      - name: Build Windows MSVC target
+        run: cargo build --locked --target x86_64-pc-windows-msvc --manifest-path apps/windows/src-tauri/Cargo.toml

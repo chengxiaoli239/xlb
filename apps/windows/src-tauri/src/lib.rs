@@ -402,6 +402,8 @@ fn is_member(user: &PublicUser) -> bool {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    #[cfg(target_os = "windows")]
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[derive(Default)]
     struct MemoryStore(Mutex<Option<String>>);
@@ -491,6 +493,39 @@ mod tests {
             KeyringCredentialStore::for_api(&first).account,
             KeyringCredentialStore::for_api(&second).account
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_credential_store_round_trips_and_clears_a_temporary_entry() {
+        struct Cleanup<'a>(&'a KeyringCredentialStore);
+
+        impl Drop for Cleanup<'_> {
+            fn drop(&mut self) {
+                let _ = self.0.clear();
+            }
+        }
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let store = KeyringCredentialStore {
+            account: format!(
+                "{KEYRING_USER_PREFIX}@ci-test-{}-{nonce}",
+                std::process::id()
+            ),
+        };
+        let _cleanup = Cleanup(&store);
+
+        store.clear().unwrap();
+        store.save("temporary-test-only-cookie").unwrap();
+        assert_eq!(
+            store.load().unwrap().as_deref(),
+            Some("temporary-test-only-cookie")
+        );
+        store.clear().unwrap();
+        assert_eq!(store.load().unwrap(), None);
     }
 
     #[test]
