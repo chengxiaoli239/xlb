@@ -15,7 +15,7 @@
 
 ## 1. 现状事实（实测，非推测）
 
-> 本节起初盘点于 2026-11-18/19；账号、M10 算法和工具链已在 2026-11-21/22 更新。发生冲突时以 `docs/member-connection-prd.md` 顶部进度和下方 2026-11-21 离线进度为准；以下表格保留底层运行链路缺口，不把离线原型误记为生产接线。
+> 本节起初盘点于 2026-11-18/19；账号、M10 算法和工具链已在 2026-11-21/22 更新。发生冲突时以 `docs/member-connection-prd.md` 顶部进度为准；以下表格保留底层运行链路缺口，不把离线原型误记为生产接线。
 
 ### 1.1 账号体系 —— 与"旧版行为"不一致
 
@@ -163,7 +163,16 @@
 - **D3 智能线路口径**：(a) 仅账号级兼容线路支持 url-test 自动选路，严格设备线路保持单 peer 受控切换；(b) 全部线路都做自动选路（需重做设备绑定语义）。推荐 a，避免绕过严格设备限制。
 - **D4 资源批准**：是否批准 S3/CloudFront/监控/压测资源的创建与费用（第 4 节）？是否沿用 `xlb-ops` root 身份操作（root 不受权限边界限制，但有安全考量）？
 
-2026-11-21 离线进度：`apps/php-api/app/Services/NodeRoutingPolicy.php` 提供 M10 候选排序算法原型，默认健康 TTL 30 秒、70% 容量水位熔断，并按管理权重、容量、延迟、丢包与 CPU headroom 做 affinity 加权排序；4,096 affinity key 的 1:3 权重模拟通过 2% 分配误差门。纯状态 `NodeHealthCircuitBreaker` 通过连续 3 次失败熔断、连续 3 次成功恢复和乱序 probe 忽略测试；路由算法现可注入熔断状态，并排除熔断打开、无探测时间或探测过期的节点。另有可注入 `NodeHealthProbeDriver` 契约与 coordinator 假驱动测试，将观测结果传入熔断器，覆盖失败开路、恢复滞回、中断重置及迟到结果忽略；`InMemoryNodeHealthStateStore` 让多次假探测自动延续熔断状态且不覆盖较新结果。以上仍未接入真实网络探测、持久化、定时 worker、`SubscriptionRouteService` 或客户端，不能代表生产调度或节点稳定性验收。D3 的严格设备线路自动选路范围仍需用户拍板；没有因此改变设备绑定策略。
+2026-11-21 离线进度：`apps/php-api/app/Services/NodeRoutingPolicy.php` 提供 M10 候选排序算法原型，默认健康 TTL 30 秒、70% 容量水位熔断，并按管理权重、容量、延迟、丢包与 CPU headroom 做 affinity 加权排序；4,096 affinity key 的 1:3 权重模拟通过 2% 分配误差门。纯状态 `NodeHealthCircuitBreaker` 通过连续 3 次失败熔断、连续 3 次成功恢复和乱序 probe 忽略测试；路由算法现可注入熔断状态，并排除熔断打开、无探测时间或探测过期的节点。另有可注入 `NodeHealthProbeDriver` 契约与 coordinator 假驱动测试，将观测结果传入熔断器，覆盖失败开路、恢复滞回、中断重置及迟到结果忽略；`InMemoryNodeHealthStateStore` 让多次假探测自动延续熔断状态且不覆盖较新结果。该段记录当时尚未持久化/worker/接路由的状态；这些部分后续已由下方快照更新。D3 的严格设备线路自动选路范围仍需用户拍板；没有因此改变设备绑定策略。
+
+### 2026-11-22 当前 M9/M10/M11 实现快照
+
+- M9 匿名注册 API、Android 明确同意与匿名恢复已在隔离 API 35 arm64 emulator 上完成 Keystore/API instrumentation；Web 和扩展能呈现匿名账号权益。邮箱/手机升级、扫码 PC 授权和真实跨端恢复仍缺。
+- Windows `apps/windows` 已有 Tauri/React 账户壳，明确不含 VPN 数据面。路径限定 MSVC/Credential Manager workflow `44945777899` 正在运行，完成前不宣称 Windows 原生验证通过。
+- M10 已有 SQLite CAS 健康状态仓库、默认关闭且缺 driver 时 fail closed 的一次性 worker，以及默认关闭的 `SubscriptionRouteService` 持久探测状态过滤。没有真实协议 probe driver 或 production scheduler；不能将 Agent `/healthz` 单独当作数据面健康。
+- M11 已完成本机临时 SQLite / PHP 开发服务器 80 请求、并发 1/4 smoke，P95 约 3.7–3.9ms / 13.7–14.1ms、错误率 0%；此结果不代表生产容量、3000 并发、节点稳定或 VPN 可用。
+
+历史目标中的每 15 秒协议探测、3000 并发、CDN/S3、CloudWatch/SNS、生产 scheduler 和负载阈值仍是待实施/审批事项，不能因有离线原型而标成完成。M6 两台真机的独立 P-256 身份已满足；线路下复制拒绝和节点撤权回执仍未验收，不需要第三台实体手机。完整状态见会员 PRD 顶部和上线工程总体规划 §0.1。
 
 ## 6. 风险与红线
 

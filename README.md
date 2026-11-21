@@ -69,8 +69,8 @@ pnpm dev
 - 正式会员节点的用户级鉴权、到期断开、流量采集和会话迁移。管理员独立 AWS 测试节点的自动部署、真实协议验证及到期整栈回收已接通，见 [节点运维](docs/node-retirement-and-reclamation.md)。
 - Android 已有原生 Debug 原型（登录、设备 challenge、Mihomo TUN、匿名注册同意）；还未验收真实会员节点/bridge、跨重启 Keystore 恢复和撤权断流，Release 不是可发布成品。
 - Web 会员控制台和 Chrome 扩展原型已在本地 API 上使用会话；匿名身份展示/扩展订阅展示有 mock 测试。扩展未完成浏览器商店发布/真实会员线路验收。
-- Windows、macOS、iOS 自有客户端工程与系统安全存储/隧道仍未实现；Android/Windows 先行，macOS/iOS 后续。
+- Windows 已有 Tauri/React 账户壳（登录、恢复、权益/设备摘要），路径限定 Windows hosted run `44945777899` 的 MSVC build 与临时 Credential Manager 测试通过；Mihomo/TUN/proof bridge 数据面、安装签名和运行验收尚未实现。macOS/iOS 自有客户端仍未实现；Android/Windows 先行，macOS/iOS 后续。
 - Clash Verge Rev / Clash Mi 的真实迅连宝会员逐设备线路导入、复用拒绝与撤权仍未验收；现有 YAML/保留地址和第三方测试订阅不算会员节点支持。
 - 生产部署和商用合规审查。
 
-当前全景、M1–M11/E0–E7 状态、并行工作包和发布阻塞门见 [上线工程总体规划 §0.1](docs/launch-engineering-master-plan.md)。近期并行队列是 Android 匿名创建的隔离安装验证与 M10 健康状态持久化原型；二者都不依赖云资源。真实会员隔离线路/节点回执、生产 mTLS/合规书面结论和需拍板的账号升级/路由口径属于后续放行门。
+当前全景、M1–M11/E0–E7 状态、并行工作包和发布阻塞门见 [上线工程总体规划 §0.1](docs/launch-engineering-master-plan.md)，逐阶段事实以 PRD 顶部开发进度为准。Android 匿名账号恢复已在隔离 API 35 arm64 emulator 完成 instrumentation；M10 有持久健康状态、默认关闭 fake-driver worker 和默认关闭路由过滤，但没有真实 probe driver 或生产调度；M11 已有 80 请求/并发 1 与 4 的本机临时 SQLite smoke 报告，不是生产容量基线。Windows 账户壳 MSVC build 和 Credential Manager 临时往返已由 hosted run `44945777899` 验证，但 Mihomo/TUN/proof bridge 尚缺。真实会员隔离线路/节点回执、生产 mTLS/合规书面结论和需拍板的账号升级/路由口径仍属于放行门。M6 现有两台真机各自独立 P-256 身份已就绪，不需要第三台手机；会员线路下复制拒绝与撤权回执仍待验收。
