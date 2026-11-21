@@ -30,6 +30,8 @@ function selectedUrl() {
 function clearMember() {
   subscription = null;
   element('member').hidden = true;
+  element('account-notice').hidden = true;
+  element('account-notice').textContent = '';
   element('copy').disabled = true;
   element('subscription-address').textContent = '尚未准备凭证';
 }
@@ -52,7 +54,12 @@ async function syncMember() {
     const [overview, subscriptions] = await Promise.all([api('/api/v1/me/overview'), api('/api/v1/me/subscriptions')]);
     if (overview.user.role !== 'member' || overview.user.id !== current.id) throw new Error('登录会话已切换，请重新同步。');
     subscription = subscriptions.find((item) => item.status === 'active' && item.url && (!item.expires_at || Date.parse(item.expires_at) > Date.now())) ?? null;
-    element('account-name').textContent = current.name;
+    const isAnonymous = current.account_type === 'anonymous';
+    element('account-name').textContent = isAnonymous ? '匿名账户' : current.name;
+    element('account-notice').hidden = !isAnonymous;
+    element('account-notice').textContent = isAnonymous
+      ? '这是匿名账户，暂不支持跨设备迁移；已购权益与订阅仍按当前账户状态显示。'
+      : '';
     const entitlement = overview.entitlement;
     element('usage').textContent = entitlement ? `${entitlement.data_used_gb} / ${entitlement.traffic_gb} GB` : '暂无有效套餐';
     element('plan-name').textContent = entitlement?.plan_name ?? '可提前准备订阅';

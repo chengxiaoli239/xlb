@@ -13,6 +13,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .brand small { max-width: 160px; display: block; overflow: hidden; color: #bad5c9; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .vip-button { min-height: 39px; padding: 8px 15px; flex: none; border: 0; border-radius: 9px; background: #147c66; color: #fff; font-size: 14px; font-weight: 650; }
 main { padding: 22px 24px 0; }
+.account-notice { margin: 0 0 16px; padding: 10px 12px; border-left: 3px solid #b58222; background: #fff7e5; color: #765719; font-size: 13px; line-height: 1.65; }
 .usage-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #64776e; font-size: 14px; }
 .usage-heading button { min-height: 32px; padding: 0 6px; border: 0; background: none; color: #147c66; font-size: 13px; }
 .usage-values { margin: 5px 0 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px 10px; }

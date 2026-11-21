@@ -30,7 +30,7 @@ function createPopup({ responses = {}, clipboardError = false } = {}) {
   const ids = [
     'message', 'member', 'copy', 'subscription-address', 'refresh', 'retry',
     'account-name', 'signed-out', 'usage', 'plan-name', 'usage-progress',
-    'expiry', 'sync-state',
+    'expiry', 'sync-state', 'account-notice',
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, new ElementStub()]));
   const formats = ['auto', 'clash', 'mihomo'].map((format, index) => {
@@ -141,6 +141,26 @@ test('有效会员显示套餐、用量和到期日，默认格式为自动识�
   assert.equal(popup.requests.every(({ options }) => options.credentials === 'include'), true);
   assert.equal(popup.elements['sync-state'].textContent.includes('已连接'), false);
   assert.equal(popupHtml.includes('自动连接'), false);
+});
+
+test('匿名账户明确显示身份与跨设备限制，但保留已有权益和有效订阅', async () => {
+  const responses = memberResponses({
+    status: 'active', url: '/subscribe/anonymous-token', expires_at: '2099-01-01T00:00:00Z',
+  });
+  responses['/api/v1/auth/session'] = {
+    id: 7, role: 'member', account_type: 'anonymous', name: '匿名会员', email: null,
+  };
+
+  const popup = createPopup({ responses });
+  await popup.settled();
+
+  assert.equal(popup.elements['account-name'].textContent, '匿名账户');
+  assert.equal(popup.elements['account-notice'].hidden, false);
+  assert.match(popup.elements['account-notice'].textContent, /暂不支持跨设备迁移/);
+  assert.equal(popup.elements.usage.textContent, '3 / 20 GB');
+  assert.equal(popup.elements.copy.disabled, false);
+  assert.equal(popup.elements['subscription-address'].textContent, '127.0.0.1 / subscribe / ••••••••');
+  assert.match(popup.elements.message.textContent, /VIP 续费完成后返回这里/);
 });
 
 test('已过期或撤权的凭证不可复制，并提示前往订阅页准备凭证', async (t) => {

@@ -15,6 +15,7 @@
     <main>
       <section id="signed-out" class="signed-out" hidden><h1>登录你的会员账户</h1><p>沿用会员中心的登录状态，自动同步到期时间和固定订阅。</p><button type="button" class="primary" data-page="login">打开会员登录</button></section>
       <section id="member" hidden>
+        <p id="account-notice" class="account-notice" role="status" hidden></p>
         <div class="usage-heading"><span>套餐周期累计流量</span><button type="button" id="refresh" aria-label="刷新会员状态">刷新</button></div>
         <div class="usage-values"><b id="usage">—</b><span id="plan-name">—</span></div>
         <progress id="usage-progress" max="100" value="0" aria-label="套餐流量用量"></progress>
