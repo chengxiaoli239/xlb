@@ -3,6 +3,8 @@
 日期：2026-11-19
 状态（2026-11-20 更新）：原计划范围与 `$1` 预算上限已获批；实验 IAM 栈 `xlb-lab-access-usw2` 和单台 `t3.small` 节点栈 `xlb-lab-us-20261119-m5m6` 曾创建。M5 的 12 进程争 3 名额通过；旧 M6 证据不满足身份拒绝归因、有效 peer 重连及撤权最终回执等放行标准。清除 HTTP/HTTPS/ALL proxy 环境变量并设置 `NO_PROXY=*` 后，`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `arn:aws:iam::289069331089:root`。只读盘点显示节点栈仍为 `CREATE_COMPLETE`，其 EC2 实例 ID 仍列在栈资源中，但 EC2 `describe-instances` 无返回；相关 EBS 卷和 ENI 查询无结果；安全组 `sg-0db2cef785cbeeba3` 仍存在，且到期 Scheduler `xlb-lab-us-20261119-m5m6-expiry` 仍为 ENABLED，计划时间已过。实验 IAM 栈仍为 `CREATE_COMPLETE`，`XlbLabSsmRole`、`XlbLabExpiryRole` 与 `XlbLabSsmProfile` 均存在。因此节点资源栈和实验权限栈尚未完整回收。此次仅做只读查询，没有创建、删除或延长任何资源，未取得 M6 四项新证据。以下旧状态说明均为历史记录，当前结论以本段为准。
 
+**最新复测（2026-11-21）**：按获批范围新建实验 IAM 栈与独立节点栈 `xlb-lab-us-20261121-m5m6`，单台 `us-west-2 t3.small`、60 分钟 TTL、预算上限 `$1`；EC2 两项状态检查转为 `ok`、SSM `Online`，安全组确认无入站且仅 TCP 443 出站。隔离 live harness 实测通过：12 个进程争 3 槽位接受数恰为 3；在活动容量有空余时，复制身份同时及错峰连接均由节点直接返回 `403`；另一独立合成 peer 可用；匹配撤权请求得到 `confirmed_test` 回执及非零最终上传/下载字节，撤权后原身份重连 `403`。这些是自动生成的两个不同 P-256 私钥合成 peer，不是两台会员真机或生产节点证据。测试结束后节点栈和实验 IAM 栈均已删除；节点为 `terminated`，卷、ENI、安全组、Scheduler、公网地址及实验 IAM 角色/profile 均只读核验不存在。本次仅为获批范围内创建/删除，无额外资源、入站规则或 TTL 延期。Harness 的空闲会话归零等待已从 15 秒调整为 1 分钟，以超过 Agent 35 秒 HTTP idle timeout；改后 live harness 通过。
+
 本地计划复核：2026-11-19。`apps/node-agent` 已有离线 Go peer-store 核心和多进程容量测试（12 个进程争 3 个槽位）；本复核没有重复 AWS 只读盘点。
 
 本地 harness 校准：隔离 Agent 新增 mTLS `GET /v1/test/status`，只暴露活动会话数与容量；M5 后等待活动会话归零，身份拒绝前确认有空位，并直接检查节点返回 `403`。本地测试通过，修改后尚未云端复验。
@@ -111,14 +113,14 @@ ops/aws-cli --profile xlb-ops --region us-west-2 ssm start-session \
 
 ### 本轮实际回收异常
 
-2026-11-19 02:58 UTC 前的最后一次成功盘点看到实例 `i-09e469b6e3501b495` 仍为 `running`，节点栈和实验 IAM 栈均为 `CREATE_COMPLETE`。TTL 过后于 03:06 UTC 尝试删除节点栈，`xlb-ops` 返回 `ExpiredToken`，AWS 未接受删除请求；尝试同一 profile 的 SSO 登录时发现其不是 SSO 配置，因此没有切换或轮换身份。**当前不得声称实例已终止、CloudFormation 栈已删除或费用已停止。**实例内 TTL/Scheduler 应触发终止，但此结果尚未回查。待同一身份恢复后先检查实例、两个栈和资源清单；若实例仍在则立即按已批准标签范围删节点栈；核实 EBS/ENI/安全组/Scheduler 和公网 IPv4 后删 `xlb-lab-access-usw2` IAM 栈，并确认实验角色/配置文件清除。不得延长 TTL、重建节点或扩大权限。
+2026-11-19 02:58 UTC 前的最后一次成功盘点看到实例 `i-09e469b6e3501b495` 仍为 `running`，节点栈和实验 IAM 栈均为 `CREATE_COMPLETE`。TTL 过后于 03:06 UTC 尝试删除节点栈，`xlb-ops` 返回 `ExpiredToken`，AWS 未接受删除请求；当时未切换或轮换身份。该段仅保留故障发生时的历史证据。2026-11-21 已按本计划获批范围重新盘点、复测并完成独立栈回收，最新实测及无残留证据见本文顶部“最新复测”；不得将 11-19 的旧栈 ID 与本次栈混为一谈，也不声称账单最终结清。
 
 ## 尚需用户/外部提供
 
-1. 有效的隔离会员会话与可撤销测试设备；不要发送密码或订阅私钥。节点协议测试会用合成隔离 peer，不替代会员购买/退款链路验收。
+1. local/testing 隔离会员会话可由仓库沙箱自给，不再是外部依赖；真机会员链路要覆盖退款/撤权时仍需有效测试权益与线路，账号凭据不得进入报告或仓库。
 2. 生产专用 mTLS client cert/key/CA 的受控密钥注入条件（不进仓库或聊天）；隔离节点使用一次性 test CA。
-3. 两个可用于 M6 会员验收的独立 proof-capable 设备身份；普通 Clash Verge 不满足挑战签名条件。桥接测试使用不同私钥的隔离身份，只证明协议拒绝复制身份。
+3. 两个真机安装均需各自完成设备 challenge 签名绑定后，才能做 M6 会员身份验收。用户已提供两台安卓真机；已知 VOG-AL10 已绑定 P-256，ALT-AN00 旧记录的 `public_key` / `bound_at` 为空，需按客户端既有设备流程重新绑定。普通 Clash Verge 不满足挑战签名条件。本次云端 bridge harness 的两个不同密钥身份只证明隔离协议拒绝复制身份，不替代会员实机证据。
 4. 若验收目标扩展到公网 VPN/TUN 或运营商质量，另行确认测试源 IP /32、协议端口和开放时限；本计划的 SSM-only 节点没有公网入站。
 5. iOS 验收范围、真机和代码签名/分发条件。
 
-AWS 只读身份和资源盘点此前通过，实验资源范围与 `$1` 预算已获批准；当前 `xlb-ops` 会话过期，过期节点栈清理和 IAM 栈回收仍待同一身份恢复后完成。生产签发保持关闭；未拿到匹配的节点撤权回执前不宣称断流或严格限制真实客户端设备，不宣称可以发布。
+2026-11-21 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 实测有效，返回 `arn:aws:iam::289069331089:root`。本次节点栈和实验 IAM 栈均已回收，未发现残留；这不代表账单最终结算。剩余会员真机依赖是 ALT-AN00 完成独立 P-256 challenge 绑定，并在有可用隔离线路时复测会员会话；生产 mTLS 凭证、安全区适配和 iOS 验收仍未完成。生产签发保持关闭；合成测试回执不代表真实会员节点撤权；未取得对应真实节点回执前不宣称断流或严格限制真实客户端设备，不宣称可以发布。

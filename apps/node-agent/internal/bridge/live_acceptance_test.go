@@ -67,7 +67,7 @@ func TestLiveNodeProtocolAcceptance(t *testing.T) {
 	defer adminTransport.CloseIdleConnections()
 	peers := createLivePeers(t, config, adminClient, 12)
 	runLiveProcessCapacityCompetition(t, config, peers, config.expectedSlots)
-	waitForLiveSessions(t, adminClient, config, 0, 15*time.Second)
+	waitForLiveSessions(t, adminClient, config, 0, time.Minute)
 	assertLiveDeviceProofAndRevocation(t, config, adminClient, peers[0], peers[1])
 }
 
@@ -403,7 +403,7 @@ func assertLiveDeviceProofAndRevocation(t *testing.T, config liveAcceptanceConfi
 
 	_ = secure.Close()
 	_ = firstBridge.Close()
-	waitForLiveSessions(t, adminClient, config, 0, 15*time.Second)
+	waitForLiveSessions(t, adminClient, config, 0, time.Minute)
 	secondBridge, secondListener := startLiveBridge(t, config, second.certificate, roots)
 	secondConnection, ownReply := connectSOCKS(t, secondListener.Addr().String(), "checkip.amazonaws.com", 443)
 	if ownReply != 0 {
@@ -413,7 +413,7 @@ func assertLiveDeviceProofAndRevocation(t *testing.T, config liveAcceptanceConfi
 	assertLiveSessionCount(t, adminClient, config, 1)
 	_ = secondConnection.Close()
 	_ = secondBridge.Close()
-	waitForLiveSessions(t, adminClient, config, 0, 15*time.Second)
+	waitForLiveSessions(t, adminClient, config, 0, time.Minute)
 
 	assertLiveCapacityAvailable(t, adminClient, config)
 	staggeredStatus := requestLiveDataPlane(t, config, spoofedCertificate, roots)
@@ -452,7 +452,7 @@ func assertLiveDeviceProofAndRevocation(t *testing.T, config liveAcceptanceConfi
 	}
 	_ = secure.Close()
 	_ = firstBridge.Close()
-	waitForLiveSessions(t, adminClient, config, 0, 15*time.Second)
+	waitForLiveSessions(t, adminClient, config, 0, time.Minute)
 	assertLiveCapacityAvailable(t, adminClient, config)
 	blockedStatus := requestLiveDataPlane(t, config, first.certificate, roots)
 	if blockedStatus != http.StatusForbidden {
