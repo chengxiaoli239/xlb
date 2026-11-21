@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\ConfiguredNodeDataPlaneProbeTransport;
 use App\Services\DisabledNodePeerProvisioningDriver;
 use App\Services\DisabledNodePeerRevocationDriver;
 use App\Services\DisabledNodePeerSubscriptionBindingDriver;
@@ -10,6 +11,10 @@ use App\Services\HttpNodePeerProvisioningDriver;
 use App\Services\HttpNodePeerRevocationDriver;
 use App\Services\HttpNodePeerSubscriptionBindingDriver;
 use App\Services\HttpNodePeerUsageDriver;
+use App\Services\MtlsNodeHealthProbeDriver;
+use App\Services\NodeDataPlaneProbeFailure;
+use App\Services\NodeDataPlaneProbeTransportException;
+use App\Services\NodeHealthProbeDriver;
 use App\Services\NodePeerProvisioningDriver;
 use App\Services\NodePeerRevocationDriver;
 use App\Services\NodePeerSubscriptionBindingDriver;
@@ -64,6 +69,25 @@ class AppServiceProvider extends ServiceProvider
 
             return $app->make(DisabledNodePeerUsageDriver::class);
         });
+
+        if (config('node_health_probe.transport') === 'http') {
+            $this->app->bind(NodeHealthProbeDriver::class, function (): NodeHealthProbeDriver {
+                $endpoints = config('node_health_probe.endpoints');
+                if (! is_array($endpoints)) {
+                    throw new NodeDataPlaneProbeTransportException(NodeDataPlaneProbeFailure::SERVER_IDENTITY_UNVERIFIED);
+                }
+                $transport = new ConfiguredNodeDataPlaneProbeTransport(
+                    $endpoints,
+                    config('node_health_probe.client_certificate'),
+                    config('node_health_probe.client_key'),
+                );
+
+                return new MtlsNodeHealthProbeDriver(
+                    $transport,
+                    max(1, min(30_000, (int) config('node_health_probe.timeout_ms', 5_000))),
+                );
+            });
+        }
     }
 
     /**
