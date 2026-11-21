@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AnonymousAccountController;
 use App\Http\Controllers\ClientCatalogController;
 use App\Http\Controllers\DeviceBindingController;
 use App\Http\Controllers\MemberDeviceController;
@@ -20,6 +21,7 @@ Route::get('/api/health', [PlatformController::class, 'health']);
 Route::get('/api/v1/auth/csrf', [PlatformController::class, 'csrf']);
 Route::get('/api/v1/auth/session', [PlatformController::class, 'session']);
 Route::post('/api/v1/auth/login', [PlatformController::class, 'login'])->middleware('throttle:5,1');
+Route::post('/api/v1/auth/register-anonymous', [AnonymousAccountController::class, 'register'])->middleware('throttle:5,1');
 Route::post('/api/v1/auth/logout', [PlatformController::class, 'logout']);
 Route::post('/api/v1/client/heartbeat', [MemberDeviceController::class, 'heartbeat'])->middleware(['auth', 'throttle:60,1']);
 Route::get('/api/v1/catalog/plans', [PlatformController::class, 'catalog']);

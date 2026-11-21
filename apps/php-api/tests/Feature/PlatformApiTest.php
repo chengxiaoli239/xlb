@@ -52,6 +52,102 @@ class PlatformApiTest extends TestCase
             ->assertStatus(429);
     }
 
+    public function test_anonymous_registration_requires_explicit_consent_and_authenticates_new_account(): void
+    {
+        $installationId = '7be684d8-b65a-4298-9060-25f85cf8ae19';
+        $recoverySecret = $this->recoverySecret('A');
+
+        $this->postJson('/api/v1/auth/register-anonymous', [
+            'installation_id' => $installationId,
+            'recovery_secret' => $recoverySecret,
+            'consent' => false,
+        ])->assertStatus(400)->assertJsonPath('error.code', 'consent_required');
+        $this->assertDatabaseCount('anonymous_accounts', 0);
+
+        $created = $this->postJson('/api/v1/auth/register-anonymous', [
+            'installation_id' => $installationId,
+            'recovery_secret' => $recoverySecret,
+            'consent' => true,
+        ])->assertCreated()
+            ->assertJsonPath('data.account_type', 'anonymous')
+            ->assertJsonPath('data.email', null)
+            ->assertJsonPath('data.created', true)
+            ->assertJsonMissingPath('data.recovery_secret')
+            ->json('data');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $created['id'],
+            'role' => 'member',
+            'account_type' => 'anonymous',
+            'email_verified_at' => null,
+        ]);
+        $this->assertDatabaseHas('anonymous_accounts', [
+            'installation_id' => $installationId,
+            'user_id' => $created['id'],
+            'recovery_secret_hash' => hash('sha256', base64_decode(strtr($recoverySecret, '-_', '+/').'=', true)),
+        ]);
+        $this->assertNotSame($recoverySecret, DB::table('anonymous_accounts')->where('user_id', $created['id'])->value('recovery_secret_hash'));
+        $this->assertSame(0, DB::table('entitlements')->where('user_id', $created['id'])->count());
+        $this->getJson('/api/v1/auth/session')->assertOk()
+            ->assertJsonPath('data.id', $created['id'])
+            ->assertJsonPath('data.account_type', 'anonymous');
+    }
+
+    public function test_anonymous_registration_is_idempotent_only_with_matching_recovery_secret(): void
+    {
+        $payload = [
+            'installation_id' => '7be684d8-b65a-4298-9060-25f85cf8ae19',
+            'recovery_secret' => $this->recoverySecret('B'),
+            'consent' => true,
+        ];
+
+        $first = $this->postJson('/api/v1/auth/register-anonymous', $payload)
+            ->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/auth/register-anonymous', $payload)
+            ->assertOk()->assertJsonPath('data.id', $first)->assertJsonPath('data.created', false);
+        $this->postJson('/api/v1/auth/register-anonymous', [...$payload, 'recovery_secret' => $this->recoverySecret('C')])
+            ->assertStatus(409)->assertJsonPath('error.code', 'anonymous_registration_conflict');
+
+        DB::table('users')->where('id', $first)->update(['account_type' => 'full']);
+        $this->postJson('/api/v1/auth/register-anonymous', $payload)
+            ->assertStatus(409)->assertJsonPath('error.code', 'anonymous_registration_conflict');
+
+        $this->assertDatabaseCount('anonymous_accounts', 1);
+        $this->assertDatabaseCount('users', 3);
+    }
+
+    public function test_anonymous_registration_rejects_reused_member_installations_and_invalid_secrets(): void
+    {
+        $this->postJson('/api/v1/auth/register-anonymous', [
+            'installation_id' => 'not-a-uuid',
+            'recovery_secret' => $this->recoverySecret('D'),
+            'consent' => true,
+        ])->assertStatus(400)->assertJsonPath('error.code', 'validation_error');
+
+        $this->postJson('/api/v1/auth/register-anonymous', [
+            'installation_id' => '7be684d8-b65a-4298-9060-25f85cf8ae19',
+            'recovery_secret' => str_repeat('B', 43),
+            'consent' => true,
+        ])->assertStatus(400)->assertJsonPath('error.code', 'validation_error');
+
+        DB::table('member_devices')->insert([
+            'id' => 'member-installation-conflict',
+            'user_id' => 'user-member',
+            'installation_id' => '2e3392a7-1d88-48a7-b1da-a6a43ef2fe13',
+            'name' => '已有会员设备',
+            'platform' => 'android',
+            'status' => 'registered',
+            'created_at' => now()->utc()->toIso8601String(),
+            'updated_at' => now()->utc()->toIso8601String(),
+        ]);
+        $this->postJson('/api/v1/auth/register-anonymous', [
+            'installation_id' => '2e3392a7-1d88-48a7-b1da-a6a43ef2fe13',
+            'recovery_secret' => $this->recoverySecret('D'),
+            'consent' => true,
+        ])->assertStatus(409)->assertJsonPath('error.code', 'anonymous_registration_conflict');
+        $this->assertDatabaseCount('anonymous_accounts', 0);
+    }
+
     public function test_admin_can_version_and_unpublish_plans_without_changing_historical_rights(): void
     {
         $this->actingAs(User::findOrFail('user-admin'));
@@ -208,5 +304,10 @@ class PlatformApiTest extends TestCase
         $this->actingAs(User::findOrFail('user-member'));
         $this->postJson('/api/v1/me/tickets/'.$id.'/replies', ['body' => '这里仍然无法连接。'])->assertCreated()->assertJsonPath('data.status', 'open');
         $this->getJson('/api/v1/me/tickets/'.$id)->assertJsonCount(5, 'data.events');
+    }
+
+    private function recoverySecret(string $byte): string
+    {
+        return rtrim(strtr(base64_encode(str_repeat($byte, 32)), '+/', '-_'), '=');
     }
 }

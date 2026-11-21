@@ -430,12 +430,18 @@ class PlatformController extends Controller
         return $validator->fails() ? null : $validator->validated();
     }
 
-    /** @return array{id: string, email: string, name: string, role: string} */
+    /** @return array{id: string, email: ?string, name: string, role: string, account_type: string} */
     private function publicUser(Request $request): array
     {
         $user = $request->user();
 
-        return ['id' => $user->id, 'email' => $user->email, 'name' => $user->name, 'role' => $user->role];
+        return [
+            'id' => $user->id,
+            'email' => $user->account_type === 'anonymous' ? null : $user->email,
+            'name' => $user->name,
+            'role' => $user->role,
+            'account_type' => $user->account_type,
+        ];
     }
 
     private function error(string $code, string $message, int $status): JsonResponse
