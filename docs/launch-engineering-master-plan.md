@@ -53,11 +53,11 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 
 ### 0.2 近期依赖顺序与并行边界（2026-11-22）
 
-当前主线 `origin/main=ee5748e`。全量 worktree 核对中，14 个已登记功能分支的提交均能在主线找到等效补丁，没有等待合并的独有提交；`android-native-ci` 仍有未提交的 Gradle/instrumentation 用户改动，必须保留并单独审查，不能混入其他阶段。
+本次规划记录时主线为 `origin/main=ee5748e`。全量 worktree 核对中，14 个已登记功能分支的提交均能在主线找到等效补丁，没有等待合并的独有提交；`android-native-ci` 仍有未提交的 Gradle/instrumentation 用户改动，必须保留并单独审查，不能混入其他阶段。
 
 近期按“共用契约先锁定、平台实现并行、真实节点串行验收”推进：
 
-1. **Android M8 离线证明阶段**：为现有 `DeviceKeyStore` 增加专用隔离 AVD instrumentation，验证同 installation ID 稳定复用 P-256 公钥、不同 installation ID 得到不同公钥、challenge 签名可由对应公钥验证、私钥不可导出。此阶段不证明硬件 backed provenance，也不接入会员隧道。
+1. **Android M8 离线证明阶段（2026-11-22 已完成）**：专用隔离 AVD instrumentation 已验证同 installation ID 稳定复用 P-256 公钥、不同 installation ID 得到不同公钥、challenge 签名可由对应公钥验证、私钥不可导出；完整 instrumentation 6/6 通过。此阶段不证明硬件 backed provenance，也未接入会员隧道。
 2. **Windows M8 平台密钥阶段（可与 Android 分支并行）**：固定 Windows CNG API binding 和 key-handle 契约，验证非导出 P-256 签名后再实现 supervisor adapter；当前账户 `keyring` 不是设备签名器，未经审查不得手写 FFI。两个平台只共享 `xlb-proof-v1` wire/身份语义，不共享私钥或把一个平台的测试结果外推到另一个平台。
 3. **M10 Agent probe 阶段（与客户端实现文件边界分离）**：把现有 challenge handler 接到专用 loopback mTLS listener，但必须默认 fail closed；在真实 executor/transport 尚不存在时只能返回 unavailable，不得让 liveness、fake executor 或订阅拉取刷新健康时间。listener/transport 契约稳定后，再连接 PHP health repository/route filter 并补受控节点验收。
 4. **M6 会员节点阶段（外部条件满足后串行）**：两台既有 Android 真机的独立 installation ID 与 P-256 绑定已满足，不需要第三台手机；仍缺可用隔离 member profile 隧道、两机同时/错峰复制拒绝、匹配 node/peer/request/generation 的真实撤权回执与最终流量单调证据。执行云端步骤前必须经 `ops/aws-cli` 只读复核当前账户/资源，复核已批准 plan 后才可 `--apply`；无节点回执不能宣称断流。
