@@ -63,13 +63,14 @@ pnpm dev
 
 运行命令：pnpm test；pnpm build。旧 Node API 回归测试可单独运行 pnpm test:legacy。
 
-## 尚未实现
+## 当前实现范围与剩余项
 
 - 真实支付、退款和财务/代理结算操作。
 - 正式会员节点的用户级鉴权、到期断开、流量采集和会话迁移。管理员独立 AWS 测试节点的自动部署、真实协议验证及到期整栈回收已接通，见 [节点运维](docs/node-retirement-and-reclamation.md)。
-- 自有 Android、iOS、Windows、macOS App。
-- Chrome/Firefox 可安装扩展。
-- Clash Verge Rev 或 Clash Mi 真实客户端导入验证。
+- Android 已有原生 Debug 原型（登录、设备 challenge、Mihomo TUN、匿名注册同意）；还未验收真实会员节点/bridge、跨重启 Keystore 恢复和撤权断流，Release 不是可发布成品。
+- Web 会员控制台和 Chrome 扩展原型已在本地 API 上使用会话；匿名身份展示/扩展订阅展示有 mock 测试。扩展未完成浏览器商店发布/真实会员线路验收。
+- Windows、macOS、iOS 自有客户端工程与系统安全存储/隧道仍未实现；Android/Windows 先行，macOS/iOS 后续。
+- Clash Verge Rev / Clash Mi 的真实迅连宝会员逐设备线路导入、复用拒绝与撤权仍未验收；现有 YAML/保留地址和第三方测试订阅不算会员节点支持。
 - 生产部署和商用合规审查。
 
-下一批按依赖顺序推进：确定续费、流量和升级规则 → 接入隔离的支付渠道沙箱及回调验签/对账/退款补偿 → 管理员 MFA 与权限拆分 → 节点只读探测、配置版本及回滚 → 第三方客户端兼容验证 → 浏览器扩展与自有 App。每项验收条件及需要提供的条件见路线图第 8 节。
+当前全景、M1–M11/E0–E7 状态、并行工作包和发布阻塞门见 [上线工程总体规划 §0.1](docs/launch-engineering-master-plan.md)。近期并行队列是 Android 匿名创建的隔离安装验证与 M10 健康状态持久化原型；二者都不依赖云资源。真实会员隔离线路/节点回执、生产 mTLS/合规书面结论和需拍板的账号升级/路由口径属于后续放行门。

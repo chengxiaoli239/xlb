@@ -15,16 +15,19 @@
 
 ## 1. 现状事实（实测，非推测）
 
+> 本节起初盘点于 2026-11-18/19；账号、M10 算法和工具链已在 2026-11-21/22 更新。发生冲突时以 `docs/member-connection-prd.md` 顶部进度和下方 2026-11-21 离线进度为准；以下表格保留底层运行链路缺口，不把离线原型误记为生产接线。
+
 ### 1.1 账号体系 —— 与"旧版行为"不一致
 
 | 能力 | 现状 | 证据 |
 | --- | --- | --- |
 | 邮箱+密码登录 | 已有 | `PlatformController::login()`（`:45-68`），路由 `web.php:17` |
-| 注册接口 | **不存在** | `routes/web.php` 仅 csrf/session/login/logout；全库无 register 路由与控制器 |
-| 首次打开自动注册 | **不存在** | Android 启动只恢复会话，失败即显示登录页（`MainActivity.java:122-139,313-343`） |
+| 匿名注册接口 | **local/testing 开发接口已有** | `POST /api/v1/auth/register-anonymous` 要求明确同意、installation ID 和 32-byte base64url 恢复密钥；有 API feature tests，不代表生产账号体系 |
+| Android Debug 匿名入口 | **已接入 UI，真机只验到取消** | 登录页显示创建入口/风险说明；现有两个 member installation 不可复用为匿名身份，成功真机注册需 emulator 或独立 profile |
+| 邮箱/手机升级 | **未实现** | 无验证码交付和匿名转正式账号接口；需要定跨端方式及验证渠道 |
 | 扫码登录 / 设备码登录 | **不存在** | 所有二维码都是"订阅配置导入"，非账号用途 |
-| 手机号体系 | **不存在** | `users` 表无 phone 字段（`0001_01_01_000000_create_users_table.php:14-24`） |
-| 跨端同账号 | **机制部分存在** | Android/Web/扩展共用 `/api/v1/auth/login` + session，同一 email/password → 同一 `users.id`；但账号本身没有自助创建入口，生产库为空（seeder 仅 local/testing 建两个演示号） |
+| 手机字段 | **结构已有、验证未有** | `users.phone` nullable/unique 已迁移；无 OTP/手机号服务 |
+| 跨端同账号 | **full-account 机制已有，匿名升级缺失** | Android/Web/扩展共用 session；email/password 命中同一 `users.id`；匿名账号不能迁移到另一安装，也没有扫码授权 PC |
 
 **结论**：当前代码里，"用同一账号在手机和电脑登录识别为同一用户"的机制是通的（共享 users.id + 设备额度账号级）；但"扫码下载→自动注册账号"这一步**在本仓库从未实现**，git 全历史也无相关控制器。若线上旧版确有该行为，其账号系统在本仓库之外，需要迁移或对接方案（见决策点 D1）。
 
@@ -32,12 +35,12 @@
 
 | 能力 | 现状 | 证据 |
 | --- | --- | --- |
-| 节点权重 | 字段存在但恒为 100，排序退化为按 id | `SubscriptionRouteService.php:49,150`；`create_subscription_route_tables.php:32-41` |
+| 节点权重 | 运行链路仍主要按现有路由/最少会话；另有离线 weighted-rendezvous 原型 | `SubscriptionRouteService.php:49,150`；`NodeRoutingPolicy.php` 仍未接入解析路径 |
 | 实际选点算法 | "最少 active_sessions 贪心"，仅用于设备专属 peer 开通 | `NodePeerProvisioningService.php:68-95` |
-| 15 秒探测 / 3 次熔断 / 恢复观察 | **无代码**，仅文档目标 | `node-operations-runbook.md:89-101`；无探测定时任务 |
-| 健康数据时效 | 300 秒静态字段新鲜度，非探测 | `config/subscription_routes.php:6` |
-| 多指标加权（带宽/CPU/丢包/延迟） | **无实现**，无采集字段 | latency_ms 字段存在但无代码读取 |
-| 客户端"智能线路/切换"开关 | **不存在**，订阅代理组全是 `type: select` | `SubscriptionProfileService.php:100-112`；`MainActivity.java:417-430`；无 iOS 端 |
+| 15 秒探测 / 3 次熔断 / 恢复观察 | **熔断/恢复和假 driver 契约有离线代码；无实际 probe worker** | `NodeHealthCircuitBreaker` / `NodeHealthProbeCoordinator` 单测；无调度器或真实协议探测 |
+| 健康时效 | 现有订阅解析仍读静态健康字段；原型接受 30s TTL/探测状态 | `config/subscription_routes.php`；尚无状态持久化及线上接线 |
+| 多指标加权（带宽/CPU/丢包/延迟） | **离线算法原型** | `NodeRoutingPolicy.php` 通过合成 affinity 测试；没有真实容量指标采集 |
+| 客户端"智能线路/切换"开关 | 运行链路不存在，订阅代理组仍为 `type: select` | `SubscriptionProfileService.php:100-112`；算法原型不等于 UI/代理组接入；无 iOS 端 |
 | 灰度分桶 | **已实现** | `SubscriptionRouteService.php:230-233`（按用户 sha256 分桶） |
 | 会话散列分摊 | 仅"设备凭证绑定"粘滞，非散列分摊 | `SubscriptionCredentialService.php:319-349` |
 
@@ -47,11 +50,11 @@
 
 | 能力 | 现状 | 证据 |
 | --- | --- | --- |
-| App 下载 | 无安装包、`download_url` 全为 null | `ClientCatalogSeeder.php:28-40`；`platform.tsx:597,615` |
+| App 下载 | 客户端目录/API 可展示元数据，但没有生产制品/CDN交付链 | 下载签名、S3/CDN 和发布流程未就绪 |
 | S3/CDN | 无 bucket、无 CloudFront；S3 驱动未安装且 env 空 | `filesystems.php` 模板在但 composer 无 `flysystem-aws-s3-v3` |
 | 站点静态资源 CDN 分离 | 无，Vite 无 base/CDN 配置 | `vite.config.ts` |
 | 监控告警 | 无 Prometheus/Grafana/CloudWatch Alarm/Sentry；health 是静态桩 | `PlatformController.php:30-32` |
-| 压测 | 无脚本、无几千并发记录 | 全库无 k6/jmeter/locust；文档反复声明"不是压力测试" |
+| 压测 | 有 k6 与 loopback smoke 脚本，无实测基线报告 | `loadtest/k6/`；脚本存在不等于容量验收 |
 | 错误追踪 | 仅本地文件日志 + 业务审计 | `logging.php`、无 ErrorBoundary/崩溃上报 |
 | 账单告警 | 无 AWS Budget/Billing Alarm | 4 个 CFN 模板无 Alarm 资源 |
 
