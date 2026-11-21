@@ -6,9 +6,11 @@ use App\Models\User;
 use App\Payments\MerchantOrder;
 use App\Payments\PaymentDecision;
 use App\Payments\PaymentEventType;
+use App\Payments\PaymentReconciliationService;
 use App\Payments\PersistentPaymentEventLedger;
 use App\Payments\PersistentSandboxPaymentProvider;
 use App\Payments\ProviderPaymentEvent;
+use App\Payments\SignedSandboxPaymentProvider;
 use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +22,8 @@ use Tests\TestCase;
 class ProviderPaymentEventLedgerTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const SIGNING_KEY = 'local-provider-reconciliation-test-key';
 
     protected function setUp(): void
     {
@@ -204,6 +208,53 @@ class ProviderPaymentEventLedgerTest extends TestCase
 
         $this->postJson('/api/v1/payments/sandbox/webhook', [])->assertForbidden();
         $this->assertDatabaseCount('provider_payment_events', 0);
+    }
+
+    public function test_reconciliation_reports_matched_and_provider_only_events_without_mutating_ledger(): void
+    {
+        $orderId = $this->createOrder();
+        $order = $this->merchantOrder($orderId);
+        $ledger = new PersistentPaymentEventLedger;
+        $ledger->register($order);
+        $provider = new SignedSandboxPaymentProvider(self::SIGNING_KEY);
+        $provider->createPayment($order);
+        $now = now()->utc()->toDateTimeImmutable();
+        $first = $provider->simulateEvent($orderId, 'provider-paid-1', PaymentEventType::Paid, $now, $now);
+        $paid = $provider->verifyWebhook($first['body'], $first['headers'], $now);
+        $ledger->ingest($paid);
+        $provider->simulateEvent($orderId, 'provider-paid-2', PaymentEventType::Paid, $now, $now);
+
+        $report = (new PaymentReconciliationService)->reconcile($provider, $now->modify('-1 minute'), $now->modify('+1 minute'));
+
+        $this->assertSame(1, $report->count('matched'));
+        $this->assertSame(1, $report->count('missing_local'));
+        $this->assertSame(0, $report->count('missing_provider'));
+        $this->assertDatabaseCount('provider_payment_events', 1);
+        $this->assertDatabaseHas('provider_payment_orders', ['merchant_order_id' => $orderId, 'status' => 'paid_pending_grant']);
+    }
+
+    public function test_reconciliation_reports_fact_mismatches_and_local_only_events(): void
+    {
+        $orderId = $this->createOrder();
+        $order = $this->merchantOrder($orderId);
+        $ledger = new PersistentPaymentEventLedger;
+        $ledger->register($order);
+        $provider = new SignedSandboxPaymentProvider(self::SIGNING_KEY);
+        $provider->createPayment($order);
+        $now = now()->utc()->toDateTimeImmutable();
+
+        $remotePaid = $provider->simulateEvent($orderId, 'provider-paid-1', PaymentEventType::Paid, $now, $now);
+        $localPaid = $provider->verifyWebhook($remotePaid['body'], $remotePaid['headers'], $now);
+        $ledger->ingest($localPaid);
+        $provider->simulateEvent($orderId, 'provider-paid-1', PaymentEventType::Failed, $now, $now);
+        $localOnly = new ProviderPaymentEvent('signed-sandbox', 'local-only', $orderId, 'sandbox-txn-'.$orderId, 2980, 'CNY', PaymentEventType::Failed, $now);
+        $ledger->ingest($localOnly);
+
+        $report = (new PaymentReconciliationService)->reconcile($provider, $now->modify('-1 minute'), $now->modify('+1 minute'));
+
+        $this->assertSame(1, $report->count('mismatch'));
+        $this->assertSame(1, $report->count('missing_provider'));
+        $this->assertDatabaseCount('provider_payment_events', 2);
     }
 
     private function createOrder(): string
