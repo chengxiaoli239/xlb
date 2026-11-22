@@ -81,6 +81,24 @@ def buildMihomoArm64 = tasks.register('buildMihomoArm64', Exec) {
 
 tasks.named('preBuild').configure { dependsOn(buildMihomoArm64) }
 
+tasks.matching { it.name in ['connectedDebugAndroidTest', 'installDebugAndroidTest'] }.configureEach {
+    doFirst {
+        def serial = project.findProperty('xlbDisposableAvdSerial')?.toString()?.trim()
+        if (!serial) {
+            throw new GradleException('Set -PxlbDisposableAvdSerial to the dedicated xlb-m9-recovery emulator serial.')
+        }
+
+        def guard = rootProject.file('scripts/validate-disposable-avd.sh')
+        def process = new ProcessBuilder('bash', guard.absolutePath, serial)
+                .redirectErrorStream(true)
+                .start()
+        def output = process.inputStream.getText('UTF-8')
+        if (process.waitFor() != 0) {
+            throw new GradleException(output.trim())
+        }
+    }
+}
+
 dependencies {
     implementation 'androidx.core:core:1.13.1'
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
