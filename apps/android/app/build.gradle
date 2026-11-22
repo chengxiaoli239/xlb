@@ -1,4 +1,20 @@
+import org.cyclonedx.gradle.CyclonedxDirectTask
+import org.cyclonedx.model.Component
+
+plugins {
+    id 'org.cyclonedx.bom' version '3.6.1'
+}
+
+group = 'com.xlb.vpn'
+version = '0.2.15'
+
 apply plugin: 'com.android.application'
+
+tasks.named('cyclonedxDirectBom', CyclonedxDirectTask) {
+    projectType = Component.Type.APPLICATION
+    includeConfigs = ['releaseRuntimeClasspath']
+    testConfigs = []
+}
 
 android {
     namespace 'com.xlb.vpn'
