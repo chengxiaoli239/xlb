@@ -27,9 +27,7 @@ jobs:
           syft-version: v1.57.2
           format: cyclonedx-json
           output-file: ${{ runner.temp }}/xlb-vpn-source.cdx.json
-          artifact-name: xlb-vpn-source-sbom
-          upload-artifact: true
-          upload-artifact-retention: 7
+          upload-artifact: false
           upload-release-assets: false
           dependency-snapshot: false
 
@@ -40,6 +38,14 @@ jobs:
           subject-path: ${{ runner.temp }}/xlb-vpn-source.cdx.json
           push-to-registry: false
           create-storage-record: false
+
+      - name: Upload attested source SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: xlb-vpn-source-sbom
+          path: ${{ runner.temp }}/xlb-vpn-source.cdx.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Set up pnpm
         uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1

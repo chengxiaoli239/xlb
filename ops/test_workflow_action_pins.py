@@ -47,7 +47,7 @@ class WorkflowActionPinsTest(unittest.TestCase):
                 "actions/setup-go": 3,
                 "actions/setup-java": 1,
                 "actions/setup-python": 1,
-                "actions/upload-artifact": 1,
+                "actions/upload-artifact": 2,
                 "android-actions/setup-android": 1,
                 "gradle/actions/setup-gradle": 1,
                 "actions/attest": 2,
@@ -65,6 +65,11 @@ class WorkflowActionPinsTest(unittest.TestCase):
         self.assertEqual(workflow.count("id-token: write"), 2)
         self.assertEqual(workflow.count("push-to-registry: false"), 2)
         self.assertEqual(workflow.count("create-storage-record: false"), 2)
+        self.assertIn("upload-artifact: false", workflow)
+        self.assertIn(
+            "name: xlb-vpn-source-sbom\n          path: ${{ runner.temp }}/xlb-vpn-source.cdx.json",
+            workflow,
+        )
         self.assertIn("subject-path: ${{ runner.temp }}/xlb-vpn-source.cdx.json", workflow)
         self.assertIn("subject-path: apps/android/app/build/reports/cyclonedx-direct/bom.json", workflow)
 
