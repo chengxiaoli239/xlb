@@ -1,5 +1,7 @@
 package com.xlb.vpn.tunnel;
 
+import com.xlb.vpn.data.MemberDeviceProof;
+
 import org.junit.Test;
 
 import java.lang.reflect.Constructor;
@@ -39,11 +41,28 @@ public final class ProofBridgeSupervisorTest {
 
     @Test
     public void capabilityCannotBeConstructedFromOrdinaryIdentifiers() {
-        Constructor<?>[] constructors = ProofBridgeSupervisor.VerifiedMemberDeviceProof.class
+        Constructor<?>[] constructors = MemberDeviceProof.class
                 .getDeclaredConstructors();
 
         assertEquals(1, constructors.length);
         assertTrue(Modifier.isPrivate(constructors[0].getModifiers()));
+    }
+
+    @Test
+    public void verifiedApiProofStillCannotStartTheDisabledBridge() throws Exception {
+        AtomicInteger launches = new AtomicInteger();
+        ProofBridgeSupervisor supervisor = new ProofBridgeSupervisor(proof -> {
+            launches.incrementAndGet();
+            return null;
+        });
+        MemberDeviceProof proof = validMemberDeviceProof();
+
+        ProofBridgeSupervisor.Snapshot result = supervisor.start(proof);
+
+        assertFalse(ProofBridgeSupervisor.PROOF_BRIDGE_ENABLED);
+        assertEquals(ProofBridgeSupervisor.State.FAILED, result.state);
+        assertEquals(ProofBridgeSupervisor.Failure.FEATURE_DISABLED, result.failure);
+        assertEquals(0, launches.get());
     }
 
     @Test
@@ -193,6 +212,29 @@ public final class ProofBridgeSupervisorTest {
         Field field = ProofBridgeSupervisor.class.getDeclaredField("stateLock");
         field.setAccessible(true);
         return field.get(supervisor);
+    }
+
+    private static MemberDeviceProof validMemberDeviceProof() throws Exception {
+        Constructor<MemberDeviceProof> constructor = MemberDeviceProof.class.getDeclaredConstructor(
+                String.class, String.class, String.class, String.class, String.class,
+                long.class, long.class, String.class, MemberDeviceProof.Signer.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance("member-1", "3680e06f-5df2-44d9-90ea-8cfa05a81647",
+                "3680e06f-5df2-44d9-90ea-8cfa05a81648",
+                "3680e06f-5df2-44d9-90ea-8cfa05a81649",
+                "3680e06f-5df2-44d9-90ea-8cfa05a81650", 1L, 1L, "registered-public-key", new FakeSigner());
+    }
+
+    private static final class FakeSigner implements MemberDeviceProof.Signer {
+        @Override
+        public String publicKeySpkiBase64Url() {
+            return "registered-public-key";
+        }
+
+        @Override
+        public String signChallengeBase64Url(byte[] challenge) {
+            return challenge.length == 32 ? "signed-challenge" : "";
+        }
     }
 
     private static final class FakeProcess implements ProofBridgeSupervisor.ManagedProcess {

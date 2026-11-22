@@ -1,5 +1,7 @@
 package com.xlb.vpn.tunnel;
 
+import com.xlb.vpn.data.MemberDeviceProof;
+
 import java.util.Objects;
 
 /** Offline lifecycle contract. It is intentionally not wired into the VPN service. */
@@ -34,37 +36,6 @@ final class ProofBridgeSupervisor {
         }
     }
 
-    /** Capability reserved for a future verifier; ordinary identifiers cannot create one. */
-    static final class VerifiedMemberDeviceProof {
-        private final String memberId;
-        private final String installationId;
-        private final String peerBindingId;
-        private final DeviceProofSigner signer;
-
-        private VerifiedMemberDeviceProof(String memberId, String installationId,
-                String peerBindingId, DeviceProofSigner signer) {
-            this.memberId = memberId;
-            this.installationId = installationId;
-            this.peerBindingId = peerBindingId;
-            this.signer = signer;
-        }
-
-        boolean hasRequiredReferences() {
-            return present(memberId) && present(installationId)
-                    && present(peerBindingId) && signer != null;
-        }
-
-        DeviceProofSigner signer() {
-            return signer;
-        }
-    }
-
-    /** Exposes only signing operations backed by a non-exportable device key. */
-    interface DeviceProofSigner {
-        String publicKeySpkiBase64Url() throws ProofBridgeException;
-        String signChallengeBase64Url(byte[] challenge) throws ProofBridgeException;
-    }
-
     interface ManagedProcess {
         boolean isAlive();
         void stop() throws ProofBridgeException;
@@ -76,7 +47,7 @@ final class ProofBridgeSupervisor {
          * Must use bounded I/O while rechecking authorization and peer proof. Any child process created
          * before an error must be synchronously stopped and reaped by the adapter.
          */
-        ManagedProcess launch(VerifiedMemberDeviceProof proof) throws ProofBridgeException;
+        ManagedProcess launch(MemberDeviceProof proof) throws ProofBridgeException;
     }
 
     static final class ProofBridgeException extends Exception {
@@ -134,7 +105,7 @@ final class ProofBridgeSupervisor {
         return finishStop(current);
     }
 
-    Snapshot start(VerifiedMemberDeviceProof proof) {
+    Snapshot start(MemberDeviceProof proof) {
         synchronized (stateLock) {
             if (operationInProgress) return snapshot;
             if (proof == null || !proof.hasRequiredReferences()) return failLocked(Failure.INVALID_MEMBER_PROOF);
@@ -289,7 +260,4 @@ final class ProofBridgeSupervisor {
         }
     }
 
-    private static boolean present(String value) {
-        return value != null && !value.trim().isEmpty();
-    }
 }

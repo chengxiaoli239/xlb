@@ -187,6 +187,11 @@ public final class PlatformApi {
         }
     }
 
+    /** Returns the last synchronized opaque proof; it contains no peer credential or profile bytes. */
+    public MemberDeviceProof verifiedMemberDeviceProof() {
+        return memberDeviceProof;
+    }
+
     public ClientSnapshot loadDevices(MemberAccount account) throws PlatformApiException {
         memberDeviceProof = null;
         return withOverview(loadDevices(account, null));

@@ -27,6 +27,7 @@ public final class MemberDeviceProofTest {
         MemberDeviceProof proof = create("ready", PEER_CREDENTIAL, PROFILE);
 
         assertNotNull(proof);
+        assertTrue(proof.hasRequiredReferences());
         assertEquals("member-1", proof.memberId());
         assertEquals(INSTALLATION_ID, proof.installationId());
         assertEquals(DEVICE_ID, proof.deviceId());
@@ -42,6 +43,20 @@ public final class MemberDeviceProofTest {
             assertFalse(field.getName().contains("credential"));
             assertFalse(field.getName().contains("profile"));
         }
+    }
+
+    @Test
+    public void capabilityFailsClosedWhenItsKeystoreSignerNoLongerMatchesTheRegisteredKey() throws Exception {
+        MutableSigner signer = new MutableSigner(PUBLIC_KEY);
+        MemberDeviceProof proof = MemberDeviceProof.fromAuthorizedResponse("member-1", INSTALLATION_ID,
+                PUBLIC_KEY, DEVICE_ID, "registered", true, "ready", PEER_ID, NODE_ID, 1, 2,
+                PEER_CREDENTIAL, PROFILE, signer);
+        assertNotNull(proof);
+        assertTrue(proof.hasRequiredReferences());
+
+        signer.publicKey = "rotated-public-key";
+
+        assertFalse(proof.hasRequiredReferences());
     }
 
     @Test
@@ -144,6 +159,24 @@ public final class MemberDeviceProofTest {
         private final String publicKey;
 
         private FakeSigner(String publicKey) {
+            this.publicKey = publicKey;
+        }
+
+        @Override
+        public String publicKeySpkiBase64Url() {
+            return publicKey;
+        }
+
+        @Override
+        public String signChallengeBase64Url(byte[] challenge) {
+            return challenge.length == 32 ? "signed-challenge" : "";
+        }
+    }
+
+    private static final class MutableSigner implements MemberDeviceProof.Signer {
+        private String publicKey;
+
+        private MutableSigner(String publicKey) {
             this.publicKey = publicKey;
         }
 

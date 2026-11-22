@@ -43,6 +43,8 @@ Release 构建的默认 API 地址是保留的 `https://api.xlb.invalid`，在�
 
 test-only JNI callback instrumentation 额外验证 Java/Android Keystore→C JNI→Go `crypto.Signer` 能完成 TLS 1.3 mutual-TLS client handshake。Go 测试用内存中的临时 CA/server certificate 验证软件 signer、客户端证书匹配和公钥错配拒绝；instrumentation 再用 Keystore signer 覆盖正确 key、错误安装身份 key 与 callback 异常失败关闭。证书不写磁盘。Java 壳只位于 `src/androidTest`；Go 导出和 C JNI 入口只编译进 Debug native library，Release 使用独立 native 输出且不包含这些测试符号。该合同不连接 `ProofBridgeSupervisor`、生产 certificate、member profile、TUN 或 VPN 数据路径。运行 instrumentation 时仍须先通过下方 AVD-only guard。
 
+`PlatformApi.verifiedMemberDeviceProof()` exposes only the opaque capability produced after server authorization, registered-device snapshot, active entitlement, and Keystore public-key checks. `ProofBridgeSupervisor.start` and its adapter signature accept this same type, but no UI or service caller passes it yet; `PROOF_BRIDGE_ENABLED` remains false and there is no adapter or `XlbVpnService`/Mihomo/TUN wiring. A proof object or supervisor `READY` state must never be presented as a connected VPN session.
+
 Gradle 的 `connectedDebugAndroidTest` 和 `installDebugAndroidTest` 在任何 task 安装动作前要求 `-PxlbDisposableAvdSerial=<serial>`，并验证该 serial 是 adb 唯一列出的设备、AVD 名为 `xlb-m9-recovery` 且 emulator 属性匹配。修改验证器时运行 `scripts/test-validate-disposable-avd.sh`，仅使用临时 fake adb。完整设备测试优先使用下方通过 `EMULATOR_SERIAL` 显式限定 AVD 的隔离 harness；不要对 adb 在线设备列表运行无 serial 的 connected task。
 
 脚本要求显式 `EMULATOR_SERIAL`，校验该 serial 是 emulator 且 AVD 名恰好为专用测试名，只对它安装 APK/设置 ADB reverse；会在 `/tmp` 新建 SQLite，拒绝复用已占用的 API 端口 `4181`，传入 `disposable_avd=true` 与 `isolated_api=true`，结束后停止自身 API 并删除本次创建的临时目录。

@@ -6,12 +6,12 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /** Opaque server-authorized device capability. Peer credentials and profile content are never retained. */
-final class MemberDeviceProof {
+public final class MemberDeviceProof {
     private static final Pattern UUID = Pattern.compile(
             "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
     private static final int MAX_PROFILE_BYTES = 128 * 1024;
 
-    interface Signer {
+    public interface Signer {
         String publicKeySpkiBase64Url() throws GeneralSecurityException;
         String signChallengeBase64Url(byte[] challenge) throws GeneralSecurityException;
     }
@@ -75,6 +75,20 @@ final class MemberDeviceProof {
         }
     }
 
+    public boolean hasRequiredReferences() {
+        if (!present(memberId) || !UUID.matcher(installationId).matches()
+                || !UUID.matcher(deviceId).matches() || !UUID.matcher(peerId).matches()
+                || !UUID.matcher(nodeId).matches() || peerGeneration <= 0
+                || deviceBindingGeneration <= 0 || !present(registeredPublicKey) || signer == null) {
+            return false;
+        }
+        try {
+            return registeredPublicKey.equals(signer.publicKeySpkiBase64Url());
+        } catch (GeneralSecurityException exception) {
+            return false;
+        }
+    }
+
     boolean matches(String accountId, PlatformApi.DeviceSnapshot snapshot, boolean activeEntitlementPresent) {
         if (!memberId.equals(accountId) || snapshot == null || !activeEntitlementPresent
                 || !snapshot.entitlementActive
@@ -100,14 +114,14 @@ final class MemberDeviceProof {
         }
     }
 
-    String memberId() { return memberId; }
-    String installationId() { return installationId; }
-    String deviceId() { return deviceId; }
-    String peerId() { return peerId; }
-    String nodeId() { return nodeId; }
-    long peerGeneration() { return peerGeneration; }
-    long deviceBindingGeneration() { return deviceBindingGeneration; }
-    Signer signer() { return signer; }
+    public String memberId() { return memberId; }
+    public String installationId() { return installationId; }
+    public String deviceId() { return deviceId; }
+    public String peerId() { return peerId; }
+    public String nodeId() { return nodeId; }
+    public long peerGeneration() { return peerGeneration; }
+    public long deviceBindingGeneration() { return deviceBindingGeneration; }
+    public Signer signer() { return signer; }
 
     @Override
     public String toString() {
@@ -122,5 +136,9 @@ final class MemberDeviceProof {
             }
         }
         return false;
+    }
+
+    private static boolean present(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 }
