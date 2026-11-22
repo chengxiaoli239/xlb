@@ -47,7 +47,7 @@
 | B. E0 制品可追溯性 | `.github/workflows/**`、`ops/build_artifact_manifest.py` | Debug APK 来源/摘要清单及 6 项测试已实现，hosted run `44943107063` 全绿；生产制品签名、SBOM 与发布存储仍未实现，不部署、不签发生产包 |
 | C. M11 本地负载分层 | `loadtest/**`、验收报告 | 80请求的 loopback smoke 已完成；后续需在获批 staging 测控制面阶梯/长稳并单独审批，现有结果不能外推生产容量或 VPN 节点 |
 | D. Windows CNG verifier/真实 sidecar adapter | `apps/windows/src-tauri/**`，Rust supervisor/lifecycle contract 与 CNG signer 已合入 | CNG P-256 signer hosted 验收（29/29，`44959472000`）与 server-authorized peer capability 门禁已完成（36/36、MSVC build、UI tests/build，全绿，`44994703324`）；门禁核对完整 READY 字段、挑战前后公钥一致和设备快照，并不暴露凭据/Profile。下一步定义实际撤权重验与进程 adapter，并与 server peer protocol 接线；桥接仍默认关闭，不得将此能力外推为 Mihomo/TUN/会员线路/严格限设备验收 |
-| E. M6/M8 真机与节点闭环 | Android/Node Agent 契约分开验收 | 两台现有手机的当前 installation 已各自完成沙箱登录与独立 P-256 绑定，旧设备行保留；总计 4 条 registered 记录。下一步是先恢复 `xlb-ops` 会话并按获批边界只读盘点/复核 plan，再以隔离 member profile 和真实节点完成会员复制拒绝、线路/隧道、匹配撤权回执验收；没有节点回执不得宣称断流 |
+| E. M6/M8 真机与节点闭环 | Android/Node Agent 契约分开验收 | 两台现有手机的当前 installation 已各自完成沙箱登录与独立 P-256 绑定，旧设备行保留；总计 4 条 registered 记录。VOG 随后已由用户登录进入首页；本机 ADB 当前可见两台真机。2026-11-22 `xlb-ops` STS 已由项目包装验证有效；只读复核确认指定实验资源已无残留，管理栈未改。继续前仍按批准范围复核新 plan；真正会员数据面仍缺 server-verified member profile/节点端参数及匹配回执，不能宣称线路/隧道或撤权断流 |
 | F. Android 授权状态快照保留（2026-11-22 已完成） | `apps/android/app/src/main/java/com/xlb/vpn/data/PlatformApi.java`、`apps/android/app/src/test/java/com/xlb/vpn/data/NodeAuthorizationStatusTest.java` | overview 合并后仍保留 `READY` 与 `PROVISIONING`；Android JVM 定向/全套测试、`lintDebug`、`assembleDebug` 通过。只验证客户端纯数据快照，不表示服务端授权或 VPN 已连接 |
 | G. Windows CNG challenge/authorize 设备状态（2026-11-22 已完成） | `apps/windows/**`，独立 worktree `codex/windows-device-enrollment` | `106b14a` 合入 `ada4de2`；按 API origin 持久化 installation UUID、challenge 签名/授权状态 fail closed；React 6/6、pnpm build、hosted Windows Rust 35/35、Credential Manager smoke、MSVC build 与主 CI 通过。bridge/TUN 保持关闭，不外推为会员 VPN 或严格限设备验收 |
 | H. Android Keystore digest signer 合同（2026-11-22，已合入） | `apps/android/**`、`apps/node-agent/internal/androidsigner/**` | `73c82cd` 等效合入 raw-digest `NONEwithECDSA`/Go `CryptoSignerAdapter`；专用 API 35 AVD instrumentation 3/3，legacy SHA256-only alias fail closed；Go full/race 106、vet/build，Android assemble/JVM/lint 通过。`3751174` 已合入 Gradle `connectedDebugAndroidTest`/`installDebugAndroidTest` pre-install AVD-only guard；fake adb 覆盖多设备/离线设备/错 serial/错 AVD/非 emulator。未接生产 bridge/VPN |
@@ -57,7 +57,7 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 
 ### 0.2 近期依赖顺序与并行边界（2026-11-22）
 
-上一轮的全量审计以 `3751174` 为基线，曾检查 26 个 worktree 和 25 条功能分支；这是历史快照，不代表本轮所有 worktree 已重新核验。当前 `main` 与 `origin/main` 为 `4b227bd`：设备授权 capability 阶段 `33da257` 已推送，AVD runtime evidence 续记 `4b227bd` 已推送。主 worktree 现有未跟踪 `.playwright-cli/` 与 `output/` 保留且未提交；本轮没有清理、重写其他 worktree。Android JNI harness 通过 ADB 5038 只连接专用 AVD；共享 ADB 5037 中两台真机和原 AVD 均仍在线，临时 API 4181 已退出。
+上一轮的全量审计以 `3751174` 为基线，曾检查 26 个 worktree 和 25 条功能分支；这是历史快照，不代表本轮所有 worktree 已重新核验。当前 `main` 与 `origin/main` 为 `475059b`。主 worktree 保留未跟踪 `.playwright-cli/` 与 `output/`，本轮不清理或提交。当前另有 `codex/android-node-auth-status=12b464f` 的旧 worktree；其授权状态保留行为已由主线后续 `MemberDeviceProof` 改动覆盖，未将旧分支倒合回主线。ADB 5037 当前可见两台会员真机和专用 AVD；本地 API 4175 正在监听。`xlb-ops` STS 当前有效；只读盘点确认 M6 实验栈及带实验标签的实例、卷、ENI、安全组、调度器、IAM 角色/配置文件和地址均无残留，现存管理栈未触碰。无云写入。
 
 近期按“共用契约先锁定、平台实现并行、真实节点串行验收”推进：
 
@@ -78,7 +78,7 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 | 1E | Android Keystore raw-digest signer 语义兼容（2026-11-22 已完成） | `apps/android/**`、`apps/node-agent/internal/androidsigner/**` | 新 key `DIGEST_NONE`/`NONEwithECDSA` 对齐 Go `crypto.Signer`，专用 AVD 3/3 与 Go 向量验签通过；legacy SHA256-only alias raw-digest fail closed；Android/Go 定向与完整离线检查通过。未接 JNI/bridge/TUN，不能外推为 member peer 或会员线路 |
 | 2 | M10 Node Agent loopback TLS 1.3/mTLS probe 集成合同（2026-11-22 已完成） | `apps/node-agent/server_test.go` | 临时证书、随机 challenge 和 test-only echo executor 覆盖受信客户端成功、缺失/不受信客户端证书握手失败、node/challenge 精确回显与 nil executor `503 probe_unavailable`；全套 Go test/race/vet/build 通过 | runnable Agent 仍无 executor，不能报告节点健康 |
 | 3 | M10 PHP transport ↔ Go Agent 跨进程 mTLS loopback 互通（2026-11-22 已完成） | `apps/php-api/tests/**`、`apps/node-agent/testdata/**`、CI tests job Go setup | 临时证书、test-only loopback helper、真实 PHP transport 与 Go handler 完成 TLS/mTLS challenge echo；Laravel 240 tests（239 passed、1 existing skip、1,991 assertions），Go race/vet/build 均通过；Go fixture build 由 PATH timeout utility 限时 60 秒；不注入 runnable executor、不写健康观测 | 最终主线 CI `44971639457` 全绿；真实节点仍需独立获批验证 |
-| 4 | M6 两台现有会员真机数据面验收 | Android/API/验收记录，云资源另按计划 | 两机同时/错峰复制均拒绝；有效会员连接成功；退款撤权有匹配回执且最终流量单调 | 不需要第三台手机；当前两机重装后的 ID/KeyStore 身份要先核对并与旧设备行/额度对账。缺可用 member profile 与隔离线路；2026-11-22 `ops/aws-cli` STS 检查返回 session expired，云资源只读盘点/plan/apply 等用户本人 `aws login` 后按授权执行；本轮无云资源写入 |
+| 4 | M6 两台现有会员真机数据面验收 | Android/API/验收记录，云资源另按计划 | 两机同时/错峰复制均拒绝；有效会员连接成功；退款撤权有匹配回执且最终流量单调 | 两台设备登录和独立绑定均已具备，不需要第三台手机；AWS 会话已恢复且实验资源已清空。真实会员 profile、节点身份/端点/证书及可核对的节点回执仍缺；其到位前继续 Android/Windows 离线 adapter 与失败关闭测试 |
 
 M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求、并发 1/4、loopback-only、临时 SQLite、无 Cookie 重放及 health preflight。它只形成开发机控制面基线，不得外推到生产容量或 VPN 隧道稳定性。D2 跨端登录方式、D3 智能线路范围、高可用拓扑/SLO 与 E4 资源费用仍需用户决策；可并行的离线工作不因此暂停。任何阶段碰到外部门时，继续执行其他无依赖离线工作。
 
