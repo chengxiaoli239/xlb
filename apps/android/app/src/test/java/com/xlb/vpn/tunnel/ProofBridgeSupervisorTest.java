@@ -5,6 +5,12 @@ import org.junit.Test;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
@@ -80,6 +86,88 @@ public final class ProofBridgeSupervisorTest {
         assertSame(process, managedProcess(supervisor));
     }
 
+    @Test
+    public void concurrentStopsDoNotRaceCleanupOrHoldTheStateLock() throws Exception {
+        ProofBridgeSupervisor supervisor = new ProofBridgeSupervisor(null);
+        CountDownLatch stopEntered = new CountDownLatch(1);
+        CountDownLatch releaseStop = new CountDownLatch(1);
+        AtomicBoolean alive = new AtomicBoolean(true);
+        AtomicInteger stopCalls = new AtomicInteger();
+        Object stateLock = stateLock(supervisor);
+        ProofBridgeSupervisor.ManagedProcess process = new ProofBridgeSupervisor.ManagedProcess() {
+            @Override
+            public boolean isAlive() {
+                return alive.get();
+            }
+
+            @Override
+            public void stop() throws ProofBridgeSupervisor.ProofBridgeException {
+                stopCalls.incrementAndGet();
+                if (Thread.holdsLock(stateLock)) throw new AssertionError("state lock held during callback");
+                stopEntered.countDown();
+                try {
+                    releaseStop.await();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new ProofBridgeSupervisor.ProofBridgeException(
+                            ProofBridgeSupervisor.Failure.STOP_FAILED);
+                }
+                alive.set(false);
+            }
+
+            @Override
+            public void forceStop() {
+                alive.set(false);
+            }
+        };
+        installProcess(supervisor, process);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<ProofBridgeSupervisor.Snapshot> first = executor.submit(supervisor::stop);
+            assertTrue(stopEntered.await(2, TimeUnit.SECONDS));
+            Future<ProofBridgeSupervisor.Snapshot> second = executor.submit(supervisor::stop);
+            assertEquals(ProofBridgeSupervisor.State.STOPPING, second.get(2, TimeUnit.SECONDS).state);
+            assertEquals(1, stopCalls.get());
+
+            releaseStop.countDown();
+            assertEquals(ProofBridgeSupervisor.State.STOPPED, first.get(2, TimeUnit.SECONDS).state);
+            assertEquals(1, stopCalls.get());
+            assertNull(managedProcess(supervisor));
+        } finally {
+            releaseStop.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void statusChecksProcessLivenessOutsideTheStateLock() throws Exception {
+        ProofBridgeSupervisor supervisor = new ProofBridgeSupervisor(null);
+        AtomicInteger livenessChecks = new AtomicInteger();
+        Object stateLock = stateLock(supervisor);
+        ProofBridgeSupervisor.ManagedProcess process = new ProofBridgeSupervisor.ManagedProcess() {
+            @Override
+            public boolean isAlive() {
+                if (Thread.holdsLock(stateLock)) throw new AssertionError("state lock held during callback");
+                livenessChecks.incrementAndGet();
+                return true;
+            }
+
+            @Override
+            public void stop() {
+            }
+
+            @Override
+            public void forceStop() {
+            }
+        };
+        installProcess(supervisor, process);
+        installSnapshot(supervisor, new ProofBridgeSupervisor.Snapshot(ProofBridgeSupervisor.State.READY, null));
+
+        assertEquals(ProofBridgeSupervisor.State.READY, supervisor.status().state);
+        assertEquals(1, livenessChecks.get());
+    }
+
     private static void installProcess(ProofBridgeSupervisor supervisor,
             ProofBridgeSupervisor.ManagedProcess process) throws Exception {
         Field field = ProofBridgeSupervisor.class.getDeclaredField("process");
@@ -92,6 +180,19 @@ public final class ProofBridgeSupervisorTest {
         Field field = ProofBridgeSupervisor.class.getDeclaredField("process");
         field.setAccessible(true);
         return (ProofBridgeSupervisor.ManagedProcess) field.get(supervisor);
+    }
+
+    private static void installSnapshot(ProofBridgeSupervisor supervisor,
+            ProofBridgeSupervisor.Snapshot snapshot) throws Exception {
+        Field field = ProofBridgeSupervisor.class.getDeclaredField("snapshot");
+        field.setAccessible(true);
+        field.set(supervisor, snapshot);
+    }
+
+    private static Object stateLock(ProofBridgeSupervisor supervisor) throws Exception {
+        Field field = ProofBridgeSupervisor.class.getDeclaredField("stateLock");
+        field.setAccessible(true);
+        return field.get(supervisor);
     }
 
     private static final class FakeProcess implements ProofBridgeSupervisor.ManagedProcess {
