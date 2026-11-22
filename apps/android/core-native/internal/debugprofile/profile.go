@@ -14,6 +14,7 @@ import (
 var ErrNoRoute = errors.New("profile has no usable proxies or providers")
 var ErrInvalidInlineProxy = errors.New("profile has no usable inline proxy")
 var ErrUnsupportedProxyProvider = errors.New("profile has no supported remote proxy provider")
+var ErrLoopbackProxyRequiresAuthorization = errors.New("loopback proxy requires verified member authorization")
 
 // FirstRouteProfile builds an isolated debug profile from the first inline proxy or
 // the first HTTPS proxy provider. Subscription rules, listeners, controller, DNS
@@ -54,6 +55,9 @@ func FirstRouteName(source *config.RawConfig) (string, error) {
 		if !hasName || !hasType || strings.TrimSpace(name) == "" || strings.TrimSpace(proxyType) == "" {
 			return "", ErrInvalidInlineProxy
 		}
+		if isLoopbackSocksProxy(first) {
+			return "", ErrLoopbackProxyRequiresAuthorization
+		}
 		return name, nil
 	}
 	if len(source.ProxyProvider) == 0 {
@@ -71,6 +75,20 @@ func FirstRouteName(source *config.RawConfig) (string, error) {
 		}
 	}
 	return "", ErrUnsupportedProxyProvider
+}
+
+func isLoopbackSocksProxy(proxy map[string]any) bool {
+	proxyType, _ := proxy["type"].(string)
+	server, _ := proxy["server"].(string)
+	if !strings.EqualFold(proxyType, "socks5") {
+		return false
+	}
+	server = strings.TrimRight(strings.ToLower(strings.TrimSpace(server)), ".")
+	if server == "localhost" || strings.HasSuffix(server, ".localhost") || strings.HasSuffix(server, ".localdomain") {
+		return true
+	}
+	address, err := netip.ParseAddr(server)
+	return err == nil && address.Unmap().IsLoopback()
 }
 
 func validateRemoteProvider(provider map[string]any) error {

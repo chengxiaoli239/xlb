@@ -93,6 +93,37 @@ func TestFirstRouteNameRejectsMissingNodeMetadata(t *testing.T) {
 	}
 }
 
+func TestGenericTunnelRejectsLoopbackProofBridgeProfiles(t *testing.T) {
+	for _, server := range []string{
+		"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost", "localhost.",
+		"proof-bridge.localhost", "proof-bridge.localhost.", "localhost.localdomain", "localhost.localdomain.",
+	} {
+		source := config.DefaultRawConfig()
+		source.Proxy = []map[string]any{{
+			"name":   "XLB proof bridge",
+			"type":   "socks5",
+			"server": server,
+			"port":   17890,
+		}}
+		if _, err := FirstRouteProfile(source); !errors.Is(err, ErrLoopbackProxyRequiresAuthorization) {
+			t.Fatalf("server %q: got %v, want proof bridge authorization error", server, err)
+		}
+	}
+}
+
+func TestGenericTunnelAllowsRemoteSocksProxy(t *testing.T) {
+	source := config.DefaultRawConfig()
+	source.Proxy = []map[string]any{{
+		"name":   "remote-socks",
+		"type":   "socks5",
+		"server": "proxy.example.test",
+		"port":   1080,
+	}}
+	if _, err := FirstRouteProfile(source); err != nil {
+		t.Fatalf("remote SOCKS proxy was rejected: %v", err)
+	}
+}
+
 func TestMihomoCoreParsesTheSharedProofBridgeProfile(t *testing.T) {
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -106,6 +137,9 @@ func TestMihomoCoreParsesTheSharedProofBridgeProfile(t *testing.T) {
 	raw, err := config.UnmarshalRawConfig(profile)
 	if err != nil {
 		t.Fatalf("Mihomo rejected the shared proof bridge profile YAML: %v", err)
+	}
+	if _, err := FirstRouteProfile(raw); !errors.Is(err, ErrLoopbackProxyRequiresAuthorization) {
+		t.Fatalf("generic debug tunnel accepted proof bridge profile: %v", err)
 	}
 	parsed, err := config.ParseRawConfig(raw)
 	if err != nil {
