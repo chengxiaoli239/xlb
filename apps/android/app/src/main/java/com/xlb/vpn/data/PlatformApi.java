@@ -161,8 +161,7 @@ public final class PlatformApi {
             EntitlementSummary entitlement = active == null ? null : new EntitlementSummary(
                     active.optString("plan_name"), active.optString("starts_at"), active.optString("ends_at"),
                     number(active, "traffic_gb"), number(active, "data_used_gb"), active.optInt("max_devices"));
-            return new ClientSnapshot(current.account, current.device, current.message, entitlement,
-                    overview.optInt("activeSubscriptions"), current.accountProfile, current.nodeAuthorizationStatus);
+            return current.withOverview(entitlement, overview.optInt("activeSubscriptions"));
         } catch (PlatformApiException exception) {
             return current;
         }
@@ -423,6 +422,11 @@ public final class PlatformApi {
             this.accountProfile = accountProfile;
             this.nodeAuthorizationStatus = nodeAuthorizationStatus == null
                     ? NodeAuthorizationStatus.UNAVAILABLE : nodeAuthorizationStatus;
+        }
+
+        ClientSnapshot withOverview(EntitlementSummary overviewEntitlement, int activeSubscriptions) {
+            return new ClientSnapshot(account, device, message, overviewEntitlement, activeSubscriptions,
+                    accountProfile, nodeAuthorizationStatus);
         }
     }
 
