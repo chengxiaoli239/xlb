@@ -119,8 +119,8 @@ ops/aws-cli --profile xlb-ops --region us-west-2 ssm start-session \
 
 1. local/testing 隔离会员会话可由仓库沙箱自给，不再是外部依赖；真机会员链路要覆盖退款/撤权时仍需有效测试权益与线路，账号凭据不得进入报告或仓库。
 2. 生产专用 mTLS client cert/key/CA 的受控密钥注入条件（不进仓库或聊天）；隔离节点使用一次性 test CA。
-3. 两个真机安装均需各自完成设备 challenge 签名绑定后，才能做 M6 会员身份验收。2026-11-21 中午快照曾显示 VOG-AL10 已绑定 P-256、ALT-AN00 旧记录 `public_key` / `bound_at` 为空；后续按客户端设备流程触发 challenge，并由 SQLite 核实两台 installation ID 均不同且各自已有绑定 P-256 公钥。故双 proof-capable 身份前置现已满足，但尚未完成会员真机凭证复制拒绝、隔离会员线路隧道和真实会员撤权回执验收。普通 Clash Verge 不满足挑战签名条件；云端 bridge harness 的两个合成密钥只证明隔离协议拒绝复制身份，不替代会员实机证据。
+3. 两个当前 Android installation 均需各自完成设备 challenge 签名绑定后，才能做 M6 会员身份验收；目标仍是 ALT-AN00 与 VOG-AL10，不需要第三台实体手机。2026-11-21 SQLite 曾核实两台当时的不同 installation ID 各有独立 P-256 绑定，但 2026-11-22 两机重装 `0.2.15-debug` 后当前身份未确认：ALT-AN00 尚无 `secure_client_state`、installation ID 尚未生成；VOG-AL10 有加密状态文件但未读取或与历史记录比对。App manifest 关闭 Android backup，不能假定历史 ID/KeyStore 密钥被恢复。当前记录必须先与服务端设备行和额度核对，再决定是否为新 installation 建立绑定；不移除旧设备记录，除非对应节点撤权完成并有回执。会员真机凭证复制拒绝、隔离会员线路隧道和真实会员撤权回执仍未验收。普通 Clash Verge 不满足挑战签名条件；云端 bridge harness 的两个合成密钥只证明隔离协议拒绝复制身份，不替代会员实机证据。
 4. 若验收目标扩展到公网 VPN/TUN 或运营商质量，另行确认测试源 IP /32、协议端口和开放时限；本计划的 SSM-only 节点没有公网入站。
 5. iOS 验收范围、真机和代码签名/分发条件。
 
-2026-11-21 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 实测有效，返回 `arn:aws:iam::289069331089:root`。本次节点栈和实验 IAM 栈均已回收，未发现残留；这不代表账单最终结算。2026-11-21 后续 SQLite 实测已确认 ALT-AN00 与 VOG-AL10 各自有 P-256 challenge 绑定；剩余会员真机依赖是在可用隔离线路下复测身份复制拒绝、隧道与会员撤权回执。生产 mTLS 凭证、安全区适配和 iOS 验收仍未完成。生产签发保持关闭；合成测试回执不代表真实会员节点撤权；未取得对应真实节点回执前不宣称断流或严格限制真实客户端设备，不宣称可以发布。
+2026-11-21 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 实测有效，返回 `arn:aws:iam::289069331089:root`。节点栈和实验 IAM 栈当时已回收且未发现残留；这不代表账单最终结算，也不是本轮资源复核。2026-11-21 的 SQLite 记录证明的是当时 ALT-AN00 与 VOG-AL10 的 installation ID/P-256 绑定；2026-11-22 重装后的身份待重新核对，见上条。剩余会员真机依赖是在当前两机身份与服务端设备行核对后，在可用隔离线路下复测身份复制拒绝、隧道与会员撤权回执。生产 mTLS 凭证、安全区适配和 iOS 验收仍未完成。生产签发保持关闭；合成测试回执不代表真实会员节点撤权；未取得对应真实节点回执前不宣称断流或严格限制真实客户端设备，不宣称可以发布。
