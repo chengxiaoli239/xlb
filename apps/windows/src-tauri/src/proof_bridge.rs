@@ -134,11 +134,12 @@ impl VerifiedMemberDeviceProof {
     }
 
     pub(super) fn matches_device_snapshot(&self, devices: &super::DeviceSummary) -> bool {
-        devices.devices.iter().any(|device| {
-            device.id == self.device_id
-                && device.installation_id == self.installation_id
-                && device.status == "registered"
-        })
+        devices.entitlement_active
+            && devices.devices.iter().any(|device| {
+                device.id == self.device_id
+                    && device.installation_id == self.installation_id
+                    && device.status == "registered"
+            })
     }
 }
 
@@ -577,6 +578,33 @@ mod tests {
             verify(&valid_authorization(), &revoked_device, "test-public-key"),
             Err(BridgeFailure::InvalidMemberProof)
         ));
+    }
+
+    #[test]
+    fn device_snapshot_must_keep_entitlement_active_to_retain_proof() {
+        let proof = valid_config().proof;
+        let devices = super::super::DeviceSummary {
+            entitlement_active: true,
+            max_devices: 1,
+            registered_count: 1,
+            available_slots: 0,
+            devices: vec![super::super::Device {
+                id: "fd3ae0f1-1234-4234-9234-000000000010".into(),
+                installation_id: "fd3ae0f1-1234-4234-9234-000000000013".into(),
+                name: "Windows".into(),
+                platform: "windows".into(),
+                status: "registered".into(),
+                created_at: "2026-11-22T00:00:00Z".into(),
+            }],
+        };
+
+        assert!(proof.matches_device_snapshot(&devices));
+
+        let inactive_entitlement = super::super::DeviceSummary {
+            entitlement_active: false,
+            ..devices
+        };
+        assert!(!proof.matches_device_snapshot(&inactive_entitlement));
     }
 
     #[test]
