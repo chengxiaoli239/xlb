@@ -66,6 +66,12 @@ jobs:
         working-directory: apps/extension
         run: node --test
 
+      - name: Set up Go for PHP-to-Node-Agent probe integration test
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/node-agent/go.mod
+          cache-dependency-path: apps/node-agent/go.sum
+
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:

@@ -156,6 +156,88 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
         }
     }
 
+    public function test_probe_transport_interoperates_with_the_node_agent_go_handler_over_tls_13_mtls(): void
+    {
+        if (! function_exists('proc_open') || ! function_exists('stream_socket_server')) {
+            $this->markTestSkipped('Process control and stream sockets are required for the PHP-to-Go mTLS integration test.');
+        }
+
+        $credentials = $this->mutualTlsCredentialFiles();
+        $nodeId = 'node-go-loopback';
+        $challenge = bin2hex(random_bytes(32));
+        $nodeAgentDirectory = base_path('../node-agent');
+        $helperSource = $nodeAgentDirectory.'/testdata/php-probe/main.go';
+        $helperBinary = $credentials['directory'].'/node-agent-php-probe';
+        $build = proc_open(
+            ['go', 'build', '-o', $helperBinary, $helperSource],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $buildPipes,
+            $nodeAgentDirectory,
+        );
+        $this->assertIsResource($build, 'Could not start the Go fixture build.');
+        fclose($buildPipes[0]);
+        $buildOutput = stream_get_contents($buildPipes[1]);
+        $buildError = stream_get_contents($buildPipes[2]);
+        fclose($buildPipes[1]);
+        fclose($buildPipes[2]);
+        $this->assertSame(0, proc_close($build), trim($buildError.' '.$buildOutput));
+
+        $server = proc_open(
+            [
+                $helperBinary,
+                '--certificate', $credentials['server_certificate'],
+                '--private-key', $credentials['server_key'],
+                '--client-ca', $credentials['ca_bundle'],
+                '--node-id', $nodeId,
+            ],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $serverPipes,
+            $nodeAgentDirectory,
+        );
+        $this->assertIsResource($server, 'Could not start the Go Node Agent fixture.');
+        fclose($serverPipes[0]);
+        stream_set_timeout($serverPipes[1], 10);
+        $endpoint = trim((string) fgets($serverPipes[1]));
+
+        try {
+            $this->assertMatchesRegularExpression('/^https:\/\/127\.0\.0\.1:\d+$/', $endpoint, 'The Go fixture did not announce a loopback-only endpoint.');
+            $transport = new ConfiguredNodeDataPlaneProbeTransport(
+                [$nodeId => ['url' => $endpoint, 'ca_bundle' => $credentials['ca_bundle']]],
+                $credentials['client_certificate'],
+                $credentials['client_key'],
+            );
+
+            $exchange = $transport->exchange($nodeId, $challenge, 5000);
+            $status = proc_get_status($server);
+            $shutdownDeadline = microtime(true) + 1.0;
+            while ($status['running'] && microtime(true) < $shutdownDeadline) {
+                usleep(10_000);
+                $status = proc_get_status($server);
+            }
+            $this->assertFalse($status['running'], 'The Go fixture did not shut down after serving one probe.');
+
+            $this->assertTrue($exchange->clientIdentityPresented);
+            $this->assertTrue($exchange->mutualTlsEstablished);
+            $this->assertTrue($exchange->serverIdentityVerified);
+            $this->assertSame($nodeId, $exchange->authenticatedNodeId);
+            $this->assertTrue($exchange->dataPlaneProbeAccepted);
+            $this->assertSame($challenge, $exchange->echoedChallenge);
+        } finally {
+            $status = proc_get_status($server);
+            $shutdownDeadline = microtime(true) + 1.0;
+            while ($status['running'] && microtime(true) < $shutdownDeadline) {
+                usleep(10_000);
+                $status = proc_get_status($server);
+            }
+            if ($status['running']) {
+                proc_terminate($server, 9);
+            }
+            fclose($serverPipes[1]);
+            fclose($serverPipes[2]);
+            proc_close($server);
+        }
+    }
+
     public function test_unknown_nodes_and_non_https_or_non_origin_urls_fail_closed(): void
     {
         $credentials = $this->credentialFiles();
