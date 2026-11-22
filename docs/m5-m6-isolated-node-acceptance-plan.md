@@ -1,5 +1,7 @@
 # M5/M6 隔离节点验收计划
 
+- **当前只读复核（2026-11-22，用户重新 `aws login` 后）**：经项目 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 验证获批账号会话有效。`us-west-2` 仅有既有 `xlb-node-manager-access-usw2` 处于 `CREATE_COMPLETE`；所有 `xlb-lab-*` CloudFormation 历史栈为 `DELETE_COMPLETE`。只读查询确认无 `ManagedBy=xlb-node-lab` EC2、EBS、ENI、安全组、公网地址或 Scheduler，无 SSM managed instance，无 `XlbLab*` IAM role/instance profile；历史安全组 `sg-0db2cef785cbeeba3` 不存在。默认 VPC `vpc-00ded9986e9e37539` 的 us-west-2a 默认子网 `subnet-01b72ddfdcc197d20` 可用且经 main route table/IGW 出网；当前 AL2023 x86_64 最新 SSM 参数解析为 `ami-09f6e62a9fe578f92`（Owner `137112412989`、`available`）。本轮没有执行 `--apply`：11-21 M5/M6 synthetic live harness 已通过，之后 peer-store/data-plane 文件无改动，重建节点只会重复已完成验收。若后续有新的获批协议变更或真实会员节点阶段，须先重新生成/复核 plan；此计划不授权扩大到公网入站或真实会员隧道。
+
 日期：2026-11-19
 状态（2026-11-20 更新）：原计划范围与 `$1` 预算上限已获批；实验 IAM 栈 `xlb-lab-access-usw2` 和单台 `t3.small` 节点栈 `xlb-lab-us-20261119-m5m6` 曾创建。M5 的 12 进程争 3 名额通过；旧 M6 证据不满足身份拒绝归因、有效 peer 重连及撤权最终回执等放行标准。清除 HTTP/HTTPS/ALL proxy 环境变量并设置 `NO_PROXY=*` 后，`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `arn:aws:iam::289069331089:root`。只读盘点显示节点栈仍为 `CREATE_COMPLETE`，其 EC2 实例 ID 仍列在栈资源中，但 EC2 `describe-instances` 无返回；相关 EBS 卷和 ENI 查询无结果；安全组 `sg-0db2cef785cbeeba3` 仍存在，且到期 Scheduler `xlb-lab-us-20261119-m5m6-expiry` 仍为 ENABLED，计划时间已过。实验 IAM 栈仍为 `CREATE_COMPLETE`，`XlbLabSsmRole`、`XlbLabExpiryRole` 与 `XlbLabSsmProfile` 均存在。因此节点资源栈和实验权限栈尚未完整回收。此次仅做只读查询，没有创建、删除或延长任何资源，未取得 M6 四项新证据。以下旧状态说明均为历史记录，当前结论以本段为准。
 
@@ -12,8 +14,8 @@
 ## 现状与可推进范围
 
 - 用户本轮提供的 AWS 只读结果：`xlb-ops` root 身份为 `arn:aws:iam::289069331089:root`，EC2/SSM/CloudFormation/IAM/VPC 盘点权限通过；当前无 EC2 实例、无 SSM 托管实例；`xlb-node-manager-access-usw2` 为 `CREATE_COMPLETE`，`XlbNodeSsmRole` 与 `XlbNodeCleanupRole` 已存在；默认 VPC 为 `vpc-00ded9986e9e37539`。本轮未重复调用 AWS，也未执行任何云端写操作。此前记录的默认子网、路由及 AMI 信息仍须在获批执行前重新核对。
-- **当前会话状态（2026-11-22）**：本轮经项目 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 做了一次只读检查，AWS 返回 session expired；此后未继续 AWS 查询或执行云操作。11-21 的资源盘点只作为历史状态；用户本人重新 `aws login` 后，才能刷新身份/资源状态并重新审 plan。
-- **当前会话复核（2026-11-22）**：本轮仅经项目 `ops/aws-cli` wrapper 调用一次 `sts get-caller-identity --profile xlb-ops`，返回 session expired。此前 11-21 的身份/资源结果保留为历史，不代表当前会话仍有效；后续任何 AWS 盘点或 plan/apply 前需用户本人重新 `aws login`。此次没有继续查询或写入任何云资源。
+- **登录前会话状态（历史，2026-11-22）**：本轮早些时候 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 session expired；用户随后本人重新 `aws login`。当前登录后身份及资源状态以本文顶部“当前只读复核”为准。
+- **登录前会话复核（历史，2026-11-22）**：此前的 session-expired 结果不代表重新登录后的状态；已在用户重新认证后重新只读盘点，未执行云写入。
 - 已在执行前重新查询并核对 Amazon Linux 2023 x86_64 AMI：`ami-062e367aff5bc494b`，Amazon 发布、状态 `available`、创建于 2026-11-18，us-west-2。本次模板强制 IMDSv2；该 AMI ID 仅用于本轮实验，后续部署前仍需重新核对。
 - **现有访问栈不能直接供 `ops/node_lab.py` 使用**：该脚本和 `ops/aws-node-lab.template.json` 要求 `XlbLabSsmProfile` / `XlbLabExpiryRole`，并将资源标记 `ManagedBy=xlb-node-lab`；现有 `XlbNode*` 角色和策略按 `xlb-node-manager` 标签授权。不要通过改标签、扩大现有角色权限或更新既有访问栈来绕过差异。
 - **M5 本地与云端数据面**：本地 Agent 增加 loopback-only TLS 1.3/HTTP2 数据面与本机 SOCKS5 桥；设备证书身份绑定 node/peer/device/subscription 代数，节点容量原子预占，撤权关闭流并等待最终用量回执。离线测试及云端隔离节点 12 进程争 3 名额均通过。云端节点只运行 `isolated-test`，不是 Mihomo/TUN 或会员生产 Agent。
@@ -121,8 +123,8 @@ ops/aws-cli --profile xlb-ops --region us-west-2 ssm start-session \
 
 1. local/testing 隔离会员会话可由仓库沙箱自给，不再是外部依赖；真机会员链路要覆盖退款/撤权时仍需有效测试权益与线路，账号凭据不得进入报告或仓库。
 2. 生产专用 mTLS client cert/key/CA 的受控密钥注入条件（不进仓库或聊天）；隔离节点使用一次性 test CA。
-3. 两个当前 Android installation 均需各自完成设备 challenge 签名绑定后，才能做 M6 会员身份验收；目标仍是 ALT-AN00 与 VOG-AL10，不需要第三台实体手机。2026-11-21 SQLite 曾核实两台当时的不同 installation ID 各有独立 P-256 绑定，但 2026-11-22 两机重装 `0.2.15-debug` 后当前身份未确认：ALT-AN00 尚无 `secure_client_state`、installation ID 尚未生成；VOG-AL10 有加密状态文件但未读取或与历史记录比对。App manifest 关闭 Android backup，不能假定历史 ID/KeyStore 密钥被恢复。当前记录必须先与服务端设备行和额度核对，再决定是否为新 installation 建立绑定；不移除旧设备记录，除非对应节点撤权完成并有回执。会员真机凭证复制拒绝、隔离会员线路隧道和真实会员撤权回执仍未验收。普通 Clash Verge 不满足挑战签名条件；云端 bridge harness 的两个合成密钥只证明隔离协议拒绝复制身份，不替代会员实机证据。
+3. 两个当前 Android installation 的身份前置已于 2026-11-22 核实完成：ALT-AN00 与 VOG-AL10 各有不同 installation ID、registered 状态、P-256 公钥指纹和 `bound_at`；SQLite 共 4 条记录，较早两条保留，不需要第三台手机。未解决的是会员真机凭证复制拒绝、真实 member profile/线路/隧道及匹配撤权回执；当前两机均显示服务线路不可用。普通 Clash Verge 不满足挑战签名条件；云端 synthetic peer harness 的两个合成密钥只证明隔离协议拒绝复制身份，不替代会员实机数据面证据。
 4. 若验收目标扩展到公网 VPN/TUN 或运营商质量，另行确认测试源 IP /32、协议端口和开放时限；本计划的 SSM-only 节点没有公网入站。
 5. iOS 验收范围、真机和代码签名/分发条件。
 
-2026-11-21 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 实测有效，返回 `arn:aws:iam::289069331089:root`。节点栈和实验 IAM 栈当时已回收且未发现残留；这不代表账单最终结算，也不是本轮资源复核。2026-11-21 的 SQLite 记录证明的是当时 ALT-AN00 与 VOG-AL10 的 installation ID/P-256 绑定；2026-11-22 重装后的身份待重新核对，见上条。剩余会员真机依赖是在当前两机身份与服务端设备行核对后，在可用隔离线路下复测身份复制拒绝、隧道与会员撤权回执。生产 mTLS 凭证、安全区适配和 iOS 验收仍未完成。生产签发保持关闭；合成测试回执不代表真实会员节点撤权；未取得对应真实节点回执前不宣称断流或严格限制真实客户端设备，不宣称可以发布。
+2026-11-21 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 和隔离节点实测为历史证据。2026-11-22 用户重新 `aws login` 后 wrapper STS 只读验证成功；当前 inventory 显示 lab 资源已回收、既有 node-manager access 栈保持不动，详见本文顶部。11-21 synthetic peer live harness 已通过，peer-store/data-plane 相关文件其后未改，本轮没有为重复验收重建栈。当前两机身份/公钥绑定已核实，但会员真机线路、凭证复制拒绝、隧道和匹配节点撤权回执仍未验收；生产 mTLS 凭证、安全区适配和 iOS 验收未完成。生产签发保持关闭；合成测试回执不代表真实会员节点撤权；未取得对应真实节点回执前不宣称断流或严格限制真实客户端设备，不宣称可以发布。
