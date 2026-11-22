@@ -12,11 +12,11 @@ final class DeviceProofJni {
 
     private DeviceProofJni() {}
 
-    static boolean verifiesSignerCallback(DigestSigner signer, byte[] publicKeySpkiDer, byte[] digest) {
-        return signer != null && publicKeySpkiDer != null && digest != null
-                && nativeVerifyDigestSignature(signer, publicKeySpkiDer, digest);
+    static boolean completesTls13MtlsHandshake(DigestSigner signer, byte[] publicKeySpkiDer) {
+        return signer != null && publicKeySpkiDer != null
+                && nativeCompleteTls13MtlsHandshake(signer, publicKeySpkiDer);
     }
 
-    private static native boolean nativeVerifyDigestSignature(
-            DigestSigner signer, byte[] publicKeySpkiDer, byte[] digest);
+    private static native boolean nativeCompleteTls13MtlsHandshake(
+            DigestSigner signer, byte[] publicKeySpkiDer);
 }

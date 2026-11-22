@@ -10,7 +10,7 @@ extern char *XlbStartTun(int);
 extern void XlbStop(void);
 extern void XlbFreeString(char *);
 #ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
-extern int XlbVerifyAndroidSigner(const char *, int, const char *, int);
+extern int XlbCompleteAndroidSignerHandshake(const char *, int);
 #endif
 
 static JavaVM *vm;
@@ -87,12 +87,13 @@ failed:
     return -1;
 }
 
-JNIEXPORT jboolean JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeVerifyDigestSignature(
-        JNIEnv *env, jclass cls, jobject signer, jbyteArray public_key, jbyteArray digest) {
+JNIEXPORT jboolean JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeCompleteTls13MtlsHandshake(
+        JNIEnv *env, jclass cls, jobject signer, jbyteArray public_key) {
     (void)cls;
-    if (signer == NULL || public_key == NULL || digest == NULL
-            || (*env)->GetArrayLength(env, public_key) < 1 || (*env)->GetArrayLength(env, public_key) > 256
-            || (*env)->GetArrayLength(env, digest) != 32) return JNI_FALSE;
+    if (signer == NULL || public_key == NULL
+            || (*env)->GetArrayLength(env, public_key) < 1 || (*env)->GetArrayLength(env, public_key) > 256) {
+        return JNI_FALSE;
+    }
 
     (*env)->GetJavaVM(env, &vm);
     pthread_mutex_lock(&digest_signer_mutex);
@@ -103,14 +104,13 @@ JNIEXPORT jboolean JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeVerifyDige
     }
 
     jbyte *public_key_bytes = (*env)->GetByteArrayElements(env, public_key, NULL);
-    jbyte *digest_bytes = (*env)->GetByteArrayElements(env, digest, NULL);
     int valid = 0;
-    if (public_key_bytes != NULL && digest_bytes != NULL) {
-        valid = XlbVerifyAndroidSigner((char *)public_key_bytes, (*env)->GetArrayLength(env, public_key),
-                (char *)digest_bytes, (*env)->GetArrayLength(env, digest));
+    if (public_key_bytes != NULL) {
+        valid = XlbCompleteAndroidSignerHandshake((char *)public_key_bytes, (*env)->GetArrayLength(env, public_key));
     }
-    if (public_key_bytes != NULL) (*env)->ReleaseByteArrayElements(env, public_key, public_key_bytes, JNI_ABORT);
-    if (digest_bytes != NULL) (*env)->ReleaseByteArrayElements(env, digest, digest_bytes, JNI_ABORT);
+    if (public_key_bytes != NULL) {
+        (*env)->ReleaseByteArrayElements(env, public_key, public_key_bytes, JNI_ABORT);
+    }
     (*env)->DeleteGlobalRef(env, digest_signer_callback);
     digest_signer_callback = NULL;
     pthread_mutex_unlock(&digest_signer_mutex);

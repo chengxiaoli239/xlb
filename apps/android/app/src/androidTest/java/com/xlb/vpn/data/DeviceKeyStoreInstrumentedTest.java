@@ -188,16 +188,13 @@ public final class DeviceKeyStoreInstrumentedTest {
     }
 
     @Test
-    public void javaKeystoreSignerCallbackRoundTripsThroughGoVerifier() throws Exception {
+    public void androidKeystoreSignerCompletesGoTls13MtlsHandshake() throws Exception {
         String installationId = "jni-signer-contract-" + UUID.randomUUID();
         String otherInstallationId = "jni-signer-other-" + UUID.randomUUID();
         String alias = KEY_ALIAS_PREFIX + installationId;
         String otherAlias = KEY_ALIAS_PREFIX + otherInstallationId;
         DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
         KeyStore keyStore = KeyStore.getInstance(KEY_STORE);
-        byte[] digest = MessageDigest.getInstance("SHA-256")
-                .digest("Keystore Java callback to Go signer v1".getBytes(StandardCharsets.UTF_8));
-
         try {
             byte[] publicKey = DeviceBindingProof.decode(deviceKeyStore.publicKey(installationId));
             byte[] otherPublicKey = DeviceBindingProof.decode(deviceKeyStore.publicKey(otherInstallationId));
@@ -209,9 +206,9 @@ public final class DeviceKeyStoreInstrumentedTest {
                 }
             };
 
-            assertTrue(DeviceProofJni.verifiesSignerCallback(signer, publicKey, digest));
+            assertTrue(DeviceProofJni.completesTls13MtlsHandshake(signer, publicKey));
             assertFalse("A different installation key must not verify the callback signature",
-                    DeviceProofJni.verifiesSignerCallback(signer, otherPublicKey, digest));
+                    DeviceProofJni.completesTls13MtlsHandshake(signer, otherPublicKey));
         } finally {
             keyStore.load(null);
             if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias);
@@ -220,7 +217,7 @@ public final class DeviceKeyStoreInstrumentedTest {
     }
 
     @Test
-    public void javaSignerCallbackExceptionFailsClosed() throws Exception {
+    public void javaSignerCallbackExceptionFailsClosedDuringTlsHandshake() throws Exception {
         String installationId = "jni-signer-error-" + UUID.randomUUID();
         String alias = KEY_ALIAS_PREFIX + installationId;
         DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
@@ -228,13 +225,11 @@ public final class DeviceKeyStoreInstrumentedTest {
 
         try {
             byte[] publicKey = DeviceBindingProof.decode(deviceKeyStore.publicKey(installationId));
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest("Keystore callback failure v1".getBytes(StandardCharsets.UTF_8));
             DeviceProofJni.DigestSigner signer = value -> {
                 throw new IllegalStateException("test signing failure");
             };
 
-            assertFalse(DeviceProofJni.verifiesSignerCallback(signer, publicKey, digest));
+            assertFalse(DeviceProofJni.completesTls13MtlsHandshake(signer, publicKey));
         } finally {
             keyStore.load(null);
             if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias);
