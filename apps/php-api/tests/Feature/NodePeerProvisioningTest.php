@@ -84,6 +84,138 @@ class NodePeerProvisioningTest extends TestCase
         $this->assertSame('stable-request-id', $first['request_id']);
     }
 
+    public function test_http_provisioning_interoperates_with_go_node_agent_over_tls_13_mtls(): void
+    {
+        if (! function_exists('proc_open')) {
+            $this->markTestSkipped('Process control is required for the PHP-to-Go mTLS integration test.');
+        }
+        $timeoutCommand = $this->compatibleTimeoutCommand();
+        if ($timeoutCommand === null) {
+            $this->markTestSkipped('A timeout utility is required for the PHP-to-Go mTLS integration test.');
+        }
+
+        $directory = sys_get_temp_dir().'/xlb-peer-provisioning-'.bin2hex(random_bytes(8));
+        $this->assertTrue(mkdir($directory, 0700));
+        $nodeAgentDirectory = base_path('../node-agent');
+        $helperSource = $nodeAgentDirectory.'/testdata/php-provisioning/main.go';
+        $helperBinary = $directory.'/node-agent-php-provisioning';
+        $build = proc_open(
+            [$timeoutCommand, '-k', '1s', '60s', 'go', 'build', '-o', $helperBinary, $helperSource],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $buildPipes,
+            $nodeAgentDirectory,
+        );
+        $this->assertIsResource($build, 'Could not start the Go fixture build.');
+        fclose($buildPipes[0]);
+        $buildOutput = stream_get_contents($buildPipes[1]);
+        $buildError = stream_get_contents($buildPipes[2]);
+        fclose($buildPipes[1]);
+        fclose($buildPipes[2]);
+        $this->assertSame(0, proc_close($build), trim($buildError.' '.$buildOutput));
+
+        $nodeId = 'node-test-1';
+        $server = proc_open(
+            [
+                $helperBinary, '--directory', $directory, '--node-id', $nodeId,
+                '--capacity', '4', '--bridge-listen-address', '127.0.0.1:17890',
+            ],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $serverPipes,
+            $nodeAgentDirectory,
+        );
+        $this->assertIsResource($server, 'Could not start the Go Node Agent fixture.');
+        fclose($serverPipes[0]);
+        stream_set_timeout($serverPipes[1], 10);
+        $startup = json_decode((string) fgets($serverPipes[1]), true);
+
+        try {
+            $this->assertIsArray($startup);
+            $this->assertMatchesRegularExpression('/^https:\/\/127\.0\.0\.1:\d+$/', $startup['endpoint'] ?? '');
+            $this->assertFileExists($startup['ca_certificate'] ?? '');
+            $this->assertFileExists($startup['client_certificate'] ?? '');
+            $this->assertFileExists($startup['client_private_key'] ?? '');
+
+            $this->prepareProductionRouteAndDevice();
+            $deviceKey = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+            $this->assertNotFalse($deviceKey);
+            $deviceKeyDetails = openssl_pkey_get_details($deviceKey);
+            $this->assertIsArray($deviceKeyDetails);
+            $publicKeyBase64 = preg_replace('/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s+/', '', $deviceKeyDetails['key']);
+            $this->assertIsString($publicKeyBase64);
+            $publicKeyDer = base64_decode($publicKeyBase64, true);
+            $this->assertIsString($publicKeyDer);
+            $fingerprint = hash('sha256', $publicKeyDer);
+            DB::table('member_devices')->where('id', 'device-provision-1')->update([
+                'public_key' => rtrim(strtr(base64_encode($publicKeyDer), '+/', '-_'), '='),
+                'public_key_fingerprint' => $fingerprint,
+            ]);
+            DB::table('nodes')->where('id', $nodeId)->update(['agent_endpoint' => $startup['endpoint']]);
+            config([
+                'node_access.driver' => 'agent',
+                'node_access.provisioning_enabled' => true,
+                'node_access.agent.client_certificate' => $startup['client_certificate'],
+                'node_access.agent.client_key' => $startup['client_private_key'],
+                'node_access.agent.ca_bundle' => $startup['ca_certificate'],
+            ]);
+            $this->app->forgetInstance(NodePeerProvisioningDriver::class);
+
+            $service = app(NodePeerProvisioningService::class);
+            $pending = $service->ensureForProvenDevice('user-member', 'device-provision-1', $fingerprint);
+            $this->assertSame('provisioning', $pending['status']);
+            $this->assertSame(1, app(NodePeerProvisioningProcessor::class)->processDue());
+
+            $peer = DB::table('node_access_peers')->where('device_id', 'device-provision-1')->first();
+            $this->assertNotNull($peer);
+            $this->assertSame('active', $peer->status);
+            $this->assertSame('confirmed', $peer->provision_confirmation_status);
+            $this->assertSame('mihomo-yaml', $peer->profile_format);
+            $this->assertSame('xlb-mihomo-bridge-v1', $peer->profile_renderer_id);
+            $profile = Crypt::decryptString($peer->profile_ciphertext);
+            $this->assertSame(hash('sha256', $profile), $peer->profile_sha256);
+            $this->assertStringContainsString('127.0.0.1', $profile);
+            $this->assertStringNotContainsString('private_key', strtolower($profile));
+            $this->assertStringNotContainsString('peer_credential', strtolower($profile));
+
+            $report = json_decode((string) file_get_contents($startup['client_report']), true);
+            $this->assertIsArray($report);
+            $this->assertTrue($report['tls_present'] ?? false, json_encode($report));
+            $this->assertSame('TLS1.3', $report['tls_version'] ?? null, json_encode($report));
+            $this->assertGreaterThanOrEqual(1, $report['peer_certificate_count'] ?? 0, json_encode($report));
+            $this->assertGreaterThanOrEqual(1, $report['verified_chain_count'] ?? 0, json_encode($report));
+            $this->assertTrue($report['verified_chain'] ?? false);
+            $this->assertSame('/v1/member-peers/ensure', $report['request_path'] ?? null);
+            $clientCertificate = openssl_x509_read((string) file_get_contents($startup['client_certificate']));
+            $this->assertNotFalse($clientCertificate);
+            $this->assertSame(openssl_x509_fingerprint($clientCertificate, 'sha256'), $report['client_certificate_sha256'] ?? null);
+
+            $ready = $service->ensureForProvenDevice('user-member', 'device-provision-1', $fingerprint);
+            $this->assertSame('ready', $ready['status']);
+            $this->assertSame($peer->id, $ready['peer_id']);
+            $this->assertSame($nodeId, $ready['node_id']);
+            $this->assertSame($profile, $ready['profile']);
+            $this->assertSame(Crypt::decryptString($peer->credential_ciphertext), $ready['peer_credential']);
+        } finally {
+            $status = proc_get_status($server);
+            $shutdownDeadline = microtime(true) + 2.0;
+            while ($status['running'] && microtime(true) < $shutdownDeadline) {
+                usleep(10_000);
+                $status = proc_get_status($server);
+            }
+            if ($status['running']) {
+                proc_terminate($server, 9);
+            }
+            fclose($serverPipes[1]);
+            fclose($serverPipes[2]);
+            proc_close($server);
+            foreach (glob($directory.'/*') ?: [] as $path) {
+                if (is_file($path)) {
+                    unlink($path);
+                }
+            }
+            rmdir($directory);
+        }
+    }
+
     public function test_timeout_after_node_execution_retries_idempotently_and_encrypts_peer_profile(): void
     {
         $this->prepareProductionRouteAndDevice();
@@ -267,5 +399,24 @@ class NodePeerProvisioningTest extends TestCase
         ]);
 
         return 'peer-provision-1';
+    }
+
+    private function compatibleTimeoutCommand(): ?string
+    {
+        $path = getenv('PATH');
+        if (! is_string($path)) {
+            return null;
+        }
+
+        foreach (explode(PATH_SEPARATOR, $path) as $directory) {
+            foreach (['timeout', 'gtimeout'] as $name) {
+                $command = rtrim($directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$name;
+                if (is_executable($command)) {
+                    return $command;
+                }
+            }
+        }
+
+        return null;
     }
 }

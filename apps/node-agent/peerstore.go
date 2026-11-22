@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -135,9 +136,10 @@ type RevocationReceipt struct {
 }
 
 type PeerStore struct {
-	path     string
-	nodeID   string
-	capacity int
+	path            string
+	nodeID          string
+	capacity        int
+	profileRenderer ProfileRenderer
 }
 
 type RuntimeSnapshot struct {
@@ -206,6 +208,18 @@ type agentState struct {
 }
 
 func OpenPeerStore(path, nodeID string, capacity int) (*PeerStore, error) {
+	return openPeerStore(path, nodeID, capacity, nil)
+}
+
+func OpenPeerStoreWithProfileRenderer(path, nodeID string, capacity int, renderer ProfileRenderer) (*PeerStore, error) {
+	if renderer == nil {
+		return nil, ErrInvalid
+	}
+
+	return openPeerStore(path, nodeID, capacity, renderer)
+}
+
+func openPeerStore(path, nodeID string, capacity int, renderer ProfileRenderer) (*PeerStore, error) {
 	if path == "" || nodeID == "" || capacity < 1 {
 		return nil, ErrInvalid
 	}
@@ -222,7 +236,7 @@ func OpenPeerStore(path, nodeID string, capacity int) (*PeerStore, error) {
 	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("protect existing node state: %w", err)
 	}
-	store := &PeerStore{path: path, nodeID: nodeID, capacity: capacity}
+	store := &PeerStore{path: path, nodeID: nodeID, capacity: capacity, profileRenderer: renderer}
 	if err := store.update(func(state *agentState) error {
 		if state.NodeID != "" && (state.NodeID != nodeID || state.Capacity != capacity) {
 			return fmt.Errorf("persisted node identity or capacity differs from configured values: %w", ErrInvalid)
@@ -303,6 +317,47 @@ func (store *PeerStore) EnsurePeer(request EnsurePeerRequest) (EnsurePeerReceipt
 	if fingerprint(publicKeyDER) != request.DeviceKeyFingerprint {
 		return EnsurePeerReceipt{}, ErrInvalid
 	}
+	var priorReceipt EnsurePeerReceipt
+	priorExists := false
+	if err := store.read(func(state *agentState) error {
+		prior, exists := state.Operations[request.RequestID]
+		if !exists {
+			return nil
+		}
+		if prior.Digest != digest || prior.EnsureReceipt == nil {
+			return ErrRequestConflict
+		}
+		priorReceipt = *prior.EnsureReceipt
+		priorExists = true
+		return nil
+	}); err != nil {
+		return EnsurePeerReceipt{}, err
+	}
+	if priorExists {
+		return priorReceipt, nil
+	}
+
+	confirmationStatus := "confirmed_test"
+	var artifact *ProfileArtifact
+	if store.profileRenderer != nil {
+		profileRequest := ProfileRenderRequest{
+			NodeID: request.NodeID, PeerID: request.PeerID, EntitlementID: request.EntitlementID,
+			RequestID: request.RequestID, Generation: request.Generation, DeviceID: request.DeviceID,
+			DeviceKeyFingerprint:    request.DeviceKeyFingerprint,
+			DeviceBindingGeneration: request.DeviceBindingGeneration, BridgeProtocol: "xlb-proof-v1",
+		}
+		renderContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		rendered, renderErr := store.profileRenderer.Render(renderContext, profileRequest)
+		cancel()
+		if renderErr != nil {
+			return EnsurePeerReceipt{}, fmt.Errorf("render member bridge profile: %w", ErrInvalid)
+		}
+		if err := ValidateProfileArtifact(profileRequest, rendered); err != nil {
+			return EnsurePeerReceipt{}, err
+		}
+		artifact = &rendered
+		confirmationStatus = "confirmed"
+	}
 
 	var receipt EnsurePeerReceipt
 	err = store.update(func(state *agentState) error {
@@ -321,7 +376,8 @@ func (store *PeerStore) EnsurePeer(request EnsurePeerRequest) (EnsurePeerReceipt
 
 		receipt = EnsurePeerReceipt{
 			NodeID: store.nodeID, PeerID: request.PeerID, RequestID: request.RequestID,
-			Generation: request.Generation, AcknowledgementID: randomID(), ConfirmationStatus: "confirmed_test",
+			Generation: request.Generation, AcknowledgementID: randomID(), ConfirmationStatus: confirmationStatus,
+			ProfileArtifact: artifact,
 		}
 		state.Peers[request.PeerID] = peerRecord{
 			NodeID: request.NodeID, PeerID: request.PeerID, EntitlementID: request.EntitlementID,

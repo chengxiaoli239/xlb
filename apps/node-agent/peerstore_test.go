@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -65,6 +66,59 @@ func TestIsolatedEnsureReceiptDoesNotIncludeAProductionProfileArtifact(t *testin
 	}
 	if receipt.ProfileArtifact != nil {
 		t.Fatal("isolated test Agent must not provide a production profile artifact")
+	}
+}
+
+func TestEnsureWithProfileRendererPersistsIdentityBoundArtifactAcrossRetries(t *testing.T) {
+	request, _ := testEnsureRequest(t, "peer-rendered", "ensure-rendered")
+	renderer, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storePath := filepath.Join(t.TempDir(), "peer-store.json")
+	store, err := OpenPeerStoreWithProfileRenderer(storePath, "node-test", 4, renderer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := store.EnsurePeer(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ConfirmationStatus != "confirmed" || first.ProfileArtifact == nil {
+		t.Fatalf("renderer receipt status/artifact = %q/%v; want confirmed with artifact", first.ConfirmationStatus, first.ProfileArtifact != nil)
+	}
+	profileRequest := ProfileRenderRequest{
+		NodeID: request.NodeID, PeerID: request.PeerID, EntitlementID: request.EntitlementID,
+		RequestID: request.RequestID, Generation: request.Generation, DeviceID: request.DeviceID,
+		DeviceKeyFingerprint: request.DeviceKeyFingerprint, DeviceBindingGeneration: request.DeviceBindingGeneration,
+		BridgeProtocol: "xlb-proof-v1",
+	}
+	if err := ValidateProfileArtifact(profileRequest, *first.ProfileArtifact); err != nil {
+		t.Fatalf("renderer artifact did not match the request: %v", err)
+	}
+	if strings.Contains(strings.ToLower(first.ProfileArtifact.Content), request.Credential) {
+		t.Fatal("rendered profile contains the peer credential")
+	}
+
+	second, err := store.EnsurePeer(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("idempotent retry changed its receipt: first=%+v second=%+v", first, second)
+	}
+
+	reopened, err := OpenPeerStore(storePath, "node-test", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRestart, err := reopened.EnsurePeer(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, afterRestart) {
+		t.Fatalf("idempotent retry after reopen changed its receipt: first=%+v reopened=%+v", first, afterRestart)
 	}
 }
 
