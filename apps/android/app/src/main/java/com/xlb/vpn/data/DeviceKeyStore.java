@@ -36,7 +36,7 @@ final class DeviceKeyStore {
         KeyPairGenerator generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, KEY_STORE);
         generator.initialize(new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
                 .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
-                .setDigests(KeyProperties.DIGEST_SHA256)
+                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_NONE)
                 .build());
         return generator.generateKeyPair();
     }

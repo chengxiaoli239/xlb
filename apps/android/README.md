@@ -39,7 +39,9 @@ Release 构建的默认 API 地址是保留的 `https://api.xlb.invalid`，在�
 
 ## Android Keystore 与匿名恢复隔离验收
 
-在 Apple Silicon Mac 上创建并启动名为 `xlb-m9-recovery` 的 Android API 35 ARM64 AVD 后，可运行隔离的 Keystore/匿名恢复 instrumentation。测试验证 Android Keystore P-256 key 按 installation ID 稳定复用、不同 installation ID 密钥隔离、32 字节 challenge 签名与公钥匹配、私钥不可导出，并覆盖匿名恢复状态。脚本要求显式 `EMULATOR_SERIAL`，校验该 serial 是 emulator 且 AVD 名恰好为专用测试名，只对它安装 APK/设置 ADB reverse；会在 `/tmp` 新建 SQLite，拒绝复用已占用的 API 端口 `4181`，传入 `disposable_avd=true` 与 `isolated_api=true`，结束后停止自身 API 并删除本次创建的临时目录。
+在 Apple Silicon Mac 上创建并启动名为 `xlb-m9-recovery` 的 Android API 35 ARM64 AVD 后，可运行隔离的 Keystore/匿名恢复 instrumentation。测试验证 Android Keystore P-256 key 按 installation ID 稳定复用、不同 installation ID 密钥隔离、32 字节 challenge 签名与公钥匹配、私钥不可导出，并覆盖匿名恢复状态。额外的 digest 合同测试只在该专用 AVD 上验证 `NONEwithECDSA` 对预计算 SHA-256 digest 的签名可按 Go `crypto.Signer` 语义验签，并生成公开测试向量 `files/android-keystore-digest-vector.json`，供 Go 单测使用；该向量不是设备凭证或生产 peer proof。读出向量后应在同一专用 AVD 上执行 `adb -s <serial> shell run-as com.xlb.vpn.debug rm files/android-keystore-digest-vector.json` 清除。新建密钥同时授权 SHA-256 与 digest 模式；先前已存在的 SHA-256-only alias 不会因代码更新而自动变化，raw-digest 操作必须失败关闭，既不回退为对 digest 再做 SHA-256，也不自动删除/轮换 alias 或更改 installation ID。此阶段未接 JNI/Java callback、Go bridge、生产 certificate 或 VPN 连接路径。
+
+脚本要求显式 `EMULATOR_SERIAL`，校验该 serial 是 emulator 且 AVD 名恰好为专用测试名，只对它安装 APK/设置 ADB reverse；会在 `/tmp` 新建 SQLite，拒绝复用已占用的 API 端口 `4181`，传入 `disposable_avd=true` 与 `isolated_api=true`，结束后停止自身 API 并删除本次创建的临时目录。
 
 ```sh
 cd apps/android

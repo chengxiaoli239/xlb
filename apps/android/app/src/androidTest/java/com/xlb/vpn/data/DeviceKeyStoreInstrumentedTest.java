@@ -1,31 +1,41 @@
 package com.xlb.vpn.data;
 
 import android.os.Build;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
+import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.FileOutputStream;
 import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
 import java.security.KeyStore;
+import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.Signature;
 import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Locale;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 @RunWith(AndroidJUnit4.class)
 public final class DeviceKeyStoreInstrumentedTest {
@@ -98,5 +108,89 @@ public final class DeviceKeyStoreInstrumentedTest {
                 keyStore.deleteEntry(secondAlias);
             }
         }
+    }
+
+    @Test
+    public void digestSignatureMatchesGoCryptoSignerContract() throws Exception {
+        String installationId = "digest-contract-" + UUID.randomUUID();
+        String alias = KEY_ALIAS_PREFIX + installationId;
+        DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
+        KeyStore keyStore = KeyStore.getInstance(KEY_STORE);
+        byte[] message = "xlb Android Keystore crypto.Signer contract v1".getBytes(StandardCharsets.UTF_8);
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(message);
+
+        try {
+            String encodedPublicKey = deviceKeyStore.publicKey(installationId);
+            KeyStore.PrivateKeyEntry entry;
+            keyStore.load(null);
+            entry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(alias, null);
+            byte[] signatureBytes = signDigest(entry.getPrivateKey(), digest);
+            PublicKey publicKey = KeyFactory.getInstance("EC").generatePublic(
+                    new X509EncodedKeySpec(DeviceBindingProof.decode(encodedPublicKey))
+            );
+
+            Signature digestVerifier = Signature.getInstance("NONEwithECDSA");
+            digestVerifier.initVerify(publicKey);
+            digestVerifier.update(digest);
+            assertTrue("Android Keystore must sign the supplied digest without hashing it again",
+                    digestVerifier.verify(signatureBytes));
+
+            Signature messageVerifier = Signature.getInstance("SHA256withECDSA");
+            messageVerifier.initVerify(publicKey);
+            messageVerifier.update(message);
+            assertTrue("The digest signature must verify against the original message",
+                    messageVerifier.verify(signatureBytes));
+
+            JSONObject vector = new JSONObject()
+                    .put("message", DeviceBindingProof.encode(message))
+                    .put("digest", DeviceBindingProof.encode(digest))
+                    .put("public_key", encodedPublicKey)
+                    .put("signature", DeviceBindingProof.encode(signatureBytes));
+            try (FileOutputStream output = InstrumentationRegistry.getInstrumentation()
+                    .getTargetContext().openFileOutput("android-keystore-digest-vector.json", 0)) {
+                output.write(vector.toString().getBytes(StandardCharsets.UTF_8));
+            }
+        } finally {
+            keyStore.load(null);
+            if (keyStore.containsAlias(alias)) {
+                keyStore.deleteEntry(alias);
+            }
+        }
+    }
+
+    @Test
+    public void legacySha256OnlyKeyFailsClosedWithoutRotation() throws Exception {
+        String installationId = "legacy-digest-contract-" + UUID.randomUUID();
+        String alias = KEY_ALIAS_PREFIX + installationId;
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("EC", KEY_STORE);
+        generator.initialize(new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
+                .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
+                .setDigests(KeyProperties.DIGEST_SHA256)
+                .build());
+        PublicKey originalPublicKey = generator.generateKeyPair().getPublic();
+        KeyStore keyStore = KeyStore.getInstance(KEY_STORE);
+        keyStore.load(null);
+
+        try {
+            try {
+                signDigest((PrivateKey) keyStore.getKey(alias, null), new byte[32]);
+                fail("A SHA256-only legacy key must not sign a pre-hashed digest");
+            } catch (java.security.GeneralSecurityException expected) {
+                assertTrue("Legacy key must remain registered", keyStore.containsAlias(alias));
+            }
+            assertArrayEquals(originalPublicKey.getEncoded(),
+                    keyStore.getCertificate(alias).getPublicKey().getEncoded());
+        } finally {
+            if (keyStore.containsAlias(alias)) {
+                keyStore.deleteEntry(alias);
+            }
+        }
+    }
+
+    private static byte[] signDigest(PrivateKey privateKey, byte[] digest) throws Exception {
+        Signature signer = Signature.getInstance("NONEwithECDSA");
+        signer.initSign(privateKey);
+        signer.update(digest);
+        return signer.sign();
     }
 }
