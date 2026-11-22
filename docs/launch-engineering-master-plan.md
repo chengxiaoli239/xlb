@@ -57,14 +57,14 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 
 ### 0.2 近期依赖顺序与并行边界（2026-11-22）
 
-上一轮的全量审计以 `3751174` 为基线，曾检查 26 个 worktree 和 25 条功能分支；这是历史快照，不代表本轮所有 worktree 已重新核验。当前 `main` 与 `origin/main` 为 `475059b`。主 worktree 保留未跟踪 `.playwright-cli/` 与 `output/`，本轮不清理或提交。当前另有 `codex/android-node-auth-status=12b464f` 的旧 worktree；其授权状态保留行为已由主线后续 `MemberDeviceProof` 改动覆盖，未将旧分支倒合回主线。ADB 5037 当前可见两台会员真机和专用 AVD；本地 API 4175 正在监听。`xlb-ops` STS 当前有效；只读盘点确认 M6 实验栈及带实验标签的实例、卷、ENI、安全组、调度器、IAM 角色/配置文件和地址均无残留，现存管理栈未触碰。无云写入。
+**当前 worktree / 依赖快照（2026-11-22，main=`84217ce`）**：只读 Git 图审计 28 个 worktree（main + 27 个 codex 功能分支）；27 条功能分支相对 main 的独有 patch 数均为 0，提交要么已在主线，要么 patch-equivalent，不应重复倒合。27 个功能 worktree 中 26 个状态干净；`android-native-ci` 有 2 项既存用户改动，保留不动。主 worktree 有 2 项既存未跟踪路径 `.playwright-cli/`、`output/`，不清理、不提交。当前没有需要合并的历史功能分支。两台会员真机现已登录并具备当前 installation 的独立 P-256 绑定，ADB 中仍有专用 AVD；会员线路不可用。`xlb-ops` STS 当前有效；指定实验资源只读确认已回收，现存管理栈未触碰；本轮无云写入。
 
 近期按“共用契约先锁定、平台实现并行、真实节点串行验收”推进：
 
 1. **Android M8 离线证明阶段（2026-11-22 已完成）**：专用隔离 AVD instrumentation 已验证同 installation ID 稳定复用 P-256 公钥、不同 installation ID 得到不同公钥、challenge 签名可由对应公钥验证、私钥不可导出；完整 instrumentation 6/6 通过。此阶段不证明硬件 backed provenance，也未接入会员隧道。
 2. **Windows M8 平台密钥阶段（2026-11-22 hosted 已通过）**：Windows-only CNG P-256 signer 使用直接 `windows-sys 0.61.2` bindings，existing key 每次打开均核对 signing-only/zero-export/P-256；Windows hosted 29 tests 与 MSVC build 均通过（run `44959472000`）。本机无 Cargo/Rust；bridge 仍关闭，不能外推为 sidecar/TUN/会员线路验收。两个平台只共享 `xlb-proof-v1` wire/身份语义，不共享私钥或把一个平台的测试结果外推到另一个平台。
 3. **M10 Agent probe 阶段（PHP 配置型 transport 与 Agent listener 契约已落地，真实 transport 未验收）**：PHP 新增按 node ID 配置 endpoint 与逐节点 CA bundle 的 `ConfiguredNodeDataPlaneProbeTransport`，强制 HTTPS origin、mTLS client cert/key、证书校验、禁 redirect 和随机 challenge/节点 ID 复核；仅显式选择 `NODE_HEALTH_PROBE_TRANSPORT=http` 注册，探测与 route filter 保持默认关闭。Go Agent listener 是 opt-in 独立 loopback TLS 1.3 mTLS，但 runnable Agent 无真实 executor，返回 `503 probe_unavailable`。PHP fake tests 不证明 HTTP fake 中的 TLS/mTLS，也不能证明真实节点健康。下一步接入已审核的实际节点身份/证书来源与真实 transport，并在批准隔离节点核验 challenge echo；不得让 liveness、fake executor 或订阅拉取刷新健康时间。
-4. **M6 会员节点阶段（设备身份后，云端验收前串行）**：两台物理设备足够，不需要第三台。2026-11-22 重装后 ALT 当前安装已在沙箱登录并新建独立 P-256 绑定；VOG 当前安装尚未登录，旧 VOG 绑定不算当前安装证据，旧设备行均保留。下一步完成 VOG 当前安装登录/challenge 并核实两条当前身份互不相同；再等待可用隔离 member profile/节点线路，执行有效连接、双机同时与错峰凭证复制拒绝、匹配 node/peer/request/generation 的撤权回执和最终流量单调验证。AWS `xlb-ops` session expired，任何云端步骤前需用户本人 `aws login`，之后通过 `ops/aws-cli` 只读盘点、复核获批 plan 后才可 `--apply`；无节点回执不能宣称断流。
+4. **M6 会员节点阶段（身份已齐，云端验收前串行）**：两台物理设备足够，不需要第三台。ALT-AN00 与 VOG-AL10 当前安装均已登录沙箱会员且各自完成独立 P-256 challenge 绑定；两条旧设备记录保留。`xlb-ops` STS 已由项目包装验证有效，M6 实验栈及关联资源已回收。当前缺 server-verified member profile、节点身份/端点/证书材料与可核对节点回执；材料到位后先按获批范围只读盘点并复核 plan，再做有效会员连接、双机同时/错峰凭证复制拒绝、匹配 node/peer/request/generation 的撤权回执与最终流量单调验证。未取得节点回执不能宣称断流。
 5. **E1–E7 放行链**：真实 mTLS/密钥注入、合规书面意见、staging/签名与回滚、分级容量数据、监控与成本预算、多云 conformance、试运行均为独立放行门；不得用本机 smoke、CI 绿灯、fake worker 或 M6 合成 peer 替代。
 
 **下一轮执行波次**（最多两个独立 worktree 同时开发；共享的 `xlb-proof-v1` 身份语义保持一致，主控逐阶段验收和串行 merge/push）：
