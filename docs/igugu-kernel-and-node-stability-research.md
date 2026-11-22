@@ -1,13 +1,13 @@
 # iGuge 内核边界与节点稳定性研究
 
-日期：2026-11-21。范围：根据仓库现有设计/验收记录、用户提供的 Clash Verge 截图和本地代码做桌面研究；本轮未访问 iGuge 私有插件数据、未查询生产节点、未做云端操作。本文描述证据能支持的结论，不把代码存在等同于生产部署。
+初稿日期：2026-11-21；证据复核：2026-11-22。范围：根据仓库现有设计/验收记录、用户提供的 Clash Verge 截图和本地代码做桌面研究；本次复核未访问 iGuge 私有插件数据、未查询生产节点、未做云端操作。本文描述证据能支持的结论，不把代码存在等同于生产部署。
 
 ## 结论摘要
 
 - **客户端内核决策已定：维持 Mihomo。** 用户提供的 Clash Verge 设置截图显示 `alpha-69c1631 Mihomo`；这指向用户安装的 Clash Verge 客户端内核，不是 iGuge 服务端内核。它与本项目锁定验证的 Mihomo `v1.19.34` 属同一 Mihomo 家族。用户已明确选择继续使用 Mihomo。仅凭截图换内核没有收益，却会改变平台封装、proof bridge、配置、许可证与验收体系。
 - **内核由客户端软件决定，不由订阅 URL 决定。** 订阅返回节点、规则和代理组等配置数据，不携带或安装内核。同一订阅可由 Clash Verge/Mihomo 解析，也可由 v2rayN 所使用的 Xray 或 sing-box 客户端解析，前提是格式和协议兼容。看到 Mihomo 是因为 Clash Verge 带有 Mihomo 核心，与 iGuge 返回的订阅内容无关。
 - **iGuge 扩展不是 VPN 内核载体。** 项目既有材料只记录其可见账户、VIP、订阅分发和兼容客户端导入路径；无法据此核实扩展内部实现，更不能宣称扩展承担隧道数据面。iGuge 桌面/移动客户端使用何种服务端协议或节点内核，当前没有直接证据。
-- **节点稳定性暂无生产结论。** 仓库里的 Node Access Agent 明确拒绝 production mode；历史证据证明少量隔离 TCP 请求、一次 Android 代理重连和临时资源到期回收，不证明生产会员节点长期稳定。最直接的改进机会是补齐可观测性、真正持续运行的健康探测和节点故障后的受控选路；封锁/抗审查原因目前只是待证假设。
+- **节点稳定性暂无生产结论。** 仓库里的 Node Access Agent 明确拒绝 production mode；除历史隔离 TCP 记录外，现已有 Go/PHP 本机 TLS 1.3/mTLS challenge 测试、持久健康状态 CAS、默认关闭的健康命令/15 秒 scheduler 与可选路由过滤，但 runnable Agent 没有真实 `DataPlaneProbeExecutor`，探测 listener 仍返回 `503 probe_unavailable`。这些证明代码合同而非已部署探测或生产会员节点长期稳定。协议封锁/抗审查原因仍是待证假设。
 
 ## A. 内核与产品形态
 
@@ -46,7 +46,7 @@
 | P0：生产服务尚未部署完整 | `apps/node-agent/cmd/node-agent` 启动时强制 `NODE_AGENT_MODE=isolated-test`，否则退出；PRD 记 production mode、生产 mTLS 与 bridge 安全区交付未完成 | 因此仓库不能解释或保证某个真实会员生产节点的稳定性；若用户报告来自另一套服务，需要取得其版本/部署和脱敏事件才能归因 | 先建立节点/线路/客户端关联的故障事件，不把本地隔离测试等同生产诊断；需要正式接入前置外部材料和放行门 |
 | P0：实验节点 TTL 到期 | `ops/aws-node-lab.template.json` 创建带 `ExpiresAt` 标签和 EventBridge Scheduler 的限时测试实例；runbook 明确到期终止实例、调度可能延迟、Scheduler 终止实例不自动删除整栈。2026-11-08 和 11-14 实验记录分别实际观察过终止/整栈回收 | 这是隔离实验资源生命周期，不是生产会员节点 TTL。若把实验线路当长期线路，连接中断是预期结果；目前没有证据显示 TTL 造成生产用户故障 | 离线：在 API/客户端区分测试线路和会员线路并展示截止时间。真实部署：核实资源标签、实例状态和 CloudTrail，不从旧资源记录推断当前状态 |
 | P0：AWS 运维会话过期 | 历史上 `xlb-ops` 曾返回 `ExpiredToken`，AWS CLI 写操作未被服务端接受；本轮 STS 仍有效返回目标账号 root ARN | 会话过期会阻止管理面查询/部署/回收，不等于已运行节点的数据隧道自动断开；没有因该错误造成节点中断的证据 | CLI 始终用 `ops/aws-cli`；控制面区分“凭据失效”和“节点不健康”，不要把一个映射成另一个。真实节点故障时另查节点事件和客户端握手 |
-| P1：健康状态新鲜度/缺少持续探测 | `health_check_ttl_seconds` 默认 300 秒；订阅解析与 peer provisioning 会拒绝超过 TTL 的健康记录。`NodeAutomation` 在管理员测试节点完成一次协议验收时写入 `last_health_check_at`。代码检索未发现对会员节点持续探测的已部署 worker | 若健康记录没有持续更新，达到 300 秒后线路会变为不可选，表现为暂不可用；它通常解释“不分配新线路”，不能单独证明已有 TCP 流为何断开 | 离线：为健康采样定义独立 provider-neutral 结果、错误类别、单测及 freshness 状态；实施要明确持续 worker 所属环境。真实节点：探测节点 Agent/握手和受控 HTTPS 出口并验证 false-positive 阈值 |
+| P1：健康状态新鲜度/真实探测执行器缺失 | `subscription_routes.health_check_ttl_seconds` 默认 300 秒，供既有节点健康字段筛选；独立探测路由状态 TTL 默认 30 秒。M10 已有 `ConfiguredNodeDataPlaneProbeTransport`、`MtlsNodeHealthProbeDriver`、SQLite CAS 状态仓库及 `nodes:probe-health` 命令；Laravel scheduler 仅在显式启用且 driver 已绑定时每 15 秒调度。PHP transport 已在 loopback TLS 1.3/mTLS listener 和 test-only Go listener 上做过集成测试。`cmd/node-agent` 对没有 executor 的探测 listener 返回 `503 probe_unavailable`；probe/route filter 默认关闭 | 两种 TTL 分属不同状态源；旧 300 秒 `last_health_check_at` 过期可使节点不可选，但不单独证明已有 TCP 流中断。代码中存在 scheduler 不证明受控运行环境确实常驻执行；HTTP fake、test-only echo 和本机 mTLS 互通也都不是节点健康观测 | 离线：保持 fail closed，补充 scheduler/状态新鲜度集成测试与部署运行合同，不用 fake executor 写成功健康时间。真实节点：由批准环境提供 node ID、endpoint、server cert、client cert/key 与 CA 映射，实现受信 executor/目标 challenge 交换；核对超时/证书失败、状态持久化、误报阈值和受控 scheduler 实际运行 |
 | P1：故障切换、线路调度不足 | `SubscriptionRouteService` 支持固定版本、canary/published、fresh health 过滤、draining 和回滚；运维文档指出当前订阅配置为单一 `select`，AUTO/远程规则尚未实现。现有代码只在 `subscription-routes:reconcile` 收口到期的 drain 版本，不等于节点探测器 | 单节点、单线路或无 fallback 时，短暂故障会直接暴露给用户；未证实已有跨节点自动故障切换 | 离线：先完善多节点 route fixture/状态转换测试。真实环境：同线路至少两台健康节点做故障注入和切换时延验收；每次切换仍经逐设备 peer 授权/撤权，不允许客户端直跳绕过设备绑定 |
 | P1：会话租约或网络抖动 | Node Agent 隔离实现的 challenge 和 session lease 为 2 分钟；bridge 心跳间隔 20 秒，续租由 Agent 校验设备证书并检查 peer 状态。隔离代码的心跳失败会关闭空闲连接，但没有用户生产环境长时/断网恢复证据 | 短时丢包、进程休眠、证书/时钟问题可能导致租约过期，重连被拒；是否发生在用户环境未知。当前没有跨平台长时运行与断网恢复验收 | 离线：测试连续心跳、短时中断、重启/过期、服务端拒绝后的错误分类和重连退避；真实设备/节点：前后台切换、Wi-Fi/蜂窝切换、时钟偏差和节点重启场景留证 |
 | P1：容量或资源耗尽 | peer-store 在本地跨进程状态锁内原子检查容量；记录有 12 个进程竞争 3 个并发名额恰好 3 个成功。容量不足会返回明确拒绝。隔离协议 harness 的早期 M6 拒绝曾因未证明有空位而不能归因身份 | 该测试证明原子名额边界，不证明小规格实例长时 CPU/内存/连接数、文件描述符、带宽、连接跟踪表或真实并发行为；容量耗尽会表现为拒连但不是身份复制防护 | 离线：补有界压力模型、资源使用指标契约和稳定容量拒绝。真实节点：按目标容量做分阶段持续测试，记录 CPU、RSS、FD、活跃 peer、建立成功率与 p95/p99，不超 `$1` 已批准单小时窗口 |
@@ -60,7 +60,7 @@
 | --- | --- | --- | --- |
 | P0 | 统一故障分类与证据链：`auth_denied`、`capacity`、`health_stale`、`connect_timeout`、`tls_handshake`、`target_unavailable`、`quota_unavailable`、`client_tunnel`；关联脱敏 node/route/config/request ID 与时间 | 事件模型、日志脱敏规则、模拟错误映射、Feature/Go 单测 | 真实生产事件字段和监控接入需部署审查 |
 | P0 | 把“看起来不稳定”拆成订阅、授权、握手、出口、DNS、流量和撤权状态；未知仍显示未知，不把健康探针通过等同隧道健康 | 文案/状态机/诊断摘要 | 用真实用户同意的脱敏事件验证可诊断性 |
-| P1 | 建立持续健康探测与熔断恢复策略，增加连续失败阈值、连续恢复观察、滞回，避免单次超时就切线路 | 探测契约、状态机、假 driver、阈值与抖动单测可离线开发 | 目标节点的探测端口、来源网络、延迟/丢包基线和假阳性阈值需实测 |
+| P1 | 将 M10 fail-closed 探测合同接入真实 Agent executor 与受控 scheduler；保留连续失败/恢复熔断、CAS 和独立状态 TTL | HTTP/TLS transport、驱动、CAS、一次性命令和条件 15 秒调度均有离线测试；可离线补部署声明和失败/陈旧状态测试 | 必须有获批节点身份/端点/证书与真实数据面 canary 目标；先验证误报阈值，再考虑开启真实路由过滤 |
 | P1 | route failover：`AUTO/url-test`、`fallback`、手动选择按版本化线路发布；故障节点停止新分配，旧线路受控 drain/rollback | YAML/profile renderer、route versions 关联、确定性模拟与测试 | 最少两台隔离节点、持续故障注入、切换时延与 peer 撤销回执 |
 | P1 | 确认生产 scheduler/worker 常驻、积压/租约/失败告警和资源逾期盘点；现在本地 worker 关闭不等于线上运行 | 部署清单、健康状态 API 与 worker 心跳测试 | 需专用受审环境和运维身份，不在本轮创建云资源 |
 | P1 | 对本机 bridge 的心跳/重连增加有界指数退避与抖动，区分离线、凭据过期、peer 撤权、节点不可达；保持撤权/配额未知时失败关闭 | 可在 fake Agent 测断线/恢复/续租边界并 race-test | 真机前后台、网络切换、真实节点重启的跨平台验收 |
