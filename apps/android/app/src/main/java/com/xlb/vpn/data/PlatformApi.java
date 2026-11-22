@@ -27,6 +27,7 @@ public final class PlatformApi {
     private final String baseUrl;
     private final SecureSessionStore sessionStore;
     private final DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
+    private MemberDeviceProof memberDeviceProof;
 
     public PlatformApi(String baseUrl, SecureSessionStore sessionStore) {
         this.baseUrl = baseUrl;
@@ -34,6 +35,7 @@ public final class PlatformApi {
     }
 
     public MemberAccount currentAccount() throws PlatformApiException {
+        memberDeviceProof = null;
         JSONObject account = request("GET", "/api/v1/auth/session", null).optJSONObject("data");
         if (account != null && !"member".equals(account.optString("role"))) {
             sessionStore.clearSession();
@@ -43,6 +45,7 @@ public final class PlatformApi {
     }
 
     public MemberAccount login(String email, String password) throws PlatformApiException {
+        memberDeviceProof = null;
         JSONObject payload = new JSONObject();
         try {
             payload.put("email", email.trim());
@@ -63,6 +66,7 @@ public final class PlatformApi {
     }
 
     public MemberAccount registerAnonymousAccount(boolean userConsented) throws PlatformApiException {
+        memberDeviceProof = null;
         if (!userConsented) {
             throw new PlatformApiException("需要先确认匿名账号使用说明");
         }
@@ -103,6 +107,7 @@ public final class PlatformApi {
     }
 
     public ClientSnapshot synchronize(MemberAccount account) throws PlatformApiException {
+        memberDeviceProof = null;
         try {
             ClientSnapshot overview = withOverview(new ClientSnapshot(account, null, null));
             if (overview.entitlement == null) {
@@ -110,13 +115,15 @@ public final class PlatformApi {
             }
             String registrationMessage = null;
             NodeAuthorizationStatus nodeAuthorizationStatus = NodeAuthorizationStatus.UNAVAILABLE;
+            MemberDeviceProof authorizedProof = null;
             try {
                 String installationId = sessionStore.installationId();
+                String publicKey = deviceKeyStore.publicKey(installationId);
                 JSONObject binding = new JSONObject()
                         .put("installation_id", installationId)
                         .put("name", Build.MODEL.length() > 80 ? Build.MODEL.substring(0, 80) : Build.MODEL)
                         .put("platform", "android")
-                        .put("public_key", deviceKeyStore.publicKey(installationId));
+                        .put("public_key", publicKey);
                 JSONObject challenge = request("POST", "/api/v1/me/device-bindings/challenge", binding).optJSONObject("data");
                 if (challenge == null || challenge.optString("challenge_id").isEmpty()) {
                     throw new PlatformApiException("设备授权响应格式不正确");
@@ -131,6 +138,27 @@ public final class PlatformApi {
                 JSONObject nodeAuthorization = authorization.optJSONObject("node_authorization");
                 nodeAuthorizationStatus = NodeAuthorizationStatus.fromStatus(
                         nodeAuthorization == null ? null : nodeAuthorization.optString("status", null));
+                if (nodeAuthorizationStatus == NodeAuthorizationStatus.READY) {
+                    JSONObject authorizedDevice = authorization.optJSONObject("device");
+                    authorizedProof = MemberDeviceProof.fromAuthorizedResponse(
+                            account.id,
+                            installationId,
+                            publicKey,
+                            authorizedDevice == null ? null : authorizedDevice.optString("id", null),
+                            authorizedDevice == null ? null : authorizedDevice.optString("status", null),
+                            authorizedDevice != null && authorizedDevice.optBoolean("bound", false),
+                            nodeAuthorization.optString("status", null),
+                            nodeAuthorization.optString("peer_id", null),
+                            nodeAuthorization.optString("node_id", null),
+                            nodeAuthorization.optLong("peer_generation", 0),
+                            nodeAuthorization.optLong("device_binding_generation", 0),
+                            nodeAuthorization.optString("peer_credential", null),
+                            nodeAuthorization.optString("profile", null),
+                            deviceSigner(installationId));
+                    if (authorizedProof == null) {
+                        nodeAuthorizationStatus = NodeAuthorizationStatus.UNAVAILABLE;
+                    }
+                }
                 try {
                     request("POST", "/api/v1/client/heartbeat", new JSONObject()
                             .put("installation_id", installationId)
@@ -141,16 +169,41 @@ public final class PlatformApi {
             } catch (PlatformApiException | GeneralSecurityException exception) {
                 registrationMessage = exception.getMessage();
             }
-            return withOverview(loadDevices(account, registrationMessage, nodeAuthorizationStatus));
+            ClientSnapshot snapshot = withOverview(loadDevices(account, registrationMessage, nodeAuthorizationStatus));
+            if (authorizedProof != null && authorizedProof.matches(
+                    account.id, snapshot.device, snapshot.entitlement != null)) {
+                memberDeviceProof = authorizedProof;
+            } else if (nodeAuthorizationStatus == NodeAuthorizationStatus.READY) {
+                memberDeviceProof = null;
+                return snapshot.withNodeAuthorizationStatus(NodeAuthorizationStatus.UNAVAILABLE);
+            }
+            return snapshot;
         } catch (PlatformApiException exception) {
+            memberDeviceProof = null;
             return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
         } catch (Exception exception) {
+            memberDeviceProof = null;
             return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
         }
     }
 
     public ClientSnapshot loadDevices(MemberAccount account) throws PlatformApiException {
+        memberDeviceProof = null;
         return withOverview(loadDevices(account, null));
+    }
+
+    private MemberDeviceProof.Signer deviceSigner(String installationId) {
+        return new MemberDeviceProof.Signer() {
+            @Override
+            public String publicKeySpkiBase64Url() throws GeneralSecurityException {
+                return deviceKeyStore.publicKey(installationId);
+            }
+
+            @Override
+            public String signChallengeBase64Url(byte[] challenge) throws GeneralSecurityException {
+                return deviceKeyStore.sign(installationId, DeviceBindingProof.encode(challenge));
+            }
+        };
     }
 
     private ClientSnapshot withOverview(ClientSnapshot current) {
@@ -197,7 +250,8 @@ public final class PlatformApi {
                     entries.add(new RegisteredDevice(device.optString("id"), name.isEmpty() ? "未命名设备" : name,
                             device.optString("platform"),
                             installationId.equals(device.optString("installation_id")),
-                            device.optBoolean("removal_pending")));
+                            device.optBoolean("removal_pending"), device.optString("installation_id"),
+                            device.optString("status")));
                 }
             }
             return new ClientSnapshot(account, new DeviceSnapshot(
@@ -214,6 +268,7 @@ public final class PlatformApi {
     }
 
     public boolean removeDevice(String deviceId) throws PlatformApiException {
+        memberDeviceProof = null;
         if (deviceId == null || !DEVICE_ID.matcher(deviceId).matches()) {
             throw new PlatformApiException("设备编号无效，请刷新设备列表");
         }
@@ -222,10 +277,12 @@ public final class PlatformApi {
     }
 
     public void rotateInstallationId() {
+        memberDeviceProof = null;
         sessionStore.rotateInstallationId();
     }
 
     public void logout() throws PlatformApiException {
+        memberDeviceProof = null;
         try {
             request("POST", "/api/v1/auth/logout", new JSONObject());
         } finally {
@@ -377,13 +434,22 @@ public final class PlatformApi {
         public final String platform;
         public final boolean current;
         public final boolean removalPending;
+        public final String installationId;
+        public final String status;
 
         public RegisteredDevice(String id, String name, String platform, boolean current, boolean removalPending) {
+            this(id, name, platform, current, removalPending, "", "registered");
+        }
+
+        public RegisteredDevice(String id, String name, String platform, boolean current, boolean removalPending,
+                                String installationId, String status) {
             this.id = id;
             this.name = name;
             this.platform = platform;
             this.current = current;
             this.removalPending = removalPending;
+            this.installationId = installationId;
+            this.status = status;
         }
     }
 
@@ -427,6 +493,11 @@ public final class PlatformApi {
         ClientSnapshot withOverview(EntitlementSummary overviewEntitlement, int activeSubscriptions) {
             return new ClientSnapshot(account, device, message, overviewEntitlement, activeSubscriptions,
                     accountProfile, nodeAuthorizationStatus);
+        }
+
+        ClientSnapshot withNodeAuthorizationStatus(NodeAuthorizationStatus status) {
+            return new ClientSnapshot(account, device, message, entitlement, subscriptionCount,
+                    accountProfile, status);
         }
     }
 
