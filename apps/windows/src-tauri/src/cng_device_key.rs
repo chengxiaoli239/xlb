@@ -35,6 +35,14 @@ impl DeviceKey {
         Self::open_named(&name, true)
     }
 
+    pub fn open_existing(installation_id: &str) -> Result<Self, String> {
+        if installation_id.trim().is_empty() {
+            return Err("installation identity is empty".into());
+        }
+        let name = key_name_for_identity(installation_id)?;
+        Self::open_named(&name, false)
+    }
+
     pub fn public_key_spki_base64url(&self) -> Result<String, String> {
         let blob = self.export_public_blob()?;
         let header_len = std::mem::size_of::<BCRYPT_ECCKEY_BLOB>();
@@ -48,7 +56,15 @@ impl DeviceKey {
         if challenge.len() != 32 {
             return Err("device challenge must be 32 bytes".into());
         }
-        let digest = sha256(challenge)?;
+        Ok(base64url(&self.sign_message_der(challenge)?))
+    }
+
+    pub fn sign_message_der(&self, message: &[u8]) -> Result<Vec<u8>, String> {
+        let digest = sha256(message)?;
+        self.sign_digest_der(&digest)
+    }
+
+    fn sign_digest_der(&self, digest: &[u8; 32]) -> Result<Vec<u8>, String> {
         let mut size = 0u32;
         status(unsafe { NCryptSignHash(
             self.key,
@@ -72,7 +88,7 @@ impl DeviceKey {
             NCRYPT_SILENT_FLAG,
         ) }, "sign device challenge")?;
         raw.truncate(size as usize);
-        Ok(base64url(&raw_signature_to_der(&raw)?))
+        raw_signature_to_der(&raw)
     }
 
     fn open_named(name: &str, create: bool) -> Result<Self, String> {
@@ -396,14 +412,17 @@ mod tests {
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-    struct TestKey(String);
+    struct TestKey {
+        key_name: String,
+        installation_id: String,
+    }
     impl TestKey {
         fn for_identity(identity: &str) -> Self {
-            let unique = format!("{identity}-{}-{}", std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed));
-            let key_name = key_name_for_identity(&unique).unwrap();
-            let key = DeviceKey::open_or_create(&unique).unwrap();
+            let installation_id = format!("{identity}-{}-{}", std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed));
+            let key_name = key_name_for_identity(&installation_id).unwrap();
+            let key = DeviceKey::open_or_create(&installation_id).unwrap();
             drop(key);
-            Self(key_name)
+            Self { key_name, installation_id }
         }
 
         fn for_exportable_identity(identity: &str) -> Self {
@@ -436,19 +455,68 @@ mod tests {
                 NCryptFreeObject(key);
                 NCryptFreeObject(provider);
             }
-            Self(key_name)
+            Self { key_name, installation_id: identity.to_owned() }
         }
-        fn open(&self) -> DeviceKey { DeviceKey::open_named(&self.0, false).unwrap() }
+        fn open(&self) -> DeviceKey { DeviceKey::open_named(&self.key_name, false).unwrap() }
     }
     impl Drop for TestKey {
         fn drop(&mut self) {
-            if let Ok(key) = DeviceKey::open_named(&self.0, false) {
+            if let Ok(key) = DeviceKey::open_named(&self.key_name, false) {
                 let key = std::mem::ManuallyDrop::new(key);
                 unsafe {
                     NCryptDeleteKey(key.key, 0);
                     NCryptFreeObject(key.provider);
                 }
             }
+        }
+    }
+
+    fn assert_signature_verifies(signer: &DeviceKey, message: &[u8], signature_der: &[u8]) {
+        let digest = sha256(message).unwrap();
+        let public_blob = signer.export_public_blob().unwrap();
+        let mut imported = 0;
+        let provider_name = wide(PROVIDER);
+        let mut provider = 0;
+        status(
+            unsafe { NCryptOpenStorageProvider(&mut provider, provider_name.as_ptr(), 0) },
+            "open provider for verification",
+        )
+        .unwrap();
+        let public_type = wide("ECCPUBLICBLOB");
+        status(
+            unsafe {
+                windows_sys::Win32::Security::Cryptography::NCryptImportKey(
+                    provider,
+                    0,
+                    public_type.as_ptr(),
+                    ptr::null(),
+                    &mut imported,
+                    public_blob.as_ptr(),
+                    public_blob.len() as u32,
+                    0,
+                )
+            },
+            "import public key",
+        )
+        .unwrap();
+        let raw = der_signature_to_raw(signature_der).unwrap();
+        assert_eq!(
+            unsafe {
+                windows_sys::Win32::Security::Cryptography::NCryptVerifySignature(
+                    imported,
+                    ptr::null(),
+                    digest.as_ptr(),
+                    digest.len() as u32,
+                    raw.as_ptr(),
+                    raw.len() as u32,
+                    0,
+                )
+            },
+            0
+        );
+        unsafe {
+            NCryptFreeObject(imported);
+            NCryptFreeObject(provider);
         }
     }
 
@@ -480,41 +548,27 @@ mod tests {
         let public_key = proof_signer.public_key_spki_base64url().unwrap();
         assert!(public_key.starts_with("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE"));
         assert_eq!(public_key.len(), 122);
-        let digest = sha256(&challenge).unwrap();
-        let public_blob = signer.export_public_blob().unwrap();
-        let mut imported = 0;
-        let provider_name = wide(PROVIDER);
-        let mut provider = 0;
-        status(unsafe { NCryptOpenStorageProvider(&mut provider, provider_name.as_ptr(), 0) }, "open provider for verification").unwrap();
-        let public_type = wide("ECCPUBLICBLOB");
-        status(unsafe {
-            windows_sys::Win32::Security::Cryptography::NCryptImportKey(
-                provider,
-                0,
-                public_type.as_ptr(),
-                ptr::null(),
-                &mut imported,
-                public_blob.as_ptr(),
-                public_blob.len() as u32,
-                0,
-            )
-        }, "import public key").unwrap();
-        let raw = der_signature_to_raw(&signature).unwrap();
-        assert_eq!(
-            unsafe {
-                windows_sys::Win32::Security::Cryptography::NCryptVerifySignature(
-                    imported,
-                    ptr::null(),
-                    digest.as_ptr(),
-                    digest.len() as u32,
-                    raw.as_ptr(),
-                    raw.len() as u32,
-                    0,
-                )
-            },
-            0
-        );
-        unsafe { NCryptFreeObject(imported); NCryptFreeObject(provider); }
+        assert_signature_verifies(&signer, &challenge, &signature);
+    }
+
+    #[test]
+    fn rustls_signer_hashes_messages_and_returns_verifiable_der() {
+        use rustls::crypto::signer::{Signer, SigningKey};
+
+        let key = TestKey::for_identity("rustls-signature");
+        let signing_key = crate::rustls_device_signer::CngRustlsSigningKey::open_existing(
+            &key.installation_id,
+        )
+        .unwrap();
+        let signer = signing_key
+            .choose_scheme(&[rustls::SignatureScheme::ECDSA_NISTP256_SHA256])
+            .unwrap();
+        let message = b"TLS 1.3, client CertificateVerify\0test transcript";
+        let signature = signer.sign(message).unwrap();
+
+        assert_eq!(signer.scheme(), rustls::SignatureScheme::ECDSA_NISTP256_SHA256);
+        assert_eq!(signature.first(), Some(&0x30));
+        assert_signature_verifies(&key.open(), message, &signature);
     }
 
     #[test]
@@ -542,8 +596,8 @@ mod tests {
     fn test_key_guard_deletes_persisted_key_on_drop() {
         let name = {
             let key = TestKey::for_identity("cleanup");
-            assert!(DeviceKey::open_named(&key.0, false).is_ok());
-            key.0.clone()
+            assert!(DeviceKey::open_named(&key.key_name, false).is_ok());
+            key.key_name.clone()
         };
         assert!(DeviceKey::open_named(&name, false).is_err());
     }

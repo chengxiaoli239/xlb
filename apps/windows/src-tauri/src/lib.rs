@@ -7,6 +7,8 @@ use url::Url;
 mod proof_bridge;
 #[cfg(windows)]
 mod cng_device_key;
+#[cfg(windows)]
+mod rustls_device_signer;
 
 const KEYRING_SERVICE: &str = "com.xlb.vpn.windows";
 const KEYRING_USER_PREFIX: &str = "api-session-cookies";
