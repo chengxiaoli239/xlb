@@ -7,6 +7,7 @@ const member: AccountSnapshot = {
   user: { id: 'member-1', email: 'member@example.test', name: '沙箱会员', role: 'member', account_type: 'full' },
   entitlement: { status: 'active', ends_at: '2027-12-31T00:00:00Z', data_used_gb: 12.5, plan_name: '年度会员', period_label: '年度', traffic_gb: 1500, max_devices: 5 },
   activeSubscriptions: 1,
+  nodeAuthorization: 'unavailable',
   devices: {
     entitlement_active: true,
     max_devices: 5,
@@ -56,8 +57,24 @@ describe('Windows account shell', () => {
     expect(host.textContent).toContain('年度会员');
     expect(host.textContent).toContain('2 / 5 台');
     expect(host.textContent).toContain('服务线路暂不可用');
+    expect(host.textContent).toContain('节点授权：暂不可用');
+    expect(host.textContent).toContain('这不代表 VPN 已连接');
     expect(host.textContent).toContain('连接功能尚未接入');
-    expect(host.textContent).not.toContain('已连接');
+    expect(host.querySelector('button[aria-disabled="true"]')).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it('labels ready as node authorization without enabling connection', async () => {
+    const bridge: NativeBridge = {
+      restore: vi.fn().mockResolvedValue({ ...member, nodeAuthorization: 'ready' }),
+      login: vi.fn(),
+      logout: vi.fn(),
+      localTestCredentials: vi.fn().mockResolvedValue(null),
+    };
+    const { host, root } = await mount(bridge);
+    expect(host.textContent).toContain('节点授权：节点授权已就绪');
+    expect(host.textContent).toContain('这不代表 VPN 已连接');
+    expect(host.querySelector('button[aria-disabled="true"]')).not.toBeNull();
     await act(async () => root.unmount());
   });
 

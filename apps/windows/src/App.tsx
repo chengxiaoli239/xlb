@@ -141,6 +141,7 @@ function App() {
         {error && <div role="alert" className="notice error-notice">{error}</div>}
 
         <div className="status-banner"><span className="status-icon"><WifiOff size={19} /></span><span><b>服务线路暂不可用</b><small>此版本仅提供账户与设备状态；线路和连接功能尚未接入。</small></span><button type="button" disabled aria-disabled="true">连接</button></div>
+        <div className="authorization-status" role="status">节点授权：{account.nodeAuthorization === 'ready' ? '节点授权已就绪' : account.nodeAuthorization === 'provisioning' ? '正在申请节点授权' : '暂不可用'}。这不代表 VPN 已连接。</div>
 
         <section className="section-heading"><div><h2>会员权益</h2><p>账户资料由会员服务实时读取</p></div><span className="live-label"><span />API 同步</span></section>
         {entitlement ? (

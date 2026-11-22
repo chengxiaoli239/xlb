@@ -47,6 +47,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #7ab8a9; outline-
 .status-banner > span:nth-child(2) { display: grid; gap: 4px; }
 .status-banner b { color: #6b4818; font-size: 13px; }
 .status-banner small { color: #897753; font-size: 11px; line-height: 1.5; }
+.authorization-status { margin: -10px 0 22px; color: #6b756f; font-size: 12px; }
 .status-banner button { height: 32px; min-width: 74px; border-radius: 5px; border: 1px solid #e7dfd1; background: #f4f1ea; color: #a6a096; cursor: not-allowed; }
 .section-heading { display: flex; align-items: end; justify-content: space-between; margin: 27px 0 11px; }
 .section-heading h2 { font-size: 15px; margin: 0; }

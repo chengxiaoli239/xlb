@@ -31,6 +31,7 @@ export type AccountSnapshot = {
   user: User;
   entitlement: Entitlement | null;
   activeSubscriptions: number;
+  nodeAuthorization: 'unavailable' | 'provisioning' | 'ready';
   devices: {
     entitlement_active: boolean;
     max_devices: number;
