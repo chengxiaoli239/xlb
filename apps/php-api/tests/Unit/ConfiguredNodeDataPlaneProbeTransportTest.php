@@ -161,6 +161,10 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
         if (! function_exists('proc_open') || ! function_exists('stream_socket_server')) {
             $this->markTestSkipped('Process control and stream sockets are required for the PHP-to-Go mTLS integration test.');
         }
+        $timeoutCommand = $this->compatibleTimeoutCommand();
+        if ($timeoutCommand === null) {
+            $this->markTestSkipped('A timeout utility is required for the PHP-to-Go mTLS integration test.');
+        }
 
         $credentials = $this->mutualTlsCredentialFiles();
         $nodeId = 'node-go-loopback';
@@ -169,7 +173,7 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
         $helperSource = $nodeAgentDirectory.'/testdata/php-probe/main.go';
         $helperBinary = $credentials['directory'].'/node-agent-php-probe';
         $build = proc_open(
-            ['go', 'build', '-o', $helperBinary, $helperSource],
+            [$timeoutCommand, '-k', '1s', '60s', 'go', 'build', '-o', $helperBinary, $helperSource],
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $buildPipes,
             $nodeAgentDirectory,
@@ -180,7 +184,8 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
         $buildError = stream_get_contents($buildPipes[2]);
         fclose($buildPipes[1]);
         fclose($buildPipes[2]);
-        $this->assertSame(0, proc_close($build), trim($buildError.' '.$buildOutput));
+        $buildExitCode = proc_close($build);
+        $this->assertSame(0, $buildExitCode, trim($buildError.' '.$buildOutput));
 
         $server = proc_open(
             [
@@ -364,6 +369,25 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
         }
 
         return $files;
+    }
+
+    private function compatibleTimeoutCommand(): ?string
+    {
+        $path = getenv('PATH');
+        if (! is_string($path)) {
+            return null;
+        }
+
+        foreach (explode(PATH_SEPARATOR, $path) as $directory) {
+            foreach (['timeout', 'gtimeout'] as $name) {
+                $command = rtrim($directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$name;
+                if (is_executable($command)) {
+                    return $command;
+                }
+            }
+        }
+
+        return null;
     }
 
     /** @return array{directory: string, client_certificate: string, client_key: string, server_certificate: string, server_key: string, ca_bundle: string} */
