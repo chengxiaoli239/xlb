@@ -33,6 +33,42 @@ class SignedSandboxPaymentProviderTest extends TestCase
         $this->assertCount(1, $provider->listEvents($this->time('2026-11-21T09:00:00Z'), $this->time('2026-11-21T11:00:00Z'))->events);
     }
 
+    public function test_reconciliation_pagination_does_not_drop_out_of_order_event_ids(): void
+    {
+        $provider = new SignedSandboxPaymentProvider(self::KEY);
+        $provider->createPayment($this->order());
+        $from = $this->time('2026-11-21T10:00:00Z');
+
+        for ($index = 0; $index < 100; $index++) {
+            $eventId = sprintf('z%03d', $index);
+            $occurredAt = $from->modify('+'.$index.' seconds');
+            $provider->simulateEvent('merchant-order-1', $eventId, PaymentEventType::Paid, $occurredAt, $occurredAt);
+        }
+        $lateEventAt = $from->modify('+200 seconds');
+        $provider->simulateEvent('merchant-order-1', 'a000', PaymentEventType::Refunded, $lateEventAt, $lateEventAt);
+
+        $firstPage = $provider->listEvents($from, $from->modify('+5 minutes'));
+        $secondPage = $provider->listEvents($from, $from->modify('+5 minutes'), $firstPage->nextCursor);
+        $actualEventIds = array_map(
+            static fn (ProviderPaymentEvent $event): string => $event->eventId,
+            [...$firstPage->events, ...$secondPage->events],
+        );
+        $expectedEventIds = ['a000'];
+        for ($index = 0; $index < 100; $index++) {
+            $expectedEventIds[] = sprintf('z%03d', $index);
+        }
+        sort($actualEventIds, SORT_STRING);
+        sort($expectedEventIds, SORT_STRING);
+
+        $this->assertCount(100, $firstPage->events);
+        $this->assertNotNull($firstPage->nextCursor);
+        $this->assertCount(1, $secondPage->events);
+        $this->assertSame('z099', $secondPage->events[0]->eventId);
+        $this->assertNull($secondPage->nextCursor);
+        $this->assertSame($expectedEventIds, $actualEventIds);
+        $this->assertCount(count(array_unique($actualEventIds)), $actualEventIds);
+    }
+
     public function test_webhook_signature_time_window_order_amount_and_currency_are_checked(): void
     {
         $provider = new SignedSandboxPaymentProvider(self::KEY);

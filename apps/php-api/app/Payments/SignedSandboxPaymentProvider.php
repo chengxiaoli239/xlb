@@ -119,7 +119,7 @@ final class SignedSandboxPaymentProvider implements PaymentProvider
     public function listEvents(DateTimeImmutable $from, DateTimeImmutable $until, ?string $cursor = null): PaymentEventPage
     {
         $events = array_values(array_filter($this->events, static fn (ProviderPaymentEvent $event): bool => $event->occurredAt >= $from && $event->occurredAt <= $until && (! $cursor || $event->eventId > $cursor)));
-        usort($events, static fn (ProviderPaymentEvent $left, ProviderPaymentEvent $right): int => [$left->occurredAt->getTimestamp(), $left->eventId] <=> [$right->occurredAt->getTimestamp(), $right->eventId]);
+        usort($events, static fn (ProviderPaymentEvent $left, ProviderPaymentEvent $right): int => $left->eventId <=> $right->eventId);
         $page = array_slice($events, 0, 100);
         $nextCursor = count($events) > 100 ? $page[array_key_last($page)]->eventId : null;
 
