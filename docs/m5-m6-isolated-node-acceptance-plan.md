@@ -12,6 +12,7 @@
 ## 现状与可推进范围
 
 - 用户本轮提供的 AWS 只读结果：`xlb-ops` root 身份为 `arn:aws:iam::289069331089:root`，EC2/SSM/CloudFormation/IAM/VPC 盘点权限通过；当前无 EC2 实例、无 SSM 托管实例；`xlb-node-manager-access-usw2` 为 `CREATE_COMPLETE`，`XlbNodeSsmRole` 与 `XlbNodeCleanupRole` 已存在；默认 VPC 为 `vpc-00ded9986e9e37539`。本轮未重复调用 AWS，也未执行任何云端写操作。此前记录的默认子网、路由及 AMI 信息仍须在获批执行前重新核对。
+- **当前会话状态（2026-11-22）**：本轮经项目 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 做了一次只读检查，AWS 返回 session expired；此后未继续 AWS 查询或执行云操作。11-21 的资源盘点只作为历史状态；用户本人重新 `aws login` 后，才能刷新身份/资源状态并重新审 plan。
 - **当前会话复核（2026-11-22）**：本轮仅经项目 `ops/aws-cli` wrapper 调用一次 `sts get-caller-identity --profile xlb-ops`，返回 session expired。此前 11-21 的身份/资源结果保留为历史，不代表当前会话仍有效；后续任何 AWS 盘点或 plan/apply 前需用户本人重新 `aws login`。此次没有继续查询或写入任何云资源。
 - 已在执行前重新查询并核对 Amazon Linux 2023 x86_64 AMI：`ami-062e367aff5bc494b`，Amazon 发布、状态 `available`、创建于 2026-11-18，us-west-2。本次模板强制 IMDSv2；该 AMI ID 仅用于本轮实验，后续部署前仍需重新核对。
 - **现有访问栈不能直接供 `ops/node_lab.py` 使用**：该脚本和 `ops/aws-node-lab.template.json` 要求 `XlbLabSsmProfile` / `XlbLabExpiryRole`，并将资源标记 `ManagedBy=xlb-node-lab`；现有 `XlbNode*` 角色和策略按 `xlb-node-manager` 标签授权。不要通过改标签、扩大现有角色权限或更新既有访问栈来绕过差异。
