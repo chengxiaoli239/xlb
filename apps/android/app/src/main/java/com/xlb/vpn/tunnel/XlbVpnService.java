@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 
+import com.xlb.vpn.BuildConfig;
 import com.xlb.vpn.R;
 import com.xlb.vpn.presentation.MainActivity;
 
@@ -35,6 +36,7 @@ public final class XlbVpnService extends VpnService {
     public static final String ACTION_STATE = "com.xlb.vpn.TUNNEL_STATE";
     public static final String EXTRA_PROFILE = "profile";
     public static final String EXTRA_ROUTE_NAME = "route_name";
+    public static final String EXTRA_DEBUG_TEST_ROUTE = "debug_test_route";
     public static final String EXTRA_STATE = "state";
     public static final String EXTRA_MESSAGE = "message";
     public static final String INTERNAL_PERMISSION = "com.xlb.vpn.permission.INTERNAL";
@@ -81,12 +83,17 @@ public final class XlbVpnService extends VpnService {
         }
         String profile = intent.getStringExtra(EXTRA_PROFILE);
         String requestedRouteName = intent.getStringExtra(EXTRA_ROUTE_NAME);
+        boolean debugTestRoute = intent.getBooleanExtra(EXTRA_DEBUG_TEST_ROUTE, false);
         currentRouteName = "";
         intent.removeExtra(EXTRA_PROFILE);
         intent.removeExtra(EXTRA_ROUTE_NAME);
+        intent.removeExtra(EXTRA_DEBUG_TEST_ROUTE);
+        if (!MemberTunnelAdmissionPolicy.mayStart(BuildConfig.DEBUG, debugTestRoute)) {
+            rejectStart("会员安全线路尚未接入");
+            return START_NOT_STICKY;
+        }
         if (profile == null || profile.isBlank()) {
-            publish(STATE_ERROR, "没有可用的线路配置");
-            stopSelf();
+            rejectStart("没有可用的线路配置");
             return START_NOT_STICKY;
         }
         createChannel();
@@ -273,6 +280,19 @@ public final class XlbVpnService extends VpnService {
         if (message != null) intent.putExtra(EXTRA_MESSAGE, message);
         if (!currentRouteName.isEmpty()) intent.putExtra(EXTRA_ROUTE_NAME, currentRouteName);
         sendBroadcast(intent, INTERNAL_PERMISSION);
+    }
+
+    private void rejectStart(String message) {
+        connectionAttempt.incrementAndGet();
+        createChannel();
+        startForeground(NOTIFICATION_ID, notification("连接不可用"));
+        worker.execute(() -> {
+            closeCore();
+            currentRouteName = "";
+            publish(STATE_ERROR, message);
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            stopSelf();
+        });
     }
 
     private void createChannel() {

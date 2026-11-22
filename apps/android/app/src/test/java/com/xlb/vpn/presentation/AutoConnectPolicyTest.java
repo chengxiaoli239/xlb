@@ -1,5 +1,7 @@
 package com.xlb.vpn.presentation;
 
+import com.xlb.vpn.tunnel.MemberTunnelAdmissionPolicy;
+
 import org.junit.Test;
 
 import static org.junit.Assert.assertFalse;
@@ -19,5 +21,14 @@ public final class AutoConnectPolicyTest {
     @Test
     public void disabledByDefaultDoesNotStart() {
         assertFalse(AutoConnectPolicy.shouldStart(false, true, true, true, false));
+    }
+
+    @Test
+    public void genericTunnelAdmitsOnlyDebugTestProfilesUntilMemberBridgeIsIntegrated() {
+        assertTrue(MemberTunnelAdmissionPolicy.mayStart(true, true));
+        assertFalse(MemberTunnelAdmissionPolicy.mayStart(false, true));
+        assertFalse(MemberTunnelAdmissionPolicy.mayStart(true, false));
+        assertFalse(MemberTunnelAdmissionPolicy.mayStart(false, false));
+        assertFalse(MemberTunnelAdmissionPolicy.MEMBER_PROOF_BRIDGE_INTEGRATED);
     }
 }

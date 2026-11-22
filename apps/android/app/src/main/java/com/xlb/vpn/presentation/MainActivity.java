@@ -38,6 +38,7 @@ import com.xlb.vpn.data.PlatformApi;
 import com.xlb.vpn.data.DebugProfileFetcher;
 import com.xlb.vpn.data.SecureSessionStore;
 import com.xlb.vpn.data.SubscriptionQrParser;
+import com.xlb.vpn.tunnel.MemberTunnelAdmissionPolicy;
 import com.xlb.vpn.tunnel.XlbVpnService;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
@@ -950,13 +951,18 @@ public final class MainActivity extends Activity {
     }
 
     private void startVpn(String profile, String selectedRoute) {
+        if (!MemberTunnelAdmissionPolicy.mayStart(BuildConfig.DEBUG, testRoute)) {
+            showMessage("会员安全线路尚未接入，未启动 VPN。", true);
+            return;
+        }
         tunnelState = XlbVpnService.STATE_CONNECTING;
         tunnelMessage = null;
         activeTunnelRouteName = selectedRoute;
         render();
         Intent start = new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_START)
                 .putExtra(XlbVpnService.EXTRA_PROFILE, profile)
-                .putExtra(XlbVpnService.EXTRA_ROUTE_NAME, selectedRoute);
+                .putExtra(XlbVpnService.EXTRA_ROUTE_NAME, selectedRoute)
+                .putExtra(XlbVpnService.EXTRA_DEBUG_TEST_ROUTE, testRoute);
         try {
             startForegroundService(start);
         } catch (RuntimeException exception) {

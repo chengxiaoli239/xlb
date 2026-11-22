@@ -21,6 +21,10 @@ public final class DebugProfileFetcher {
     private DebugProfileFetcher() {}
 
     public static String fetch(String address) throws IOException {
+        return fetch(address, uri -> (HttpURLConnection) uri.toURL().openConnection());
+    }
+
+    static String fetch(String address, ConnectionFactory connectionFactory) throws IOException {
         URI uri;
         try {
             uri = URI.create(address.trim());
@@ -35,7 +39,7 @@ public final class DebugProfileFetcher {
             if (!visited.add(normalizedAddress)) {
                 throw new ProfileException("订阅地址存在重定向循环");
             }
-            HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
+            HttpURLConnection connection = connectionFactory.open(uri);
             connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(8_000);
             connection.setReadTimeout(8_000);
@@ -54,6 +58,7 @@ public final class DebugProfileFetcher {
                 if (status != HttpURLConnection.HTTP_OK) {
                     throw new ProfileException("订阅请求未成功（HTTP " + status + "）");
                 }
+                requireDebugTestScope(connection.getHeaderField("X-XLB-Profile-Scope"));
                 if (connection.getContentLengthLong() > MAX_BYTES) {
                     throw new ProfileException("订阅配置超过 128 KB");
                 }
@@ -79,6 +84,10 @@ public final class DebugProfileFetcher {
         }
     }
 
+    interface ConnectionFactory {
+        HttpURLConnection open(URI uri) throws IOException;
+    }
+
     static URI resolveRedirect(URI source, String location) throws ProfileException {
         if (location == null || location.isBlank()) {
             throw new ProfileException("订阅重定向地址无效");
@@ -95,6 +104,12 @@ public final class DebugProfileFetcher {
     private static void validateHttpsUri(URI uri, String error) throws ProfileException {
         if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) {
             throw new ProfileException(error);
+        }
+    }
+
+    static void requireDebugTestScope(String scope) throws ProfileException {
+        if (!"local-test".equals(scope)) {
+            throw new ProfileException("仅支持隔离测试订阅");
         }
     }
 

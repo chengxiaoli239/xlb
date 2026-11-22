@@ -45,6 +45,8 @@ test-only JNI callback instrumentation 额外验证 Java/Android Keystore→C JN
 
 `PlatformApi.verifiedMemberDeviceProof()` exposes only the opaque capability produced after server authorization, registered-device snapshot, active entitlement, and Keystore public-key checks. `ProofBridgeSupervisor.start` and its adapter signature accept this same type, but no UI or service caller passes it yet; `PROOF_BRIDGE_ENABLED` remains false and there is no adapter or `XlbVpnService`/Mihomo/TUN wiring. A proof object or supervisor `READY` state must never be presented as a connected VPN session.
 
+`MemberTunnelAdmissionPolicy` keeps account/member profiles out of the generic Mihomo/TUN path until the proof bridge is integrated. Only an imported profile whose response has `X-XLB-Profile-Scope: local-test` may use the generic path in a Debug build, with the service rechecking its test-route marker; this is test access, not a member line or device-proof acceptance.
+
 Gradle 的 `connectedDebugAndroidTest` 和 `installDebugAndroidTest` 在任何 task 安装动作前要求 `-PxlbDisposableAvdSerial=<serial>`，并验证该 serial 是 adb 唯一列出的设备、AVD 名为 `xlb-m9-recovery` 且 emulator 属性匹配。修改验证器时运行 `scripts/test-validate-disposable-avd.sh`，仅使用临时 fake adb。完整设备测试优先使用下方通过 `EMULATOR_SERIAL` 显式限定 AVD 的隔离 harness；不要对 adb 在线设备列表运行无 serial 的 connected task。
 
 脚本要求显式 `EMULATOR_SERIAL`，校验该 serial 是 emulator 且 AVD 名恰好为专用测试名，只对它安装 APK/设置 ADB reverse；会在 `/tmp` 新建 SQLite，拒绝复用已占用的 API 端口 `4181`，传入 `disposable_avd=true` 与 `isolated_api=true`，结束后停止自身 API 并删除本次创建的临时目录。

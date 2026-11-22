@@ -2,14 +2,22 @@ package com.xlb.vpn.data;
 
 import org.junit.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public final class DebugProfileFetcherTest {
+    private static final String TEST_PROFILE_URL = "https://feed.example.test/profile";
+
     @Test
     public void identifiesCommonNonMihomoResponsesWithoutLeakingContent() throws Exception {
         String encoded = Base64.getEncoder().encodeToString("ss://private-value".getBytes(StandardCharsets.UTF_8));
@@ -26,6 +34,42 @@ public final class DebugProfileFetcherTest {
     @Test
     public void preservesMihomoYamlForCoreValidation() throws Exception {
         DebugProfileFetcher.rejectUnsupportedFormat("proxies:\n  - name: Test\n    type: direct\n");
+    }
+
+    @Test
+    public void debugImporterAcceptsOnlyExplicitLocalTestProfileScope() throws Exception {
+        DebugProfileFetcher.requireDebugTestScope("local-test");
+
+        for (String scope : new String[] {null, "", "production", "local-sandbox-peer", "test"}) {
+            try {
+                DebugProfileFetcher.requireDebugTestScope(scope);
+                fail("Expected non-test profile scope to be rejected: " + scope);
+            } catch (DebugProfileFetcher.ProfileException exception) {
+                assertEquals("仅支持隔离测试订阅", exception.getMessage());
+            }
+        }
+    }
+
+    @Test
+    public void fetchChecksProfileScopeBeforeReadingTheResponseBody() throws Exception {
+        String profile = "proxies:\n  - name: Test\n    type: socks5\n";
+        FakeConnection testProfile = new FakeConnection(
+                new URL(TEST_PROFILE_URL), "local-test", profile);
+
+        assertEquals(profile, DebugProfileFetcher.fetch(TEST_PROFILE_URL, uri -> testProfile));
+        assertTrue(testProfile.bodyRead);
+
+        for (String scope : new String[] {"production", "local-sandbox-peer", null}) {
+            FakeConnection memberProfile = new FakeConnection(
+                    new URL(TEST_PROFILE_URL), scope, profile);
+            try {
+                DebugProfileFetcher.fetch(TEST_PROFILE_URL, uri -> memberProfile);
+                fail("Expected non-test profile scope to be rejected: " + scope);
+            } catch (DebugProfileFetcher.ProfileException exception) {
+                assertEquals("仅支持隔离测试订阅", exception.getMessage());
+                assertFalse(memberProfile.bodyRead);
+            }
+        }
     }
 
     @Test
@@ -81,6 +125,52 @@ public final class DebugProfileFetcherTest {
             fail("Expected missing redirect location to be rejected");
         } catch (DebugProfileFetcher.ProfileException exception) {
             assertEquals("订阅重定向地址无效", exception.getMessage());
+        }
+    }
+
+    private static final class FakeConnection extends HttpURLConnection {
+        private final String scope;
+        private final byte[] body;
+        private boolean bodyRead;
+
+        private FakeConnection(URL url, String scope, String body) {
+            super(url);
+            this.scope = scope;
+            this.body = body.getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        public void disconnect() {
+        }
+
+        @Override
+        public boolean usingProxy() {
+            return false;
+        }
+
+        @Override
+        public void connect() {
+        }
+
+        @Override
+        public int getResponseCode() {
+            return HTTP_OK;
+        }
+
+        @Override
+        public String getHeaderField(String name) {
+            return "X-XLB-Profile-Scope".equalsIgnoreCase(name) ? scope : null;
+        }
+
+        @Override
+        public long getContentLengthLong() {
+            return body.length;
+        }
+
+        @Override
+        public InputStream getInputStream() {
+            bodyRead = true;
+            return new ByteArrayInputStream(body);
         }
     }
 }
