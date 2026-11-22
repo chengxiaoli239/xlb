@@ -20,12 +20,24 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
     /** @var list<string> */
     private array $credentialFiles = [];
 
+    /** @var list<string> */
+    private array $temporaryDirectories = [];
+
     protected function tearDown(): void
     {
         foreach ($this->credentialFiles as $path) {
             if (is_file($path)) {
                 unlink($path);
             }
+        }
+
+        foreach ($this->temporaryDirectories as $directory) {
+            foreach (glob($directory.'/*') ?: [] as $path) {
+                if (is_file($path)) {
+                    unlink($path);
+                }
+            }
+            rmdir($directory);
         }
 
         parent::tearDown();
@@ -67,6 +79,81 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
             && $request->url() === 'https://node-canary-1.example.test/v1/node/probe'
             && $request->data() === ['challenge' => $challenge]);
         Http::assertSentCount(1);
+    }
+
+    public function test_probe_performs_a_real_tls_13_mutual_tls_exchange_with_the_configured_credentials(): void
+    {
+        if (! function_exists('pcntl_fork') || ! function_exists('posix_kill') || ! function_exists('stream_socket_server')) {
+            $this->markTestSkipped('pcntl, POSIX signals, and PHP stream sockets are required for the local mTLS integration test.');
+        }
+
+        $credentials = $this->mutualTlsCredentialFiles();
+        $challenge = str_repeat('d4', 32);
+        $nodeId = 'node-mtls-loopback';
+        $reportPath = $credentials['directory'].'/server-report.json';
+        $context = stream_context_create(['ssl' => [
+            'local_cert' => $credentials['server_certificate'],
+            'local_pk' => $credentials['server_key'],
+            'verify_peer' => true,
+            'verify_peer_name' => false,
+            'allow_self_signed' => false,
+            'cafile' => $credentials['ca_bundle'],
+            'capture_peer_cert' => true,
+        ]]);
+        $listener = stream_socket_server('tcp://127.0.0.1:0', $errorCode, $errorMessage, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $context);
+        $this->assertNotFalse($listener, sprintf('Could not bind local TLS test listener: %s (%d)', $errorMessage, $errorCode));
+        $this->assertTrue(is_resource($listener));
+        $listenerAddress = stream_socket_get_name($listener, false);
+        $this->assertIsString($listenerAddress);
+        $port = (int) substr((string) strrchr($listenerAddress, ':'), 1);
+
+        $serverPid = pcntl_fork();
+        $this->assertNotSame(-1, $serverPid, 'Could not fork the local TLS test server.');
+        if ($serverPid === 0) {
+            $this->serveMutualTlsProbe($listener, $reportPath, $nodeId, $challenge);
+            exit(0);
+        }
+
+        fclose($listener);
+
+        try {
+            $transport = new ConfiguredNodeDataPlaneProbeTransport(
+                [$nodeId => [
+                    'url' => 'https://127.0.0.1:'.$port,
+                    'ca_bundle' => $credentials['ca_bundle'],
+                ]],
+                $credentials['client_certificate'],
+                $credentials['client_key'],
+            );
+
+            $exchange = $transport->exchange($nodeId, $challenge, 5000);
+            $waitedPid = pcntl_waitpid($serverPid, $serverStatus);
+            $this->assertSame($serverPid, $waitedPid, 'The local TLS server did not exit after the probe.');
+            $this->assertTrue(pcntl_wifexited($serverStatus), 'The local TLS server exited abnormally.');
+            $this->assertSame(0, pcntl_wexitstatus($serverStatus), (string) file_get_contents($reportPath));
+
+            $report = json_decode((string) file_get_contents($reportPath), true);
+            $this->assertIsArray($report);
+            $this->assertSame('TLSv1.3', $report['tls_protocol'] ?? null);
+            $this->assertSame('/v1/node/probe', $report['request_path'] ?? null);
+            $this->assertSame($nodeId, $report['node_id'] ?? null);
+            $this->assertSame($challenge, $report['challenge'] ?? null);
+            $clientCertificate = openssl_x509_read((string) file_get_contents($credentials['client_certificate']));
+            $this->assertNotFalse($clientCertificate);
+            $this->assertSame(openssl_x509_fingerprint($clientCertificate, 'sha256'), $report['client_certificate_sha256'] ?? null);
+
+            $this->assertTrue($exchange->clientIdentityPresented);
+            $this->assertTrue($exchange->mutualTlsEstablished);
+            $this->assertTrue($exchange->serverIdentityVerified);
+            $this->assertSame($nodeId, $exchange->authenticatedNodeId);
+            $this->assertTrue($exchange->dataPlaneProbeAccepted);
+            $this->assertSame($challenge, $exchange->echoedChallenge);
+        } finally {
+            if (pcntl_waitpid($serverPid, $serverStatus, WNOHANG) === 0) {
+                posix_kill($serverPid, SIGTERM);
+                pcntl_waitpid($serverPid, $serverStatus);
+            }
+        }
     }
 
     public function test_unknown_nodes_and_non_https_or_non_origin_urls_fail_closed(): void
@@ -195,5 +282,168 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
         }
 
         return $files;
+    }
+
+    /** @return array{directory: string, client_certificate: string, client_key: string, server_certificate: string, server_key: string, ca_bundle: string} */
+    private function mutualTlsCredentialFiles(): array
+    {
+        $directory = sys_get_temp_dir().'/xlb-probe-mtls-'.bin2hex(random_bytes(8));
+        $this->assertTrue(mkdir($directory, 0700));
+        $this->temporaryDirectories[] = $directory;
+        $configurationPath = $directory.'/openssl.cnf';
+        $configuration = <<<'OPENSSL'
+[req]
+distinguished_name = distinguished_name
+prompt = no
+
+[distinguished_name]
+CN = xlb local probe test
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+
+[server_cert]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = IP:127.0.0.1
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+
+[client_cert]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+extendedKeyUsage = clientAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+OPENSSL;
+        $this->assertNotFalse(file_put_contents($configurationPath, $configuration));
+        chmod($configurationPath, 0600);
+
+        $authorityKey = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+        $this->assertNotFalse($authorityKey);
+        $authorityRequest = openssl_csr_new(['commonName' => 'xlb-test-ca'], $authorityKey, [
+            'config' => $configurationPath,
+            'digest_alg' => 'sha256',
+        ]);
+        $this->assertNotFalse($authorityRequest);
+        $authorityCertificate = openssl_csr_sign($authorityRequest, null, $authorityKey, 1, [
+            'config' => $configurationPath,
+            'x509_extensions' => 'v3_ca',
+            'digest_alg' => 'sha256',
+        ]);
+        $this->assertNotFalse($authorityCertificate);
+        $this->writeCertificate($directory.'/ca.pem', $authorityCertificate);
+
+        $server = $this->signedCertificate($configurationPath, $authorityCertificate, $authorityKey, '127.0.0.1', 'server_cert');
+        $client = $this->signedCertificate($configurationPath, $authorityCertificate, $authorityKey, 'xlb-probe-client', 'client_cert');
+        $this->writeCertificate($directory.'/server.pem', $server['certificate']);
+        $this->writePrivateKey($directory.'/server.key', $server['key']);
+        $this->writeCertificate($directory.'/client.pem', $client['certificate']);
+        $this->writePrivateKey($directory.'/client.key', $client['key']);
+
+        return [
+            'directory' => $directory,
+            'client_certificate' => $directory.'/client.pem',
+            'client_key' => $directory.'/client.key',
+            'server_certificate' => $directory.'/server.pem',
+            'server_key' => $directory.'/server.key',
+            'ca_bundle' => $directory.'/ca.pem',
+        ];
+    }
+
+    /** @return array{certificate: \OpenSSLCertificate, key: \OpenSSLAsymmetricKey} */
+    private function signedCertificate(string $configurationPath, \OpenSSLCertificate $authorityCertificate, \OpenSSLAsymmetricKey $authorityKey, string $commonName, string $extensions): array
+    {
+        $key = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+        $this->assertNotFalse($key);
+        $request = openssl_csr_new(['commonName' => $commonName], $key, [
+            'config' => $configurationPath,
+            'digest_alg' => 'sha256',
+        ]);
+        $this->assertNotFalse($request);
+        $certificate = openssl_csr_sign($request, $authorityCertificate, $authorityKey, 1, [
+            'config' => $configurationPath,
+            'x509_extensions' => $extensions,
+            'digest_alg' => 'sha256',
+        ]);
+        $this->assertNotFalse($certificate);
+
+        return ['certificate' => $certificate, 'key' => $key];
+    }
+
+    private function writeCertificate(string $path, \OpenSSLCertificate $certificate): void
+    {
+        $this->assertTrue(openssl_x509_export($certificate, $pem));
+        $this->assertNotFalse(file_put_contents($path, $pem));
+        chmod($path, 0600);
+    }
+
+    private function writePrivateKey(string $path, \OpenSSLAsymmetricKey $key): void
+    {
+        $this->assertTrue(openssl_pkey_export($key, $pem));
+        $this->assertNotFalse(file_put_contents($path, $pem));
+        chmod($path, 0600);
+    }
+
+    /** @param resource $listener */
+    private function serveMutualTlsProbe(mixed $listener, string $reportPath, string $nodeId, string $challenge): void
+    {
+        $connection = @stream_socket_accept($listener, 8);
+        if (! is_resource($connection)) {
+            file_put_contents($reportPath, json_encode(['error' => 'accept timed out']));
+            exit(1);
+        }
+
+        stream_set_timeout($connection, 5);
+        $secured = @stream_socket_enable_crypto($connection, true, STREAM_CRYPTO_METHOD_TLSv1_3_SERVER);
+        if ($secured !== true) {
+            file_put_contents($reportPath, json_encode(['error' => 'TLS 1.3 mutual TLS handshake failed']));
+            fclose($connection);
+            exit(1);
+        }
+
+        $request = '';
+        while (! str_contains($request, "\r\n\r\n")) {
+            $chunk = fread($connection, 8192);
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            $request .= $chunk;
+        }
+        [$headers, $body] = array_pad(explode("\r\n\r\n", $request, 2), 2, '');
+        preg_match('/^POST\s+(\S+)/', $headers, $requestLine);
+        preg_match('/^Content-Length:\s*(\d+)/im', $headers, $contentLength);
+        $expectedLength = (int) ($contentLength[1] ?? 0);
+        while (strlen($body) < $expectedLength) {
+            $chunk = fread($connection, min(8192, $expectedLength - strlen($body)));
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            $body .= $chunk;
+        }
+
+        $payload = json_decode($body, true);
+        $context = stream_context_get_params($connection);
+        $peerCertificate = $context['options']['ssl']['peer_certificate'] ?? null;
+        $peerFingerprint = $peerCertificate instanceof \OpenSSLCertificate
+            ? openssl_x509_fingerprint($peerCertificate, 'sha256')
+            : null;
+        $metadata = stream_get_meta_data($connection);
+        $report = [
+            'tls_protocol' => $metadata['crypto']['protocol'] ?? null,
+            'request_path' => $requestLine[1] ?? null,
+            'node_id' => $nodeId,
+            'challenge' => $payload['challenge'] ?? null,
+            'client_certificate_sha256' => $peerFingerprint,
+        ];
+        file_put_contents($reportPath, json_encode($report));
+
+        $responseBody = json_encode(['data' => ['node_id' => $nodeId, 'challenge' => $challenge]]);
+        $response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ".strlen((string) $responseBody)."\r\nConnection: close\r\n\r\n".$responseBody;
+        fwrite($connection, $response);
+        fclose($connection);
     }
 }
