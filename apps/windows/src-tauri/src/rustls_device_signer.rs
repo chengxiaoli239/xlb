@@ -1,9 +1,7 @@
 #![cfg(windows)]
 
-use rustls::{
-    crypto::signer::{Signer, SigningKey},
-    Error, SignatureAlgorithm, SignatureScheme,
-};
+use rustls::{Error, SignatureAlgorithm, SignatureScheme};
+use rustls::sign::{Signer, SigningKey};
 
 use crate::cng_device_key::DeviceKey;
 

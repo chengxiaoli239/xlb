@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn rustls_signer_hashes_messages_and_returns_verifiable_der() {
-        use rustls::crypto::signer::{Signer, SigningKey};
+        use rustls::sign::{Signer, SigningKey};
 
         let key = TestKey::for_identity("rustls-signature");
         let signing_key = crate::rustls_device_signer::CngRustlsSigningKey::open_existing(
