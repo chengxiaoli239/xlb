@@ -1,5 +1,8 @@
 #![allow(dead_code)] // Offline lifecycle contract is intentionally not wired to Tauri yet.
 
+use std::sync::Arc;
+
+use base64::Engine as _;
 use serde::Serialize;
 
 const PROOF_BRIDGE_ENABLED: bool = false;
@@ -35,38 +38,129 @@ struct BridgeSnapshot {
 
 /// Signing capability supplied by the platform's non-exportable device key.
 /// Implementations must never return private key material.
-pub(super) trait DeviceProofSigner {
+pub(super) trait DeviceProofSigner: Send + Sync {
     fn public_key_spki_base64url(&self) -> Result<String, BridgeFailure>;
     fn sign_challenge_base64url(&self, challenge: &[u8; 32]) -> Result<String, BridgeFailure>;
 }
 
 /// An unforgeable capability created only by the native member/device verifier.
 /// Keep fields and constructor private so IDs or booleans cannot claim proof success.
-struct VerifiedMemberDeviceProof {
+pub(super) struct VerifiedMemberDeviceProof {
     member_id: String,
     installation_id: String,
+    device_id: String,
     peer_binding_id: String,
+    node_id: String,
+    peer_generation: u64,
+    device_binding_generation: u64,
+    registered_public_key_spki_base64url: String,
     signer: Box<dyn DeviceProofSigner>,
 }
 
 impl VerifiedMemberDeviceProof {
-    fn new(
-        member_id: String,
-        installation_id: String,
-        peer_binding_id: String,
-        signer: Box<dyn DeviceProofSigner>,
-    ) -> Self {
-        Self {
-            member_id,
-            installation_id,
-            peer_binding_id,
-            signer,
+    /// Creates the capability only from a complete server-authorized peer response.
+    /// Peer credentials and profile content are validated here but never retained.
+    pub(super) fn from_authorized_response(
+        member_id: &str,
+        installation_id: &str,
+        device: &super::BoundDevice,
+        authorization: &super::DeviceAuthorization,
+        registered_public_key_spki_base64url: &str,
+        signer: Arc<dyn super::DeviceProofProvider>,
+    ) -> Result<Self, BridgeFailure> {
+        let peer_id = authorization.peer_id.as_deref().unwrap_or_default();
+        let node_id = authorization.node_id.as_deref().unwrap_or_default();
+        let peer_credential = authorization.peer_credential.as_deref().unwrap_or_default();
+        let profile = authorization.profile.as_deref().unwrap_or_default();
+        let peer_generation = authorization.peer_generation.unwrap_or_default();
+        let device_binding_generation = authorization.device_binding_generation.unwrap_or_default();
+        let credential = super::decode_base64url(peer_credential).ok_or(BridgeFailure::InvalidMemberProof)?;
+        let profile_text = profile.to_ascii_lowercase();
+        let signer_installation_id = signer.installation_id();
+
+        if authorization.status != "ready"
+            || member_id.trim().is_empty()
+            || !device.bound
+            || device.status != "registered"
+            || !valid_uuid(installation_id)
+            || signer_installation_id != installation_id
+            || !valid_uuid(&device.id)
+            || !valid_uuid(peer_id)
+            || !valid_uuid(node_id)
+            || peer_generation == 0
+            || device_binding_generation == 0
+            || credential.len() != 32
+            || profile.is_empty()
+            || profile.len() > 128 * 1024
+            || [
+                "private_key:",
+                "privatekey:",
+                "peer_credential:",
+                "peercredential:",
+                "peer_secret:",
+                "peersecret:",
+                "subscription_token:",
+                "subscriptiontoken:",
+            ]
+                .iter()
+                .any(|field| profile_text.contains(field))
+        {
+            return Err(BridgeFailure::InvalidMemberProof);
         }
+
+        let signer = DeviceProofSignerAdapter(signer);
+        let current_public_key = signer.public_key_spki_base64url()?;
+        if registered_public_key_spki_base64url.trim().is_empty()
+            || current_public_key != registered_public_key_spki_base64url
+        {
+            return Err(BridgeFailure::DeviceKeyUnavailable);
+        }
+
+        Ok(Self {
+            member_id: member_id.to_owned(),
+            installation_id: installation_id.to_owned(),
+            device_id: device.id.clone(),
+            peer_binding_id: peer_id.to_owned(),
+            node_id: node_id.to_owned(),
+            peer_generation,
+            device_binding_generation,
+            registered_public_key_spki_base64url: registered_public_key_spki_base64url.to_owned(),
+            signer: Box::new(signer),
+        })
     }
 
     fn signer(&self) -> &dyn DeviceProofSigner {
         self.signer.as_ref()
     }
+
+    pub(super) fn matches_device_snapshot(&self, devices: &super::DeviceSummary) -> bool {
+        devices.devices.iter().any(|device| {
+            device.id == self.device_id
+                && device.installation_id == self.installation_id
+                && device.status == "registered"
+        })
+    }
+}
+
+struct DeviceProofSignerAdapter(Arc<dyn super::DeviceProofProvider>);
+
+impl DeviceProofSigner for DeviceProofSignerAdapter {
+    fn public_key_spki_base64url(&self) -> Result<String, BridgeFailure> {
+        self.0
+            .public_key_spki_base64url()
+            .map_err(|_| BridgeFailure::DeviceKeyUnavailable)
+    }
+
+    fn sign_challenge_base64url(&self, challenge: &[u8; 32]) -> Result<String, BridgeFailure> {
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(challenge);
+        self.0
+            .sign_challenge_base64url(&encoded)
+            .map_err(|_| BridgeFailure::DeviceProofSigningFailed)
+    }
+}
+
+fn valid_uuid(value: &str) -> bool {
+    uuid::Uuid::parse_str(value).is_ok()
 }
 
 struct BridgeConfig {
@@ -80,8 +174,17 @@ impl BridgeConfig {
 
     fn has_required_binding_references(&self) -> bool {
         !self.proof.member_id.trim().is_empty()
-            && !self.proof.installation_id.trim().is_empty()
-            && !self.proof.peer_binding_id.trim().is_empty()
+            && valid_uuid(&self.proof.installation_id)
+            && valid_uuid(&self.proof.device_id)
+            && valid_uuid(&self.proof.peer_binding_id)
+            && valid_uuid(&self.proof.node_id)
+            && self.proof.peer_generation > 0
+            && self.proof.device_binding_generation > 0
+            && self
+                .proof
+                .signer()
+                .public_key_spki_base64url()
+                .is_ok_and(|public_key| public_key == self.proof.registered_public_key_spki_base64url)
     }
 }
 
@@ -234,6 +337,7 @@ impl<A: ProofBridgeAdapter> Drop for BridgeSupervisor<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
     use std::{cell::Cell, rc::Rc};
 
     #[derive(Clone, Default)]
@@ -249,15 +353,35 @@ mod tests {
 
     struct FakeAdapter(Counters);
 
-    struct FakeSigner;
+    struct FakeDeviceProof {
+        installation_id: String,
+    }
 
-    impl DeviceProofSigner for FakeSigner {
-        fn public_key_spki_base64url(&self) -> Result<String, BridgeFailure> {
+    fn valid_authorization() -> super::super::DeviceAuthorization {
+        super::super::DeviceAuthorization {
+            status: "ready".into(),
+            peer_id: Some("fd3ae0f1-1234-4234-9234-000000000011".into()),
+            node_id: Some("fd3ae0f1-1234-4234-9234-000000000012".into()),
+            peer_generation: Some(1),
+            device_binding_generation: Some(1),
+            peer_credential: Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([7u8; 32])),
+            profile: Some("mode: global\nproxy-groups:\n  - name: GLOBAL\n".into()),
+        }
+    }
+
+    impl super::super::DeviceProofProvider for FakeDeviceProof {
+        fn installation_id(&self) -> &str {
+            &self.installation_id
+        }
+
+        fn public_key_spki_base64url(&self) -> Result<String, String> {
             Ok("test-public-key".into())
         }
 
-        fn sign_challenge_base64url(&self, challenge: &[u8; 32]) -> Result<String, BridgeFailure> {
-            Ok(format!("test-signature-{}", challenge[0]))
+        fn sign_challenge_base64url(&self, challenge: &str) -> Result<String, String> {
+            let bytes = super::super::decode_base64url(challenge)
+                .ok_or_else(|| "invalid challenge".to_owned())?;
+            Ok(format!("test-signature-{}", bytes[0]))
         }
     }
 
@@ -313,12 +437,24 @@ mod tests {
     }
 
     fn valid_config() -> BridgeConfig {
-        BridgeConfig::from_verified_proof(VerifiedMemberDeviceProof::new(
-            "member-1".into(),
-            "installation-1".into(),
-            "peer-binding-1".into(),
-            Box::new(FakeSigner),
-        ))
+        let device = super::super::BoundDevice {
+            id: "fd3ae0f1-1234-4234-9234-000000000010".into(),
+            status: "registered".into(),
+            bound: true,
+        };
+        let authorization = valid_authorization();
+        let proof = VerifiedMemberDeviceProof::from_authorized_response(
+            "member-1",
+            "fd3ae0f1-1234-4234-9234-000000000013",
+            &device,
+            &authorization,
+            "test-public-key",
+            Arc::new(FakeDeviceProof {
+                installation_id: "fd3ae0f1-1234-4234-9234-000000000013".into(),
+            }),
+        )
+        .unwrap();
+        BridgeConfig::from_verified_proof(proof)
     }
 
     fn supervisor(counters: Counters) -> BridgeSupervisor<FakeAdapter> {
@@ -356,6 +492,91 @@ mod tests {
 
         assert_eq!(config.proof.signer().public_key_spki_base64url().unwrap(), "test-public-key");
         assert_eq!(config.proof.signer().sign_challenge_base64url(&challenge).unwrap(), "test-signature-7");
+    }
+
+    #[test]
+    fn ready_authorization_requires_complete_bound_peer_material() {
+        let device = super::super::BoundDevice {
+            id: "fd3ae0f1-1234-4234-9234-000000000010".into(),
+            status: "registered".into(),
+            bound: true,
+        };
+        let signer = || Arc::new(FakeDeviceProof {
+            installation_id: "fd3ae0f1-1234-4234-9234-000000000013".into(),
+        }) as Arc<dyn super::super::DeviceProofProvider>;
+        let verify = |authorization: &super::super::DeviceAuthorization,
+                      device: &super::super::BoundDevice,
+                      registered_public_key: &str| {
+            VerifiedMemberDeviceProof::from_authorized_response(
+                "member-1",
+                "fd3ae0f1-1234-4234-9234-000000000013",
+                device,
+                authorization,
+                registered_public_key,
+                signer(),
+            )
+        };
+
+        assert!(verify(&valid_authorization(), &device, "test-public-key").is_ok());
+
+        assert!(matches!(
+            verify(&valid_authorization(), &device, "different-public-key"),
+            Err(BridgeFailure::DeviceKeyUnavailable)
+        ));
+
+        assert!(matches!(
+            VerifiedMemberDeviceProof::from_authorized_response(
+                "member-1",
+                "fd3ae0f1-1234-4234-9234-000000000013",
+                &device,
+                &valid_authorization(),
+                "test-public-key",
+                Arc::new(FakeDeviceProof {
+                    installation_id: "fd3ae0f1-1234-4234-9234-000000000014".into(),
+                }),
+            ),
+            Err(BridgeFailure::InvalidMemberProof)
+        ));
+
+        let mut missing_peer = valid_authorization();
+        missing_peer.peer_id = None;
+        assert!(matches!(verify(&missing_peer, &device, "test-public-key"), Err(BridgeFailure::InvalidMemberProof)));
+
+        let mut wrong_generation = valid_authorization();
+        wrong_generation.device_binding_generation = Some(0);
+        assert!(matches!(verify(&wrong_generation, &device, "test-public-key"), Err(BridgeFailure::InvalidMemberProof)));
+
+        let mut short_credential = valid_authorization();
+        short_credential.peer_credential = Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([7u8; 31]));
+        assert!(matches!(verify(&short_credential, &device, "test-public-key"), Err(BridgeFailure::InvalidMemberProof)));
+
+        let mut unsafe_profile = valid_authorization();
+        unsafe_profile.profile = Some("private_key: do-not-retain\n".into());
+        assert!(matches!(verify(&unsafe_profile, &device, "test-public-key"), Err(BridgeFailure::InvalidMemberProof)));
+
+        let mut camel_case_secret = valid_authorization();
+        camel_case_secret.profile = Some("peerCredential: do-not-retain\n".into());
+        assert!(matches!(verify(&camel_case_secret, &device, "test-public-key"), Err(BridgeFailure::InvalidMemberProof)));
+
+        let mut provisioning = valid_authorization();
+        provisioning.status = "provisioning".into();
+        assert!(matches!(verify(&provisioning, &device, "test-public-key"), Err(BridgeFailure::InvalidMemberProof)));
+
+        let unbound_device = super::super::BoundDevice { bound: false, ..device };
+        assert!(matches!(
+            verify(&valid_authorization(), &unbound_device, "test-public-key"),
+            Err(BridgeFailure::InvalidMemberProof)
+        ));
+
+        let revoked_device = super::super::BoundDevice {
+            status: "revoked".into(),
+            bound: true,
+            ..unbound_device
+        };
+        assert!(matches!(
+            verify(&valid_authorization(), &revoked_device, "test-public-key"),
+            Err(BridgeFailure::InvalidMemberProof)
+        ));
     }
 
     #[test]

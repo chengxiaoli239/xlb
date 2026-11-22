@@ -208,12 +208,18 @@ struct DeviceBindingChallenge {
     challenge: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct DeviceAuthorization {
     status: String,
+    peer_id: Option<String>,
+    node_id: Option<String>,
+    peer_generation: Option<u64>,
+    device_binding_generation: Option<u64>,
+    peer_credential: Option<String>,
+    profile: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct DeviceBindingResult {
     device: Option<BoundDevice>,
     node_authorization: Option<DeviceAuthorization>,
@@ -222,6 +228,7 @@ struct DeviceBindingResult {
 #[derive(Debug, Deserialize)]
 struct BoundDevice {
     id: String,
+    status: String,
     bound: bool,
 }
 
@@ -299,6 +306,7 @@ pub struct AccountClient {
     credentials: Arc<dyn CredentialStore>,
     session: CookieSession,
     device_proof: Option<Arc<dyn DeviceProofProvider>>,
+    verified_member_device_proof: Option<proof_bridge::VerifiedMemberDeviceProof>,
 }
 
 impl AccountClient {
@@ -326,6 +334,7 @@ impl AccountClient {
             credentials,
             session: CookieSession::default(),
             device_proof: None,
+            verified_member_device_proof: None,
         })
     }
 
@@ -341,6 +350,7 @@ impl AccountClient {
     }
 
     pub async fn restore(&mut self) -> Result<Option<AccountSnapshot>, String> {
+        self.verified_member_device_proof = None;
         if self.session.header.is_empty() {
             self.load_persisted_session()?;
         }
@@ -369,6 +379,7 @@ impl AccountClient {
     }
 
     pub async fn login(&mut self, email: &str, password: &str) -> Result<AccountSnapshot, String> {
+        self.verified_member_device_proof = None;
         let email = email.trim();
         if email.is_empty() || password.is_empty() {
             return Err("请输入邮箱和密码".to_owned());
@@ -396,6 +407,7 @@ impl AccountClient {
     }
 
     pub async fn logout(&mut self) -> Result<(), String> {
+        self.verified_member_device_proof = None;
         let result = async {
             let csrf_response = self.request(Method::GET, "api/v1/auth/csrf").await?;
             let csrf = parse_data::<CsrfToken>(csrf_response).await?.token;
@@ -420,15 +432,38 @@ impl AccountClient {
     }
 
     async fn load_snapshot(&mut self, user: PublicUser) -> Result<AccountSnapshot, String> {
+        self.verified_member_device_proof = None;
         let overview_response = self.request(Method::GET, "api/v1/me/overview").await?;
         let overview = parse_data::<Overview>(overview_response).await?;
         if !is_member(&overview.user) || overview.user.id != user.id {
             self.clear_session()?;
             return Err("会员账户状态不匹配，请重新登录".to_owned());
         }
-        let node_authorization = self.authorize_device().await;
-        let devices_response = self.request(Method::GET, "api/v1/me/devices").await?;
-        let devices = parse_data::<DeviceSummary>(devices_response).await?;
+        let mut node_authorization = self.authorize_device(&user.id).await;
+        let devices_response = match self.request(Method::GET, "api/v1/me/devices").await {
+            Ok(response) => response,
+            Err(error) => {
+                self.verified_member_device_proof = None;
+                return Err(error);
+            }
+        };
+        let devices = match parse_data::<DeviceSummary>(devices_response).await {
+            Ok(value) => value,
+            Err(error) => {
+                self.verified_member_device_proof = None;
+                return Err(error);
+            }
+        };
+        if !self
+            .verified_member_device_proof
+            .as_ref()
+            .is_some_and(|proof| proof.matches_device_snapshot(&devices))
+        {
+            self.verified_member_device_proof = None;
+            if node_authorization == NodeAuthorizationStatus::Ready {
+                node_authorization = NodeAuthorizationStatus::Unavailable;
+            }
+        }
         Ok(AccountSnapshot {
             user: overview.user,
             entitlement: overview.entitlement,
@@ -438,7 +473,8 @@ impl AccountClient {
         })
     }
 
-    async fn authorize_device(&mut self) -> NodeAuthorizationStatus {
+    async fn authorize_device(&mut self, member_id: &str) -> NodeAuthorizationStatus {
+        self.verified_member_device_proof = None;
         #[cfg(windows)]
         if self.device_proof.is_none() {
             let installation_id = match self.installation_id() {
@@ -454,15 +490,16 @@ impl AccountClient {
         let Some(proof) = self.device_proof.as_ref().cloned() else {
             return NodeAuthorizationStatus::Unavailable;
         };
-        let request_body = match proof.public_key_spki_base64url() {
-            Ok(public_key) => serde_json::json!({
-                "installation_id": proof.installation_id(),
-                "name": windows_device_name(),
-                "platform": "windows",
-                "public_key": public_key,
-            }),
+        let registered_public_key = match proof.public_key_spki_base64url() {
+            Ok(public_key) => public_key,
             Err(_) => return NodeAuthorizationStatus::Unavailable,
         };
+        let request_body = serde_json::json!({
+            "installation_id": proof.installation_id(),
+            "name": windows_device_name(),
+            "platform": "windows",
+            "public_key": registered_public_key,
+        });
         let challenge_response = match self.post_json("api/v1/me/device-bindings/challenge", request_body).await {
             Ok(response) => response,
             Err(_) => return NodeAuthorizationStatus::Unavailable,
@@ -482,13 +519,41 @@ impl AccountClient {
             Ok(response) => response,
             Err(_) => return NodeAuthorizationStatus::Unavailable,
         };
-        match parse_data::<DeviceBindingResult>(authorization_response).await {
-            Ok(result) if result.device.as_ref().is_some_and(|device| {
-                device.bound && uuid::Uuid::parse_str(&device.id).is_ok()
-            }) && result.node_authorization.is_some() => {
-                NodeAuthorizationStatus::from_status(result.node_authorization.as_ref().map(|value| value.status.as_str()))
+        let result = match parse_data::<DeviceBindingResult>(authorization_response).await {
+            Ok(value) => value,
+            Err(_) => return NodeAuthorizationStatus::Unavailable,
+        };
+        let Some(device) = result.device.as_ref().filter(|device| {
+            device.bound
+                && device.status == "registered"
+                && uuid::Uuid::parse_str(&device.id).is_ok()
+        }) else {
+            return NodeAuthorizationStatus::Unavailable;
+        };
+        let Some(authorization) = result.node_authorization.as_ref() else {
+            return NodeAuthorizationStatus::Unavailable;
+        };
+        let status = NodeAuthorizationStatus::from_status(Some(authorization.status.as_str()));
+        if status != NodeAuthorizationStatus::Ready {
+            return status;
+        }
+        let Some(signer) = self.device_proof.as_ref().cloned() else {
+            return NodeAuthorizationStatus::Unavailable;
+        };
+        let installation_id = signer.installation_id().to_owned();
+        match proof_bridge::VerifiedMemberDeviceProof::from_authorized_response(
+            member_id,
+            &installation_id,
+            device,
+            authorization,
+            &registered_public_key,
+            signer,
+        ) {
+            Ok(proof) => {
+                self.verified_member_device_proof = Some(proof);
+                NodeAuthorizationStatus::Ready
             }
-            _ => NodeAuthorizationStatus::Unavailable,
+            Err(_) => NodeAuthorizationStatus::Unavailable,
         }
     }
 
@@ -541,6 +606,7 @@ impl AccountClient {
     }
 
     fn clear_session(&mut self) -> Result<(), String> {
+        self.verified_member_device_proof = None;
         self.session.header.clear();
         self.credentials.clear()
     }
@@ -733,7 +799,7 @@ mod tests {
     fn binding_result_requires_a_bound_device_identity() {
         let valid: Envelope<DeviceBindingResult> = serde_json::from_value(serde_json::json!({
             "data": {
-                "device": { "id": "fd3ae0f1-1234-4234-9234-000000000001", "bound": true },
+                "device": { "id": "fd3ae0f1-1234-4234-9234-000000000001", "status": "registered", "bound": true },
                 "node_authorization": { "status": "ready" }
             }
         })).unwrap();
@@ -779,14 +845,27 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let challenge_id = "fd3ae0f1-1234-4234-9234-000000000001";
         let challenge = URL_SAFE_NO_PAD.encode([9u8; 32]);
+        let peer_credential = URL_SAFE_NO_PAD.encode([0x41u8; 32]);
+        let profile = "mode: global\nproxy-groups:\n  - name: GLOBAL\n";
         let responses = vec![
             serde_json::json!({"data": member_user("member")}),
             serde_json::json!({"data": {"user": member_user("member"), "entitlement": null, "activeSubscriptions": 0}}),
             serde_json::json!({"data": {"token": "csrf"}}),
             serde_json::json!({"data": {"challenge_id": challenge_id, "challenge": challenge}}),
             serde_json::json!({"data": {"token": "csrf"}}),
-            serde_json::json!({"data": {"device": {"id": "fd3ae0f1-1234-4234-9234-000000000002", "bound": true}, "node_authorization": {"status": "ready"}}}),
-            serde_json::json!({"data": {"entitlement_active": true, "max_devices": 5, "registered_count": 1, "available_slots": 4, "devices": [{"id": "device-1", "installation_id": "fd3ae0f1-1234-4234-9234-000000000002", "name": "Windows", "platform": "windows", "status": "registered", "created_at": "2026-11-22T00:00:00Z"}]}}),
+            serde_json::json!({"data": {
+                "device": {"id": "fd3ae0f1-1234-4234-9234-000000000002", "status": "registered", "bound": true},
+                "node_authorization": {
+                    "status": "ready",
+                    "peer_id": "fd3ae0f1-1234-4234-9234-000000000003",
+                    "node_id": "fd3ae0f1-1234-4234-9234-000000000004",
+                    "peer_generation": 1,
+                    "device_binding_generation": 1,
+                    "peer_credential": peer_credential.clone(),
+                    "profile": profile
+                }
+            }}),
+            serde_json::json!({"data": {"entitlement_active": true, "max_devices": 5, "registered_count": 1, "available_slots": 4, "devices": [{"id": "fd3ae0f1-1234-4234-9234-000000000002", "installation_id": "fd3ae0f1-1234-4234-9234-000000000002", "name": "Windows", "platform": "windows", "status": "registered", "created_at": "2026-11-22T00:00:00Z"}]}}),
         ];
         let server = thread::spawn(move || {
             let mut paths = Vec::new();
@@ -840,7 +919,11 @@ mod tests {
         let snapshot = client.restore().await.unwrap().unwrap();
         let paths = server.join().unwrap();
         assert_eq!(snapshot.node_authorization, NodeAuthorizationStatus::Ready);
+        assert!(client.verified_member_device_proof.is_some());
         assert_eq!(snapshot.devices.registered_count, 1);
+        let snapshot_json = serde_json::to_string(&snapshot).unwrap();
+        assert!(!snapshot_json.contains(&peer_credential));
+        assert!(!snapshot_json.contains(profile));
         assert!(paths[3].contains("device-bindings/challenge"));
         assert!(paths[5].contains("device-bindings/authorize"));
         assert!(paths[6].contains("me/devices"));
