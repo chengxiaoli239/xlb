@@ -16,6 +16,7 @@ PINNED_NODE_24_ACTIONS = {
     "actions/setup-java": "d1374f8ac74474200d16ef8ecee22c7ae7a51880",
     "actions/setup-python": "6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
     "actions/upload-artifact": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+    "actions/download-artifact": "9000827ccba6bdab643e8b6fd33ac0654aef8333",
     "android-actions/setup-android": "be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd",
     "gradle/actions/setup-gradle": "8da46b539cd8fe6ab27ca75128919a18d757604c",
     "actions/attest": "508db95dd578ae2727ebd6217d5ba78e4fbda05d",
@@ -51,6 +52,7 @@ class WorkflowActionPinsTest(unittest.TestCase):
                 "android-actions/setup-android": 1,
                 "gradle/actions/setup-gradle": 1,
                 "actions/attest": 4,
+                "actions/download-artifact": 2,
             },
             occurrences,
         )
@@ -59,23 +61,23 @@ class WorkflowActionPinsTest(unittest.TestCase):
         workflow = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         main_push_gate = "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
 
-        self.assertEqual(workflow.count(main_push_gate), 6)
-        self.assertEqual(workflow.count("attestations: write"), 2)
-        self.assertEqual(workflow.count("artifact-metadata: write"), 2)
-        self.assertEqual(workflow.count("id-token: write"), 2)
+        self.assertEqual(workflow.count(main_push_gate), 1)
+        self.assertEqual(workflow.count("attestations: write"), 1)
+        self.assertEqual(workflow.count("artifact-metadata: write"), 1)
+        self.assertEqual(workflow.count("id-token: write"), 1)
         self.assertEqual(workflow.count("push-to-registry: false"), 4)
         self.assertEqual(workflow.count("create-storage-record: false"), 4)
         self.assertIn("upload-artifact: false", workflow)
-        self.assertEqual(workflow.count("continue-on-error: true"), 2)
+        self.assertIn("needs: [checks, tests, node-agent, operations, android]", workflow)
+        self.assertEqual(workflow.count("continue-on-error: true"), 3)
         self.assertEqual(workflow.count("run: sleep 30"), 2)
         self.assertIn("steps.attest_source_sbom.outcome == 'failure'", workflow)
         self.assertIn("steps.attest_android_sbom.outcome == 'failure'", workflow)
         self.assertIn(
-            "name: xlb-vpn-source-sbom\n          path: ${{ runner.temp }}/xlb-vpn-source.cdx.json",
+            "subject-path: ${{ runner.temp }}/sboms/source/xlb-vpn-source.cdx.json",
             workflow,
         )
-        self.assertIn("subject-path: ${{ runner.temp }}/xlb-vpn-source.cdx.json", workflow)
-        self.assertIn("subject-path: apps/android/app/build/reports/cyclonedx-direct/bom.json", workflow)
+        self.assertIn("subject-path: ${{ runner.temp }}/sboms/android/bom.json", workflow)
 
 
 if __name__ == "__main__":
