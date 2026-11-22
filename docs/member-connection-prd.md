@@ -2,7 +2,9 @@
 
 确认：2026-11-18 09:44。范围：自有 Android / Windows / macOS 客户端、会员网站、浏览器扩展，以及 Clash Verge 等兼容客户端。本文区分产品目标、开发期验证和正式上线门槛；不表示当前代码或正式节点已实现。阶段进度见下文。
 
-## 开发进度（2026-11-22）
+## 开发进度（2026-11-23）
+
+- **M8 Android VPN service 会员 profile 准入回归（2026-11-23，专用 AVD 1/1）**：新增 `XlbVpnServiceAdmissionInstrumentedTest`，在专用 `xlb-m9-recovery` AVD 上实际启动非导出的 `XlbVpnService`，确认 bridge 关闭时会员 profile 收到“会员安全线路尚未接入”，未进入测试线路/路由启动。JDK 21 + 本机 Android SDK 下 AndroidTest 编译、JVM 测试、lint、Debug APK 构建通过；定向 instrumentation 1/1 通过。首次误用无隔离参数的整套 `connectedDebugAndroidTest` 被既有 disposable-AVD 前置断言拒绝，之后仅按隔离 AVD 参数运行新增用例。未连接或安装到实体会员手机，未访问 AWS/真实节点；此结果只验证服务层拒绝路径，不证明会员隧道、节点回执、断流或精确设备限制。下一步继续 Android proof bridge adapter/JNI 到 VPN service 的默认关闭离线接线，保持无可验证 member profile 时失败关闭。
 
 - **M8 Android member profile 通用 tunnel 准入失败关闭（2026-11-22，本机离线验收）**：新增 `MemberTunnelAdmissionPolicy` 并在 `MainActivity.startVpn()` 唯一入口应用：Debug 导入响应还必须带 `X-XLB-Profile-Scope: local-test`；MainActivity 和非 exported XlbVpnService 均只允许此显式测试路线进入通用 Mihomo/TUN；非测试会员 profile 要求 member proof bridge 已集成，目前常量保持 false，因此即使未来出现普通 account profile 也会显示“会员安全线路尚未接入，未启动 VPN”并停止。此门禁不改变会员登录/权益/设备同步，不阻断 Debug 测试节点；不会把通用 profile 误标成严格限设备线路。JVM 覆盖 fetch 响应 scope、拒绝 body 读取及 Debug/release × 测试/会员准入矩阵；Android JVM 48/48、`lintDebug`、`assembleDebug`、AndroidTest 编译通过，`git diff --check` 通过。未触碰两台真机、AWS 或节点；未运行 VPN/节点连接。下一步只有在专用 proof bridge adapter、Keystore→Go 生产 signer 与 server-verified member profile 均接线并单独验收后，才可改变该门禁。
 

@@ -1,6 +1,6 @@
 # 上线工程总体规划：批量部署 / 快速上下线 / 压测负载均衡 / 四端研发 / 多云长期演进
 
-日期：2026-11-22（执行状态复核）
+日期：2026-11-23（执行状态复核）
 状态：**滚动执行计划**。路线与验收门在本文维护；具体阶段证据以 `docs/member-connection-prd.md` 顶部和链接验收记录为准。本文不改任何线上资源，不代表生产已上线或可发布。
 
 ## 0. 这份文档解决什么
@@ -55,7 +55,7 @@
 
 | J. Android server-verified peer proof 与 bridge supervisor 输入类型统一（2026-11-22 本机离线验收） | `apps/android/app/src/main/java/com/xlb/vpn/data/MemberDeviceProof.java`、`PlatformApi.java`、`tunnel/ProofBridgeSupervisor.java` 与 JVM tests | PlatformApi 的验证结果与 supervisor/adapter 输入统一为 opaque proof 类型，当前无 UI/service 调用点传入；只暴露身份引用和 Keystore signer 操作、不含 credential/profile；完整合法 proof 仍因 `PROOF_BRIDGE_ENABLED=false` 返回 `FEATURE_DISABLED` 且不调用 adapter。JVM 45/45、lint、Debug APK 与 AndroidTest 编译通过。没有接 `XlbVpnService`/JNI/Mihomo/TUN；adapter 启动、授权重检与线路验收仍未实现 |
 
-| K. Android member profile 通用 tunnel 准入失败关闭（2026-11-22 本机离线验收） | `apps/android/app/src/main/java/com/xlb/vpn/tunnel/MemberTunnelAdmissionPolicy.java`、`DebugProfileFetcher.java`、`MainActivity.java`、`XlbVpnService.java` 与 JVM tests | Debug importer 要求 `X-XLB-Profile-Scope: local-test`；MainActivity 与 non-exported XlbVpnService 双重检查准入标记；服务端 profile scope 必须精确为 `local-test`，XlbVpnService 拒绝未标记 ACTION_START 并取消旧连接尝试；member profile 在 bridge 未集成时失败关闭；scope 与 Debug/release admission tests、lint、APK 和 AndroidTest 编译通过；尚无专门的 service 级 instrumentation 断言。Debug test route 不代表会员线路或设备证明；member bridge/TUN 集成仍未验收 |
+| K. Android member profile 通用 tunnel 准入失败关闭（2026-11-23，专用 AVD 验收） | `apps/android/app/src/main/java/com/xlb/vpn/tunnel/MemberTunnelAdmissionPolicy.java`、`DebugProfileFetcher.java`、`MainActivity.java`、`XlbVpnService.java` 与 JVM/instrumentation tests | Debug importer 要求 `X-XLB-Profile-Scope: local-test`；MainActivity 与 non-exported XlbVpnService 双重检查准入标记；服务端 profile scope 必须精确为 `local-test`，XlbVpnService 拒绝未标记 ACTION_START 并取消旧连接尝试；新增专用 AVD service instrumentation，实际调用拒绝路径 1/1；JVM 48/48、AndroidTest 编译、lint、Debug APK 构建通过。Debug test route 不代表会员线路或设备证明；member bridge/TUN 集成仍未验收 |
 
 M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适用账号级还是逐设备线路）、E1 高可用拓扑/SLO 和 E4 资源费用是需用户拍板的项目决策；各自之外的离线契约、测试和模块工作继续推进。合规书面评估、生产 mTLS/运行身份、真实支付商户资料属于上线外部门槛，不阻止本地实现。每个工作包以最新 `origin/main` 开独立分支，阶段通过后 commit，并由主控运行 `ops/merge-worktree.sh <branch>` 合并推送；禁止提交 `.env`、私钥、数据库和临时产物。
 
@@ -85,6 +85,25 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 | 4 | M6 两台现有会员真机数据面验收 | Android/API/验收记录，云资源另按计划 | 两机同时/错峰复制均拒绝；有效会员连接成功；退款撤权有匹配回执且最终流量单调 | 两台设备登录和独立绑定均已具备，不需要第三台手机；AWS 会话已恢复且实验资源已清空。真实会员 profile、节点身份/端点/证书及可核对的节点回执仍缺；其到位前继续 Android/Windows 离线 adapter 与失败关闭测试 |
 
 M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求、并发 1/4、loopback-only、临时 SQLite、无 Cookie 重放及 health preflight。它只形成开发机控制面基线，不得外推到生产容量或 VPN 隧道稳定性。D2 跨端登录方式、D3 智能线路范围、高可用拓扑/SLO 与 E4 资源费用仍需用户决策；可并行的离线工作不因此暂停。任何阶段碰到外部门时，继续执行其他无依赖离线工作。
+
+### 0.3 上线时间区间与需要的外部输入（2026-11-23，低置信计划）
+
+当前没有足够依据给出单日上线承诺。按一个主开发流持续推进、外部输入在两周内到位、范围不扩大的条件，建议用下列区间做资源规划；外部等待会按实际时长顺延，测试失败或新增平台也会重新估算。
+
+| 交付范围 | 粗略区间（从 2026-11-23 起算） | 主要退出门 |
+| --- | --- | --- |
+| Android + Web/API 的单服务商受控试点，不含 Windows/macOS/iOS、多云和规模放量 | 3–6 个月，约 2027-02 至 2027-05；低置信，不是上线承诺 | Android proof bridge/会员真 profile/真节点握手；双真机复制拒绝与匹配撤权回执；真实支付与对账；签名制品、staging/回滚、监控告警；合规意见和试运行观察 |
+| Android、Windows、macOS、iOS 全平台公开发布，并完成多云与放量门 | 6–12 个月以上，约 2027-05 起；低置信，平台签名/审核与第二服务商时间不确定 | 上述全部，加 Windows sidecar/TUN、macOS/iOS 系统扩展和商店/签名验收、第二家 provider conformance、容量模型及 E6/E7 放量退出门 |
+
+当前最快关键路径是 M8 Android proof bridge 与 M6 真会员数据面：bridge 仍未连接 VPN service，真实 member profile/节点身份、端点、mTLS 注入与节点匹配回执也未到位；AWS `xlb-ops` 会话已验证有效，实验资源只读盘点无残留，因此当前卡点不是 AWS 登录，也不是缺第三台手机。可并行的离线工作包括 Android/Windows adapter 失败关闭合同、M10 probe executor 契约与测试、生产签名/staging 流水线和 E2 plan/失败回收验证；M6 真节点与双真机验收仍需串行等待可信 profile 和回执。
+
+**需要用户/外部协助，但不阻断上述离线工作：**
+
+1. 首发范围：确认第一阶段是否仅 Android + Web/API 单服务商受控试点，以及 Windows、macOS、iOS、第二家云厂商分别属于后续阶段还是首发门。此决定影响 E3/E6/E7 退出条件。
+2. 产品决策：确认 D2 跨端登录方式、D3 智能线路是否只对账号级兼容线路自动选路（建议严格设备线路保持逐设备 peer 受控切换）、首发高可用拓扑、SLO/错误预算和 E4 资源费用上限。代码与无费用验证继续进行；涉及资源创建/费用仍需逐项批准。
+3. 节点联调材料：由节点/运维侧提供可用于获批验收的 member profile 生成条件、node ID、管理员控制的 endpoint、证书身份映射和受控 mTLS CA/client/server 证书注入方式，以及能核对 node/peer/request/generation 的真实回执。凭据走本机受控安全存储，不经聊天、仓库或普通文档。现有合成 peer 回执不能替代此项。
+4. 商业放行材料：真实支付服务商的商户沙箱账号、API/验签与回调契约，以及目标市场对应的合规书面结论；凭据使用安全注入。provider-neutral 支付代码可继续，但不能宣称真实支付已验收。
+5. 分发条件：若 Windows/iOS 纳入首发，需要相应代码签名、分发/商店账号和可用验收设备；若不纳入，可在 Android 首发之后推进。
 
 ## 1. 与既有文档的关系（不重复）
 
