@@ -33,4 +33,14 @@ final class DeviceBindingProof {
         signer.update(challengeBytes);
         return encode(signer.sign());
     }
+
+    static String signDigest(PrivateKey privateKey, byte[] digest) throws GeneralSecurityException {
+        if (digest == null || digest.length != 32) {
+            throw new IllegalArgumentException("无效的设备验证请求");
+        }
+        Signature signer = Signature.getInstance("NONEwithECDSA");
+        signer.initSign(privateKey);
+        signer.update(digest);
+        return encode(signer.sign());
+    }
 }

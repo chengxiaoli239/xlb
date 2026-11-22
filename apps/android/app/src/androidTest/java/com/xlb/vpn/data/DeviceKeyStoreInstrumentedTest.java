@@ -187,10 +187,61 @@ public final class DeviceKeyStoreInstrumentedTest {
         }
     }
 
+    @Test
+    public void javaKeystoreSignerCallbackRoundTripsThroughGoVerifier() throws Exception {
+        String installationId = "jni-signer-contract-" + UUID.randomUUID();
+        String otherInstallationId = "jni-signer-other-" + UUID.randomUUID();
+        String alias = KEY_ALIAS_PREFIX + installationId;
+        String otherAlias = KEY_ALIAS_PREFIX + otherInstallationId;
+        DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
+        KeyStore keyStore = KeyStore.getInstance(KEY_STORE);
+        byte[] digest = MessageDigest.getInstance("SHA-256")
+                .digest("Keystore Java callback to Go signer v1".getBytes(StandardCharsets.UTF_8));
+
+        try {
+            byte[] publicKey = DeviceBindingProof.decode(deviceKeyStore.publicKey(installationId));
+            byte[] otherPublicKey = DeviceBindingProof.decode(deviceKeyStore.publicKey(otherInstallationId));
+            DeviceProofJni.DigestSigner signer = value -> {
+                try {
+                    return deviceKeyStore.signDigestBytes(installationId, value);
+                } catch (java.security.GeneralSecurityException exception) {
+                    throw new IllegalStateException("device digest signing failed", exception);
+                }
+            };
+
+            assertTrue(DeviceProofJni.verifiesSignerCallback(signer, publicKey, digest));
+            assertFalse("A different installation key must not verify the callback signature",
+                    DeviceProofJni.verifiesSignerCallback(signer, otherPublicKey, digest));
+        } finally {
+            keyStore.load(null);
+            if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias);
+            if (keyStore.containsAlias(otherAlias)) keyStore.deleteEntry(otherAlias);
+        }
+    }
+
+    @Test
+    public void javaSignerCallbackExceptionFailsClosed() throws Exception {
+        String installationId = "jni-signer-error-" + UUID.randomUUID();
+        String alias = KEY_ALIAS_PREFIX + installationId;
+        DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
+        KeyStore keyStore = KeyStore.getInstance(KEY_STORE);
+
+        try {
+            byte[] publicKey = DeviceBindingProof.decode(deviceKeyStore.publicKey(installationId));
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest("Keystore callback failure v1".getBytes(StandardCharsets.UTF_8));
+            DeviceProofJni.DigestSigner signer = value -> {
+                throw new IllegalStateException("test signing failure");
+            };
+
+            assertFalse(DeviceProofJni.verifiesSignerCallback(signer, publicKey, digest));
+        } finally {
+            keyStore.load(null);
+            if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias);
+        }
+    }
+
     private static byte[] signDigest(PrivateKey privateKey, byte[] digest) throws Exception {
-        Signature signer = Signature.getInstance("NONEwithECDSA");
-        signer.initSign(privateKey);
-        signer.update(digest);
-        return signer.sign();
+        return DeviceBindingProof.decode(DeviceBindingProof.signDigest(privateKey, digest));
     }
 }

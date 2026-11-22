@@ -32,7 +32,14 @@ android {
         }
     }
 
-    sourceSets.main.jniLibs.srcDirs += ["$buildDir/generated/mihomo"]
+    sourceSets {
+        debug {
+            jniLibs.srcDirs += ["$buildDir/generated/mihomo/debug"]
+        }
+        release {
+            jniLibs.srcDirs += ["$buildDir/generated/mihomo/release"]
+        }
+    }
 
     packagingOptions {
         jniLibs {
@@ -66,20 +73,32 @@ if (System.getProperty('os.name').toLowerCase().contains('mac')) {
     throw new GradleException("Unsupported NDK host: ${System.getProperty('os.name')} ${System.getProperty('os.arch')}")
 }
 def ndkBin = new File(ndkPrebuiltDir, "${ndkHostTag}/bin")
-def buildMihomoArm64 = tasks.register('buildMihomoArm64', Exec) {
-    workingDir goCoreDir
-    def outputDir = file("$buildDir/generated/mihomo/arm64-v8a")
-    outputs.file(file("$outputDir/libxlbcore.so"))
-    inputs.files(fileTree(goCoreDir) { include '*.go', '*.c', '*.h', 'go.mod', 'go.sum' })
-    doFirst { outputDir.mkdirs() }
-    environment 'CGO_ENABLED', '1'
-    environment 'GOOS', 'android'
-    environment 'GOARCH', 'arm64'
-    environment 'CC', new File(ndkBin, ndkCompilerName).absolutePath
-    commandLine 'go', 'build', '-trimpath', '-buildmode=c-shared', '-tags=with_gvisor,cmfa', '-o', file("$outputDir/libxlbcore.so"), '.'
+def registerMihomoArm64Build = { String variant, boolean includeTestSignerCallback ->
+    def variantName = variant.capitalize()
+    def outputDir = file("$buildDir/generated/mihomo/${variant}/arm64-v8a")
+    def buildTags = includeTestSignerCallback
+        ? 'with_gvisor,cmfa,xlb_android_test_callback'
+        : 'with_gvisor,cmfa'
+    tasks.register("buildMihomoArm64${variantName}", Exec) {
+        workingDir goCoreDir
+        outputs.file(file("$outputDir/libxlbcore.so"))
+        inputs.files(fileTree(goCoreDir) { include '*.go', '*.c', '*.h', 'go.mod', 'go.sum' })
+        inputs.property('testSignerCallbackEnabled', includeTestSignerCallback)
+        doFirst { outputDir.mkdirs() }
+        environment 'CGO_ENABLED', '1'
+        environment 'GOOS', 'android'
+        environment 'GOARCH', 'arm64'
+        environment 'CC', new File(ndkBin, ndkCompilerName).absolutePath
+        environment 'CGO_CFLAGS', includeTestSignerCallback ? '-DXLB_ANDROID_TEST_SIGNER_CALLBACK' : ''
+        commandLine 'go', 'build', '-trimpath', '-buildmode=c-shared', "-tags=${buildTags}",
+                '-o', file("$outputDir/libxlbcore.so"), '.'
+    }
 }
 
-tasks.named('preBuild').configure { dependsOn(buildMihomoArm64) }
+def debugCoreBuild = registerMihomoArm64Build('debug', true)
+def releaseCoreBuild = registerMihomoArm64Build('release', false)
+tasks.matching { it.name == 'preDebugBuild' }.configureEach { dependsOn(debugCoreBuild) }
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn(releaseCoreBuild) }
 
 tasks.matching { it.name in ['connectedDebugAndroidTest', 'installDebugAndroidTest'] }.configureEach {
     doFirst {

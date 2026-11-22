@@ -21,6 +21,10 @@ final class DeviceKeyStore {
         return DeviceBindingProof.sign(keyPair(installationId).getPrivate(), challenge);
     }
 
+    byte[] signDigestBytes(String installationId, byte[] digest) throws GeneralSecurityException {
+        return DeviceBindingProof.decode(DeviceBindingProof.signDigest(keyPair(installationId).getPrivate(), digest));
+    }
+
     private KeyPair keyPair(String installationId) throws GeneralSecurityException {
         String alias = KEY_ALIAS_PREFIX + installationId;
         KeyStore store = KeyStore.getInstance(KEY_STORE);
