@@ -65,6 +65,13 @@ def check_capacity(state):
         raise RuntimeError("Existing local website is not healthy; no probe was installed")
 
 
+def parse_expected_ip(value):
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        raise ValueError("Expected egress IP must be a valid IPv4 or IPv6 address") from None
+
+
 def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -153,6 +160,7 @@ def server_config(port, password):
 
 
 def probe(args):
+    expected_ip = parse_expected_ip(args.expected_ip)
     ssh = ssh_command(args.host)
     before = snapshot(ssh)
     check_capacity(before)
@@ -229,7 +237,6 @@ def probe(args):
             wait_port(client_port, client)
             report["exit_ip_request"] = http_probe(client_port, "https://checkip.amazonaws.com/", root / "exit-ip")
             exit_ip = str(ipaddress.ip_address((root / "exit-ip").read_text().strip()))
-            expected_ip = str(ipaddress.ip_address(args.expected_ip))
             if exit_ip != expected_ip:
                 raise RuntimeError("Egress address does not match the expected test host")
             report["egress_ip_matches"] = True

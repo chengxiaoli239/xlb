@@ -1,7 +1,8 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from node_probe import ARCHIVE_SHA256, check_capacity, cleanup, http_probe, identity, server_config, server_setup, ssh_command
+from node_probe import ARCHIVE_SHA256, check_capacity, cleanup, http_probe, identity, probe, server_config, server_setup, ssh_command
 
 
 class ProbeSafetyTest(unittest.TestCase):
@@ -30,6 +31,14 @@ class ProbeSafetyTest(unittest.TestCase):
         with patch("node_probe.run", return_value="503 0.5 100"):
             with self.assertRaises(RuntimeError):
                 http_probe(17777, "https://example.com/", "/tmp/probe")
+
+    def test_invalid_expected_ip_is_rejected_before_remote_inventory(self):
+        args = SimpleNamespace(host="test-node", expected_ip="not-an-ip")
+        with patch("node_probe.ssh_command") as ssh_command, patch("node_probe.snapshot") as snapshot:
+            with self.assertRaisesRegex(ValueError, "Expected egress IP"):
+                probe(args)
+        ssh_command.assert_not_called()
+        snapshot.assert_not_called()
 
     def test_https_transport_keeps_tls_validation_and_resource_bounds(self):
         with patch("node_probe.run", return_value="200 0.5 300") as command:
