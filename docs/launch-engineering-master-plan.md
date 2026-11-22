@@ -67,9 +67,9 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 
 | 波次 | 并行工作 | 文件边界 | 独立退出条件 | 外部门 |
 | --- | --- | --- | --- | --- |
-| 1A | Android Keystore proof signer 到 Mihomo loopback bridge 的离线 adapter/失败关闭接线 | `apps/android/**` | 缺少有效签名、绑定 peer 或 bridge 时不启动 TUN；定向 JVM/Instrumentation 测试通过；不能把本地 ready 标成 VPN connected | 真实 member profile 与两机隧道验收仍需隔离节点 |
+| 1A | Android generic debug tunnel 的 loopback proof-bridge 失败关闭保护 | `apps/android/core-native/internal/debugprofile/**` | 已拒绝 IPv4/IPv6/mapped loopback、`localhost`/`.localhost`/`.localdomain` 常见形式；保留远端 SOCKS；此语法检查不覆盖任意自定义 DNS/hosts alias。Keystore signer 尚未接入专用 bridge，不能启动会员 TUN | 真实 member profile、server-verified peer binding 与两机隧道验收仍需隔离节点 |
 | 1B | Windows CNG signer 到 verified-proof/sidecar adapter 的离线合同 | `apps/windows/**` | 普通字符串不能构造 verified capability；默认关闭；Windows hosted 测试与 build 通过；不宣称 sidecar/TUN 已运行 | Windows 真实系统运行和签名另验 |
-| 2 | M10 runnable Agent 的 probe executor 注入与 loopback mTLS 集成测试 | `apps/node-agent/**`，PHP transport 单独提交 | 没有真实数据面执行器时保持 `503 probe_unavailable`；本地 loopback 测试明确标 test-only；Go race/vet/build 通过 | node ID、节点/客户端证书和隔离节点 challenge echo 需要获批环境 |
+| 2 | M10 runnable Agent 的 probe executor 注入与 loopback mTLS 集成测试 | `apps/node-agent/**`，PHP transport 单独提交 | 只在测试中注入 echo executor 与 client cert 验证 TLS/mTLS challenge 路径；runnable Agent 缺 executor 时继续 `503 probe_unavailable`；Go race/vet/build 通过 | node ID、节点/客户端证书和隔离节点 challenge echo 仍需获批环境 |
 | 3 | M6 两台现有会员真机数据面验收 | Android/API/验收记录，云资源另按计划 | 两机同时/错峰复制均拒绝；有效会员连接成功；退款撤权有匹配回执且最终流量单调 | 需要 member profile、获批隔离节点窗口与当前 AWS 会话；两台设备身份已具备，不需要第三台手机 |
 
 M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求、并发 1/4、loopback-only、临时 SQLite、无 Cookie 重放及 health preflight。它只形成开发机控制面基线，不得外推到生产容量或 VPN 隧道稳定性。D2 跨端登录方式、D3 智能线路范围、高可用拓扑/SLO 与 E4 资源费用仍需用户决策；可并行的离线工作不因此暂停。任何阶段碰到外部门时，继续执行其他无依赖离线工作。
