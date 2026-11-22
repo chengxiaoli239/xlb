@@ -50,7 +50,7 @@ class WorkflowActionPinsTest(unittest.TestCase):
                 "actions/upload-artifact": 2,
                 "android-actions/setup-android": 1,
                 "gradle/actions/setup-gradle": 1,
-                "actions/attest": 2,
+                "actions/attest": 4,
             },
             occurrences,
         )
@@ -59,13 +59,17 @@ class WorkflowActionPinsTest(unittest.TestCase):
         workflow = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         main_push_gate = "if: github.event_name == 'push' && github.ref == 'refs/heads/main'"
 
-        self.assertEqual(workflow.count(main_push_gate), 2)
+        self.assertEqual(workflow.count(main_push_gate), 6)
         self.assertEqual(workflow.count("attestations: write"), 2)
         self.assertEqual(workflow.count("artifact-metadata: write"), 2)
         self.assertEqual(workflow.count("id-token: write"), 2)
-        self.assertEqual(workflow.count("push-to-registry: false"), 2)
-        self.assertEqual(workflow.count("create-storage-record: false"), 2)
+        self.assertEqual(workflow.count("push-to-registry: false"), 4)
+        self.assertEqual(workflow.count("create-storage-record: false"), 4)
         self.assertIn("upload-artifact: false", workflow)
+        self.assertEqual(workflow.count("continue-on-error: true"), 2)
+        self.assertEqual(workflow.count("run: sleep 30"), 2)
+        self.assertIn("steps.attest_source_sbom.outcome == 'failure'", workflow)
+        self.assertIn("steps.attest_android_sbom.outcome == 'failure'", workflow)
         self.assertIn(
             "name: xlb-vpn-source-sbom\n          path: ${{ runner.temp }}/xlb-vpn-source.cdx.json",
             workflow,

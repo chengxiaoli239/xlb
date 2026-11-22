@@ -32,7 +32,21 @@ jobs:
           dependency-snapshot: false
 
       - name: Attest source SBOM provenance
+        id: attest_source_sbom
+        continue-on-error: true
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ runner.temp }}/xlb-vpn-source.cdx.json
+          push-to-registry: false
+          create-storage-record: false
+
+      - name: Wait before retrying source SBOM provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.attest_source_sbom.outcome == 'failure'
+        run: sleep 30
+
+      - name: Retry source SBOM provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.attest_source_sbom.outcome == 'failure'
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: ${{ runner.temp }}/xlb-vpn-source.cdx.json
@@ -206,7 +220,21 @@ jobs:
         run: ./gradlew :app:cyclonedxDirectBom --no-daemon
 
       - name: Attest Android runtime SBOM provenance
+        id: attest_android_sbom
+        continue-on-error: true
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: apps/android/app/build/reports/cyclonedx-direct/bom.json
+          push-to-registry: false
+          create-storage-record: false
+
+      - name: Wait before retrying Android SBOM provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.attest_android_sbom.outcome == 'failure'
+        run: sleep 30
+
+      - name: Retry Android SBOM provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.attest_android_sbom.outcome == 'failure'
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: apps/android/app/build/reports/cyclonedx-direct/bom.json
