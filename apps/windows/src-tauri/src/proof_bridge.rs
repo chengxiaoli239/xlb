@@ -22,6 +22,7 @@ enum BridgeState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum BridgeFailure {
+    FeatureDisabled,
     InvalidMemberProof,
     DeviceKeyUnavailable,
     DeviceProofSigningFailed,
@@ -243,6 +244,14 @@ impl<A: ProofBridgeAdapter> BridgeSupervisor<A> {
     }
 
     fn start(&mut self, config: &BridgeConfig) -> BridgeSnapshot {
+        if !PROOF_BRIDGE_ENABLED {
+            return self.fail(BridgeFailure::FeatureDisabled);
+        }
+
+        self.start_enabled(config)
+    }
+
+    fn start_enabled(&mut self, config: &BridgeConfig) -> BridgeSnapshot {
         if self.snapshot.state == BridgeState::Ready {
             return self.status();
         }
@@ -278,6 +287,11 @@ impl<A: ProofBridgeAdapter> BridgeSupervisor<A> {
         }
 
         self.snapshot
+    }
+
+    #[cfg(test)]
+    fn start_enabled_for_test(&mut self, config: &BridgeConfig) -> BridgeSnapshot {
+        self.start_enabled(config)
     }
 
     fn stop(&mut self) -> BridgeSnapshot {
@@ -465,8 +479,17 @@ mod tests {
     #[test]
     fn feature_is_off_and_initial_state_is_stopped() {
         assert!(!PROOF_BRIDGE_ENABLED);
-        let mut supervisor = supervisor(Counters::default());
+        let counters = Counters::default();
+        let mut supervisor = supervisor(counters.clone());
         assert_eq!(supervisor.status().state, BridgeState::Stopped);
+        assert_eq!(
+            supervisor.start(&valid_config()),
+            BridgeSnapshot {
+                state: BridgeState::Failed,
+                failure: Some(BridgeFailure::FeatureDisabled),
+            }
+        );
+        assert_eq!(counters.launches.get(), 0);
     }
 
     #[test]
@@ -477,7 +500,7 @@ mod tests {
         config.proof.peer_binding_id.clear();
 
         assert_eq!(
-            supervisor.start(&config),
+            supervisor.start_enabled_for_test(&config),
             BridgeSnapshot {
                 state: BridgeState::Failed,
                 failure: Some(BridgeFailure::InvalidMemberProof),
@@ -612,8 +635,8 @@ mod tests {
         let counters = Counters::default();
         let mut supervisor = supervisor(counters.clone());
 
-        assert_eq!(supervisor.start(&valid_config()).state, BridgeState::Ready);
-        assert_eq!(supervisor.start(&valid_config()).state, BridgeState::Ready);
+        assert_eq!(supervisor.start_enabled_for_test(&valid_config()).state, BridgeState::Ready);
+        assert_eq!(supervisor.start_enabled_for_test(&valid_config()).state, BridgeState::Ready);
         assert_eq!(counters.launches.get(), 1);
     }
 
@@ -623,7 +646,7 @@ mod tests {
         counters.launch_fails.set(true);
         let mut supervisor = supervisor(counters.clone());
 
-        let result = supervisor.start(&valid_config());
+        let result = supervisor.start_enabled_for_test(&valid_config());
         assert_eq!(result.state, BridgeState::Failed);
         assert_eq!(result.failure, Some(BridgeFailure::LaunchFailed));
         assert_eq!(counters.launches.get(), 1);
@@ -633,7 +656,7 @@ mod tests {
     fn process_exit_changes_ready_to_failed() {
         let counters = Counters::default();
         let mut supervisor = supervisor(counters.clone());
-        assert_eq!(supervisor.start(&valid_config()).state, BridgeState::Ready);
+        assert_eq!(supervisor.start_enabled_for_test(&valid_config()).state, BridgeState::Ready);
         counters.alive.set(false);
 
         let result = supervisor.status();
@@ -645,7 +668,7 @@ mod tests {
     fn repeated_stop_is_idempotent_and_cleans_process() {
         let counters = Counters::default();
         let mut supervisor = supervisor(counters.clone());
-        supervisor.start(&valid_config());
+        supervisor.start_enabled_for_test(&valid_config());
 
         assert_eq!(supervisor.stop().state, BridgeState::Stopped);
         assert_eq!(supervisor.stop().state, BridgeState::Stopped);
@@ -657,7 +680,7 @@ mod tests {
     fn force_stop_fallback_cleans_process_after_graceful_stop_fails() {
         let counters = Counters::default();
         let mut supervisor = supervisor(counters.clone());
-        supervisor.start(&valid_config());
+        supervisor.start_enabled_for_test(&valid_config());
         counters.stop_fails.set(true);
 
         let result = supervisor.stop();
@@ -674,7 +697,7 @@ mod tests {
     fn stop_failure_is_reported_as_failed() {
         let counters = Counters::default();
         let mut supervisor = supervisor(counters.clone());
-        supervisor.start(&valid_config());
+        supervisor.start_enabled_for_test(&valid_config());
         counters.stop_fails.set(true);
         counters.force_stop_fails.set(true);
 
@@ -688,7 +711,7 @@ mod tests {
         let counters = Counters::default();
         {
             let mut supervisor = supervisor(counters.clone());
-            supervisor.start(&valid_config());
+            supervisor.start_enabled_for_test(&valid_config());
         }
 
         assert_eq!(counters.stops.get(), 1);
@@ -699,13 +722,13 @@ mod tests {
     fn failed_stop_keeps_handle_and_blocks_second_launch_until_retry_succeeds() {
         let counters = Counters::default();
         let mut supervisor = supervisor(counters.clone());
-        supervisor.start(&valid_config());
+        supervisor.start_enabled_for_test(&valid_config());
         counters.stop_fails.set(true);
         counters.force_stop_fails.set(true);
 
         assert_eq!(supervisor.stop().failure, Some(BridgeFailure::StopFailed));
         assert_eq!(
-            supervisor.start(&valid_config()).failure,
+            supervisor.start_enabled_for_test(&valid_config()).failure,
             Some(BridgeFailure::StopFailed)
         );
         assert_eq!(counters.launches.get(), 1);
@@ -723,7 +746,7 @@ mod tests {
         let counters = Counters::default();
         {
             let mut supervisor = supervisor(counters.clone());
-            supervisor.start(&valid_config());
+            supervisor.start_enabled_for_test(&valid_config());
             counters.stop_fails.set(true);
             counters.force_stop_fails.set(true);
             assert_eq!(supervisor.stop().failure, Some(BridgeFailure::StopFailed));
@@ -740,7 +763,7 @@ mod tests {
         let counters = Counters::default();
         {
             let mut supervisor = supervisor(counters.clone());
-            supervisor.start(&valid_config());
+            supervisor.start_enabled_for_test(&valid_config());
             counters.stop_fails.set(true);
             counters.force_stop_fails.set(true);
             assert_eq!(supervisor.stop().failure, Some(BridgeFailure::StopFailed));
