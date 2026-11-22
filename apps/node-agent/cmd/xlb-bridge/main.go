@@ -27,7 +27,7 @@ import (
 	"time"
 
 	agent "xlb/node-agent"
-	"xlb/node-agent/internal/bridge"
+	"xlb/node-agent/bridge"
 )
 
 func main() {
