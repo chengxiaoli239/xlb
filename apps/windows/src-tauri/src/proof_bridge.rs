@@ -626,6 +626,23 @@ mod tests {
     }
 
     #[test]
+    fn force_stop_fallback_cleans_process_after_graceful_stop_fails() {
+        let counters = Counters::default();
+        let mut supervisor = supervisor(counters.clone());
+        supervisor.start(&valid_config());
+        counters.stop_fails.set(true);
+
+        let result = supervisor.stop();
+
+        assert_eq!(result.state, BridgeState::Stopped);
+        assert_eq!(result.failure, None);
+        assert_eq!(counters.stops.get(), 2);
+        assert!(!counters.alive.get());
+        assert_eq!(supervisor.stop().state, BridgeState::Stopped);
+        assert_eq!(counters.stops.get(), 2);
+    }
+
+    #[test]
     fn stop_failure_is_reported_as_failed() {
         let counters = Counters::default();
         let mut supervisor = supervisor(counters.clone());
