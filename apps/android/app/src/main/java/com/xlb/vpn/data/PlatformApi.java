@@ -109,6 +109,7 @@ public final class PlatformApi {
                 return withOverview(loadDevices(account, null));
             }
             String registrationMessage = null;
+            NodeAuthorizationStatus nodeAuthorizationStatus = NodeAuthorizationStatus.UNAVAILABLE;
             try {
                 String installationId = sessionStore.installationId();
                 JSONObject binding = new JSONObject()
@@ -127,6 +128,9 @@ public final class PlatformApi {
                 if (authorization == null || authorization.optJSONObject("device") == null) {
                     throw new PlatformApiException("设备授权响应格式不正确");
                 }
+                JSONObject nodeAuthorization = authorization.optJSONObject("node_authorization");
+                nodeAuthorizationStatus = NodeAuthorizationStatus.fromStatus(
+                        nodeAuthorization == null ? null : nodeAuthorization.optString("status", null));
                 try {
                     request("POST", "/api/v1/client/heartbeat", new JSONObject()
                             .put("installation_id", installationId)
@@ -137,7 +141,7 @@ public final class PlatformApi {
             } catch (PlatformApiException | GeneralSecurityException exception) {
                 registrationMessage = exception.getMessage();
             }
-            return withOverview(loadDevices(account, registrationMessage));
+            return withOverview(loadDevices(account, registrationMessage, nodeAuthorizationStatus));
         } catch (PlatformApiException exception) {
             return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
         } catch (Exception exception) {
@@ -158,7 +162,7 @@ public final class PlatformApi {
                     active.optString("plan_name"), active.optString("starts_at"), active.optString("ends_at"),
                     number(active, "traffic_gb"), number(active, "data_used_gb"), active.optInt("max_devices"));
             return new ClientSnapshot(current.account, current.device, current.message, entitlement,
-                    overview.optInt("activeSubscriptions"));
+                    overview.optInt("activeSubscriptions"), current.accountProfile, current.nodeAuthorizationStatus);
         } catch (PlatformApiException exception) {
             return current;
         }
@@ -171,6 +175,11 @@ public final class PlatformApi {
     }
 
     private ClientSnapshot loadDevices(MemberAccount account, String message) throws PlatformApiException {
+        return loadDevices(account, message, NodeAuthorizationStatus.UNAVAILABLE);
+    }
+
+    private ClientSnapshot loadDevices(MemberAccount account, String message,
+                                       NodeAuthorizationStatus nodeAuthorizationStatus) throws PlatformApiException {
         try {
             String installationId = sessionStore.installationId();
             JSONObject devices = request("GET", "/api/v1/me/devices", null).optJSONObject("data");
@@ -197,7 +206,7 @@ public final class PlatformApi {
                     devices.optInt("max_devices"),
                     devices.optBoolean("entitlement_active"),
                     entries
-            ), message);
+            ), message, null, 0, null, nodeAuthorizationStatus);
         } catch (PlatformApiException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -386,6 +395,7 @@ public final class PlatformApi {
         public final EntitlementSummary entitlement;
         public final int subscriptionCount;
         public final String accountProfile;
+        public final NodeAuthorizationStatus nodeAuthorizationStatus;
 
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message) {
             this(account, device, message, null, 0);
@@ -398,12 +408,33 @@ public final class PlatformApi {
 
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
                               EntitlementSummary entitlement, int subscriptionCount, String accountProfile) {
+            this(account, device, message, entitlement, subscriptionCount, accountProfile,
+                    NodeAuthorizationStatus.UNAVAILABLE);
+        }
+
+        public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
+                              EntitlementSummary entitlement, int subscriptionCount, String accountProfile,
+                              NodeAuthorizationStatus nodeAuthorizationStatus) {
             this.account = account;
             this.device = device;
             this.message = message;
             this.entitlement = entitlement;
             this.subscriptionCount = subscriptionCount;
             this.accountProfile = accountProfile;
+            this.nodeAuthorizationStatus = nodeAuthorizationStatus == null
+                    ? NodeAuthorizationStatus.UNAVAILABLE : nodeAuthorizationStatus;
+        }
+    }
+
+    public enum NodeAuthorizationStatus {
+        UNAVAILABLE,
+        PROVISIONING,
+        READY;
+
+        static NodeAuthorizationStatus fromStatus(String status) {
+            if ("provisioning".equals(status)) return PROVISIONING;
+            if ("ready".equals(status)) return READY;
+            return UNAVAILABLE;
         }
     }
 

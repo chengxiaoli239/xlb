@@ -581,12 +581,23 @@ public final class MainActivity extends Activity {
         LinearLayout status = card();
         boolean deviceLimitReached = current != null && current.message != null
                 && current.message.contains("设备名额已满");
+        PlatformApi.NodeAuthorizationStatus authorizationStatus = current == null
+                ? PlatformApi.NodeAuthorizationStatus.UNAVAILABLE : current.nodeAuthorizationStatus;
         String title = routeSyncing ? "正在同步账户线路" :
                 deviceLimitReached ? "设备名额已满" :
-                hasActiveEntitlement(current) ? "服务线路暂不可用" : "开通会员后获取线路";
+                !hasActiveEntitlement(current) ? "开通会员后获取线路" :
+                authorizationStatus == PlatformApi.NodeAuthorizationStatus.PROVISIONING ? "正在申请节点授权" :
+                authorizationStatus == PlatformApi.NodeAuthorizationStatus.READY ? "节点授权已就绪" :
+                        "服务线路暂不可用";
         status.addView(text(title, 17, COLOR_INK, true));
         if (hasActiveEntitlement(current)) {
             status.addView(text("会员权益仍有效。", 13, COLOR_MUTED, false), spacedParams(7, 0));
+            String authorizationDetail = authorizationStatus == PlatformApi.NodeAuthorizationStatus.PROVISIONING
+                    ? "正在等待节点授权处理；VPN 未连接。"
+                    : authorizationStatus == PlatformApi.NodeAuthorizationStatus.READY
+                    ? "尚未验证 VPN 连接；此状态不表示隧道已连接。"
+                    : "当前设备的节点授权不可用；VPN 未连接。";
+            status.addView(text(authorizationDetail, 13, COLOR_MUTED, false), spacedParams(7, 0));
         }
         if (current != null && current.message != null && !current.message.isEmpty()) {
             status.addView(text(current.message, 13, COLOR_MUTED, false), spacedParams(7, 0));
