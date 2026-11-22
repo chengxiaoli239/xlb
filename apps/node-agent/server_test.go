@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -393,6 +394,126 @@ func TestNodeProbeReturnsNodeIdentityAndChallengeOnlyAfterExecutorEcho(t *testin
 	}
 	if envelope.Data.NodeID != "node-canary-17" || envelope.Data.Challenge != challenge || hex.EncodeToString(gotChallenge) != challenge {
 		t.Fatalf("probe response=%+v executorChallenge=%x; expected configured identity and exact challenge", envelope.Data, gotChallenge)
+	}
+}
+
+func TestNodeProbeMTLSServerIntegration(t *testing.T) {
+	serverCertificate, clientTLS, caPEM := createTestCertificates(t)
+	executorChallenge := make(chan []byte, 1)
+	server, endpoint, listener := startNodeProbeMTLSServer(t, serverCertificate, caPEM,
+		NewDataPlaneProbeHandler("node-mtls-test", probeExecutorFunc(func(_ context.Context, challenge []byte) ([]byte, error) {
+			executorChallenge <- append([]byte(nil), challenge...)
+			return append([]byte(nil), challenge...), nil
+		})))
+	defer closeNodeProbeServer(t, server, listener)
+
+	challenge := make([]byte, nodeProbeChallengeBytes)
+	if _, err := rand.Read(challenge); err != nil {
+		t.Fatal(err)
+	}
+	challengeHex := hex.EncodeToString(challenge)
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: clientTLS}, Timeout: 5 * time.Second}
+	t.Cleanup(client.CloseIdleConnections)
+	response := postRawJSON(t, client, endpoint+nodeProbePath, fmt.Sprintf(`{"challenge":%q}`, challengeHex))
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("mTLS probe status=%d; want %d", response.StatusCode, http.StatusOK)
+	}
+	if response.TLS == nil || response.TLS.Version != tls.VersionTLS13 {
+		t.Fatalf("probe TLS state=%+v; want TLS 1.3", response.TLS)
+	}
+	var envelope struct {
+		Data struct {
+			NodeID    string `json:"node_id"`
+			Challenge string `json:"challenge"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	gotChallenge := <-executorChallenge
+	if envelope.Data.NodeID != "node-mtls-test" || envelope.Data.Challenge != challengeHex || !bytes.Equal(gotChallenge, challenge) {
+		t.Fatalf("mTLS probe response=%+v; want exact node identity and random challenge", envelope.Data)
+	}
+
+	noCertificateTLS := clientTLS.Clone()
+	noCertificateTLS.Certificates = nil
+	_, untrustedTLS, _ := createTestCertificates(t)
+	untrustedTLS.RootCAs = testRootPool(t, caPEM)
+	for name, tlsConfig := range map[string]*tls.Config{
+		"client certificate missing":   noCertificateTLS,
+		"client certificate untrusted": untrustedTLS,
+	} {
+		t.Run(name, func(t *testing.T) {
+			untrustedClient := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}, Timeout: 5 * time.Second}
+			defer untrustedClient.CloseIdleConnections()
+			request, err := http.NewRequest(http.MethodPost, endpoint+nodeProbePath, strings.NewReader(fmt.Sprintf(`{"challenge":%q}`, challengeHex)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Content-Type", "application/json")
+			if response, err := untrustedClient.Do(request); err == nil {
+				response.Body.Close()
+				t.Fatal("mTLS handshake unexpectedly succeeded without a trusted client certificate")
+			} else if !strings.Contains(strings.ToLower(err.Error()), "certificate") {
+				t.Fatalf("mTLS request failed for an unexpected reason: %v", err)
+			}
+		})
+	}
+
+	unavailableServer, unavailableEndpoint, unavailableListener := startNodeProbeMTLSServer(t, serverCertificate, caPEM,
+		NewDataPlaneProbeHandler("node-mtls-test", nil))
+	defer closeNodeProbeServer(t, unavailableServer, unavailableListener)
+	unavailableResponse := postRawJSON(t, client, unavailableEndpoint+nodeProbePath,
+		fmt.Sprintf(`{"challenge":%q}`, challengeHex))
+	defer unavailableResponse.Body.Close()
+	if unavailableResponse.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("mTLS probe without executor status=%d; want %d", unavailableResponse.StatusCode, http.StatusServiceUnavailable)
+	}
+	assertProbeError(t, unavailableResponse, "probe_unavailable")
+}
+
+func startNodeProbeMTLSServer(t *testing.T, certificate tls.Certificate, caPEM []byte, handler http.Handler) (*http.Server, string, net.Listener) {
+	t.Helper()
+	directory := t.TempDir()
+	certificatePath := filepath.Join(directory, "server.crt")
+	privateKeyPath := filepath.Join(directory, "server.key")
+	clientCAPath := filepath.Join(directory, "client-ca.crt")
+	if err := os.WriteFile(certificatePath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Certificate[0]}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(certificate.PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(privateKeyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clientCAPath, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewMTLSServer("127.0.0.1:0", certificatePath, privateKeyPath, clientCAPath, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.ErrorLog = log.New(io.Discard, "", 0)
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_ = server.ServeTLS(listener, "", "")
+	}()
+	return server, "https://" + listener.Addr().String(), listener
+}
+
+func closeNodeProbeServer(t *testing.T, server *http.Server, listener net.Listener) {
+	t.Helper()
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Fatal(err)
 	}
 }
 
