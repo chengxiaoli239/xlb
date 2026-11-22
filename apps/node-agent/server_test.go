@@ -337,6 +337,38 @@ func TestNodeProbeTimesOutWithoutReturningChallenge(t *testing.T) {
 	assertProbeError(t, response, "probe_timeout")
 }
 
+func TestNodeProbeRejectsMatchingEchoReturnedAfterDeadline(t *testing.T) {
+	executor := probeExecutorFunc(func(_ context.Context, challenge []byte) ([]byte, error) {
+		time.Sleep(nodeProbeTimeout + 50*time.Millisecond)
+		return append([]byte(nil), challenge...), nil
+	})
+	client, server, _ := newMTLSTestClient(t, NewDataPlaneProbeHandler("node-test", executor))
+	defer server.Close()
+
+	challenge := strings.Repeat("e", 64)
+	response := postRawJSON(t, client, server.URL+nodeProbePath, fmt.Sprintf(`{"challenge":%q}`, challenge))
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("late matching probe status=%d; want %d", response.StatusCode, http.StatusGatewayTimeout)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		Error *apiError `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error == nil || envelope.Error.Code != "probe_timeout" {
+		t.Fatalf("late matching probe error=%+v; want code probe_timeout", envelope.Error)
+	}
+	if strings.Contains(string(body), challenge) {
+		t.Fatalf("timed out probe exposed challenge: %s", body)
+	}
+}
+
 func TestNodeProbeExecutorFailureDoesNotReturnChallenge(t *testing.T) {
 	executor := probeExecutorFunc(func(context.Context, []byte) ([]byte, error) {
 		return nil, errors.New("sensitive executor detail")
