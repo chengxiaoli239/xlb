@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M8 Android 启动自动连接使用已验证会员 grant（2026-11-24，本机离线验收）**：修正启动自动连接策略此前仅检查权益和账户配置文本、随后调用 generic tunnel 的不匹配。现在只有用户显式开启自动连接、系统 VPN 权限已授予、会员权益有效、`PlatformApi` 已产出完整身份绑定 `MemberTunnelGrant` 且当前无活动隧道时才经会员 grant handoff 启动；不再把账号配置文本当授权或绕过 member admission gate。单测覆盖缺 grant、缺 VPN 权限、无权益、开关关闭和隧道已活动均不启动；Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 通过。member gate 仍关闭，测试未运行系统 TUN 或真实节点；没有可验证服务端 grant 时启动自动连接继续失败关闭。下一步继续检查 process/service 重建后是否可能把过期 grant 重新连接，并维持真实节点验收门。
+
 - **M8 授权失效时撤销尚未消费的 member grant handoff（2026-11-24，本机与专用 AVD 离线验收）**：Android 停止策略现在把进程内待消费的会员 grant 与已标记会员隧道同样视作会员连接；同步得到无效/缺失节点授权时，即使 service 尚未消费 grant，也会发出停止请求。service 的 STOP 同步清空 handoff 并使旧 intent 无法重新消费；新增单测覆盖“grant 待处理、隧道尚未标记会员、节点授权失效”时应停止及授权仍就绪时不误停，Fake API→PlatformApi→grant store→service instrumentation 覆盖 READY grant 待处理期间设备撤权、同步转为 UNAVAILABLE、STOP 后延迟旧 intent 不能标记会员或发布 CONNECTED。定向 AVD 类 2/2、Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 通过；仅使用专用 `xlb-m9-recovery` AVD。member gate 仍关闭，未建立系统 TUN、真实节点连接或真实节点撤权回执；该测试只证明客户端本地竞态处理。下一步继续验证权益刷新、登出和 attempt 代次在 service 重启/进程恢复边界上的组合，并保持真实节点验收关闭至可信 profile、endpoint/CA/mTLS runtime 与匹配回执具备。
 
 - **M8 会员 grant 与 service intent 单次交接绑定（2026-11-24，本机与专用 AVD 离线验收）**：给每个进程内 grant handoff 分配单调 ID，`MainActivity` 将 ID 放入内部 service intent，`XlbVpnService` 只消费匹配 ID；旧 intent、旧启动失败清理不会消费或清除被替换的新 grant。缺失/过期的 foreground start 会先履行前台服务生命周期要求；存在替代 handoff 时保留该请求等待匹配 intent，STOP/revoke 仍负责清除待处理 grant。新增 JVM 用例覆盖旧 ID 无法消费/清除新 grant及待处理标记状态，并在专用 `xlb-m9-recovery` AVD 上验证 stale foreground service intent 后新 grant 仍能被正确消费、有效 grant 仍因生产 gate 关闭而拒绝；另一个 PlatformApi→service→logout integration case 1/1 通过。Android 全套 `testDebugUnitTest`、`lintDebug`、`compileDebugAndroidTestJavaWithJavac`、Debug/AndroidTest APK build 通过；提交 `d718d90` 对应 CI `45218168507` 全绿，前台生命周期修复提交 `b283316` 对应主线 CI `45227271566` 全绿。未运行实体手机或系统 TUN，member gate 仍关闭；不代表真实会员线路、设备限制或节点撤权回执已验收。下一步验证授权状态更新与 grant 生命周期在 attempt 代次中一致，并保持真实节点材料到位前不开启准入。
@@ -46,7 +48,7 @@
 
 | 模块 | 当前状态 | 证据与未完成项 | 可并行推进 / 下一关 |
 | --- | --- | --- | --- |
-| Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、关闭 gate 拒绝与 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；提交 `83591b9`、`c7ab282`、`d718d90` 对应 CI 全绿 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 继续验证授权刷新/失效与 grant/attempt 生命周期组合；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
+| Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、关闭 gate 拒绝与 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；提交 `83591b9`、`c7ab282`、`d718d90` 对应 CI 全绿 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 继续验证 service 重启/进程恢复边界的 grant/attempt 生命周期组合；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
 | PHP 会员 API 与设备限制 | 本机 challenge 签名、peer provisioning、逐设备 grant、撤权状态与 descriptor 校验有测试 | Laravel 全套 245 项中 244 项通过、1 项既有跳过；配置与 profile 用本地 fixture，未证明生产节点回执、实际断流或正式数据库并发 | 继续不依赖云的状态机/回归；真实会员授权和撤权验收须等节点 mTLS runtime 与回执 |
 | Web 管理端 | 订单/会员/节点管理已有本地页面；节点详情可配置 per-node bridge origin 与加密 CA | Web 5 项测试和 TypeScript/Vite 构建通过；未向真实节点下发或核验配置，CA 接口不回显 | 可继续管理端输入校验与试点运营流程；任何真实 node config 需先完成资源盘点及授权操作计划 |
 | Node Agent / proof bridge | Go 隔离协议、设备证书、容量、peer 拒绝与撤权计量、renderer artifact 有离线/合成测试 | 可执行 Agent 只允许 `isolated-test`，runtime renderer 仍 unavailable；本地测试不等于真实节点长期运行或断流 | 可继续 runtime/协议离线测试；生产启用需要管理员提供真实 listener、反向代理、CA/证书和部署验收 |

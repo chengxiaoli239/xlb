@@ -1,6 +1,8 @@
 package com.xlb.vpn.presentation;
 
 import com.xlb.vpn.tunnel.MemberTunnelAdmissionPolicy;
+import com.xlb.vpn.data.MemberTunnelGrant;
+import com.xlb.vpn.data.MemberTunnelGrantTestFixture;
 
 import org.junit.Test;
 
@@ -10,17 +12,19 @@ import static org.junit.Assert.assertTrue;
 public final class AutoConnectPolicyTest {
     @Test
     public void startsOnlyWhenEnabledAndAllStartupRequirementsAreMet() {
-        assertTrue(AutoConnectPolicy.shouldStart(true, true, true, true, false));
-        assertFalse(AutoConnectPolicy.shouldStart(false, true, true, true, false));
-        assertFalse(AutoConnectPolicy.shouldStart(true, false, true, true, false));
-        assertFalse(AutoConnectPolicy.shouldStart(true, true, false, true, false));
-        assertFalse(AutoConnectPolicy.shouldStart(true, true, true, false, false));
-        assertFalse(AutoConnectPolicy.shouldStart(true, true, true, true, true));
+        MemberTunnelGrant grant = MemberTunnelGrantTestFixture.create();
+        assertTrue(AutoConnectPolicy.shouldStart(true, true, true, grant, false));
+        assertFalse(AutoConnectPolicy.shouldStart(false, true, true, grant, false));
+        assertFalse(AutoConnectPolicy.shouldStart(true, false, true, grant, false));
+        assertFalse(AutoConnectPolicy.shouldStart(true, true, false, grant, false));
+        assertFalse(AutoConnectPolicy.shouldStart(true, true, true, null, false));
+        assertFalse(AutoConnectPolicy.shouldStart(true, true, true, grant, true));
     }
 
     @Test
     public void disabledByDefaultDoesNotStart() {
-        assertFalse(AutoConnectPolicy.shouldStart(false, true, true, true, false));
+        assertFalse(AutoConnectPolicy.shouldStart(false, true, true,
+                MemberTunnelGrantTestFixture.create(), false));
     }
 
     @Test

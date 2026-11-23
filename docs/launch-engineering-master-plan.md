@@ -43,6 +43,8 @@
 
 **2026-11-24 Android 授权刷新期间的待处理 grant 撤权增量**：`MemberTunnelStopPolicy` 将 service 已标记会员线路与 grant 已发布但尚未消费都视为会员启动；授权变为 `UNAVAILABLE` 时可及时 STOP 并清除 handoff，延迟到达的旧 member intent 不能重新启动。JVM 覆盖待处理 grant 与已就绪授权的策略组合；专用 AVD Fake API→PlatformApi→grant store→service 撤权/延迟 intent 类 2/2 通过，Android 全套 JVM、lint、AndroidTest 编译及 Debug/AndroidTest APK build 通过。只证明客户端本地授权状态竞态，member gate 仍关闭，未建立系统 TUN 或真实节点连接。
 
+**2026-11-24 Android 启动自动连接改走已验证会员 grant**：修复自动连接检查账户配置后调用 generic tunnel、而非 member grant 入口的模式错配。启动连接现在要求显式开启、VPN permission、有效权益、完整 server-authorized grant 和无现有隧道，通过单次 member handoff 进入 service；缺少 grant 时关闭失败。策略 JVM tests、Android 全套 JVM、lint、AndroidTest 编译、Debug/AndroidTest APK build 通过。未建立系统 TUN 或真实节点，member admission 仍关闭。
+
 **此前 Android 增量，以主线 `342a7d8` 为准**：Android `PlatformApi` contract-shaped loopback grant→VPN service 关闭 gate、ACTION_STOP、撤权与登出清理测试通过；伪造 profile digest 时 `MemberTunnelGrant` 不产生；权益同步失效时 `CONNECTING` 与 `CONNECTED` 均触发 stop。专用 AVD 19/19 基础 instrumentation，新增 API integration cases 各 1/1，Android JVM/AndroidTest 编译/lint 通过。hosted CI run `45196145412` 全绿。测试使用 loopback 假 API 与 service 测试边界，未建立系统 TUN、未连接 PHP ready authorization 或真实节点，Android member gate 仍关闭。中间 CI run `45195474224` 的 Laravel `NodePeerProvisioningTest` 曾出现 peer 保持 provisioning 的单次失败，下一主线全套 run 通过且 PHP 代码未变，原因未复现，保留为待观察的 CI 波动。
 
 | 发布阶段 | 状态 | 下一退出门 |

@@ -1046,9 +1046,10 @@ public final class MainActivity extends Activity {
         boolean tunnelAlreadyActive = XlbVpnService.STATE_CONNECTED.equals(tunnelState)
                 || XlbVpnService.STATE_CONNECTING.equals(tunnelState);
         boolean vpnPermissionGranted = VpnService.prepare(this) == null;
+        MemberTunnelGrant memberGrant = api.verifiedMemberTunnelGrant();
         if (!AutoConnectPolicy.shouldStart(autoConnectOnStart, vpnPermissionGranted,
-                hasActiveEntitlement(snapshot), loadedProfile != null && !testRoute, tunnelAlreadyActive)) return;
-        startVpn(loadedProfile, routeName);
+                hasActiveEntitlement(snapshot), memberGrant, tunnelAlreadyActive)) return;
+        startMemberVpn(memberGrant);
     }
 
     private void addDevicesCard(PlatformApi.ClientSnapshot current) {
