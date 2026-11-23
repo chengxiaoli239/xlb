@@ -5,8 +5,10 @@ import com.xlb.vpn.data.MemberTunnelGrantTestFixture;
 import org.junit.After;
 import org.junit.Test;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 public final class MemberTunnelGrantStoreTest {
     @After
@@ -44,5 +46,17 @@ public final class MemberTunnelGrantStoreTest {
         MemberTunnelGrantStore.clear();
 
         assertNull(MemberTunnelGrantStore.consume(handoffId));
+    }
+
+    @Test
+    public void pendingHandoffReflectsSingleUseGrantLifecycle() {
+        assertFalse(MemberTunnelGrantStore.hasPendingHandoff());
+        var grant = MemberTunnelGrantTestFixture.create();
+        long handoffId = MemberTunnelGrantStore.publish(grant);
+        assertTrue(MemberTunnelGrantStore.hasPendingHandoff());
+
+        assertSame(grant, MemberTunnelGrantStore.consume(handoffId));
+
+        assertFalse(MemberTunnelGrantStore.hasPendingHandoff());
     }
 }

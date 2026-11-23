@@ -61,6 +61,7 @@ public final class XlbVpnService extends VpnService {
     private final ExecutorService tunnelWorker = Executors.newSingleThreadExecutor();
     private final TunnelAttemptGate tunnelAttempts = new TunnelAttemptGate();
     private final Object memberSessionLock = new Object();
+    private volatile boolean foregroundServiceStarted;
     private ParcelFileDescriptor tun;
     private MemberTunnelSession memberSession;
 
@@ -93,6 +94,20 @@ public final class XlbVpnService extends VpnService {
             long handoffId = intent.getLongExtra(EXTRA_MEMBER_GRANT_HANDOFF_ID, 0);
             MemberTunnelGrant grant = MemberTunnelGrantStore.consume(handoffId);
             if (grant == null) {
+                boolean tunnelInProgress = STATE_CONNECTING.equals(currentState)
+                        || STATE_CONNECTED.equals(currentState);
+                boolean memberCleanupPending = currentTunnelIsMember();
+                if (!foregroundServiceStarted) {
+                    createChannel();
+                    String foregroundMessage = STATE_CONNECTED.equals(currentState) ? "已连接" :
+                            STATE_CONNECTING.equals(currentState) ? "正在连接" :
+                            memberCleanupPending ? "正在清理会员线路" : "连接请求已过期";
+                    promoteForeground(foregroundMessage);
+                }
+                if (!tunnelInProgress && !memberCleanupPending
+                        && !MemberTunnelGrantStore.hasPendingHandoff()) {
+                    stopSelfResult(startId);
+                }
                 return START_NOT_STICKY;
             }
             currentRouteName = "";
@@ -103,7 +118,7 @@ public final class XlbVpnService extends VpnService {
             int attempt = tunnelAttempts.begin();
             setMemberTunnelForAttempt(attempt, true);
             createChannel();
-            startForeground(NOTIFICATION_ID, notification("正在连接"));
+            promoteForeground("正在连接");
             publish(STATE_CONNECTING, null);
             worker.execute(() -> startMemberTunnel(grant, attempt, handoffId));
             return START_NOT_STICKY;
@@ -129,7 +144,7 @@ public final class XlbVpnService extends VpnService {
         }
         int attempt = tunnelAttempts.begin();
         createChannel();
-        startForeground(NOTIFICATION_ID, notification("正在连接"));
+        promoteForeground("正在连接");
         publish(STATE_CONNECTING, null);
         worker.execute(() -> startTunnel(profile, requestedRouteName, attempt));
         return START_NOT_STICKY;
@@ -143,6 +158,7 @@ public final class XlbVpnService extends VpnService {
     @Override
     public void onRevoke() {
         int attempt = tunnelAttempts.invalidate();
+        MemberTunnelGrantStore.clear();
         requestMemberSessionStop();
         worker.execute(() -> stopTunnel(attempt));
         super.onRevoke();
@@ -151,7 +167,6 @@ public final class XlbVpnService extends VpnService {
     @Override
     public void onDestroy() {
         int attempt = tunnelAttempts.invalidate();
-        MemberTunnelGrantStore.clear();
         requestMemberSessionStop();
         worker.execute(() -> {
             if (closeMemberSession()) setMemberTunnelForAttempt(attempt, false);
@@ -182,7 +197,7 @@ public final class XlbVpnService extends VpnService {
                 if (verified) {
                     tunnelAttempts.runIfCurrent(attempt, () -> {
                         publish(STATE_CONNECTED, null);
-                        startForeground(NOTIFICATION_ID, notification("已连接"));
+                        promoteForeground("已连接");
                     });
                 } else {
                     closeCore();
@@ -259,7 +274,7 @@ public final class XlbVpnService extends VpnService {
             operation.get(20, TimeUnit.SECONDS);
             boolean published = tunnelAttempts.runIfCurrent(attempt, () -> {
                 publish(STATE_CONNECTED, null);
-                startForeground(NOTIFICATION_ID, notification("已连接"));
+                promoteForeground("已连接");
             });
             if (!published) closeMemberSession();
         } catch (TimeoutException exception) {
@@ -531,14 +546,14 @@ public final class XlbVpnService extends VpnService {
         }
         requestMemberSessionStop();
         createChannel();
-        startForeground(NOTIFICATION_ID, notification("连接不可用"));
+        promoteForeground("连接不可用");
         worker.execute(() -> {
             if (!closeMemberSession()) {
                 closeCore();
                 currentRouteName = "";
                 tunnelAttempts.runIfCurrent(attempt, () -> {
                     publish(STATE_ERROR, "VPN 资源清理尚未完成，请重试");
-                    stopForeground(STOP_FOREGROUND_REMOVE);
+                    removeForeground();
                     stopSelf();
                 });
                 return;
@@ -548,7 +563,7 @@ public final class XlbVpnService extends VpnService {
             tunnelAttempts.runIfCurrent(attempt, () -> {
                 currentTunnelIsMember = false;
                 publish(STATE_ERROR, message);
-                stopForeground(STOP_FOREGROUND_REMOVE);
+                removeForeground();
                 stopSelf();
             });
         });
@@ -556,6 +571,16 @@ public final class XlbVpnService extends VpnService {
 
     private void setMemberTunnelForAttempt(int attempt, boolean isMember) {
         tunnelAttempts.runIfCurrent(attempt, () -> currentTunnelIsMember = isMember);
+    }
+
+    private void promoteForeground(String message) {
+        startForeground(NOTIFICATION_ID, notification(message));
+        foregroundServiceStarted = true;
+    }
+
+    private void removeForeground() {
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        foregroundServiceStarted = false;
     }
 
     private void createChannel() {

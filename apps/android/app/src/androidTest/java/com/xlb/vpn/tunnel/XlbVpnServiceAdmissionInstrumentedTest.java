@@ -61,7 +61,7 @@ public final class XlbVpnServiceAdmissionInstrumentedTest {
                 .putExtra(XlbVpnService.EXTRA_MEMBER_GRANT_HANDOFF_ID, handoffId);
 
         try {
-            ComponentName staleStarted = context.startService(staleStart);
+            ComponentName staleStarted = context.startForegroundService(staleStart);
             assertNotNull("VPN service did not accept the stale grant start", staleStarted);
             ComponentName started = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? context.startForegroundService(start)
