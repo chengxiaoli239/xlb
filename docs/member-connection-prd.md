@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-24）
 
-- **M8 Android 会员 grant 并发单次消费回归（2026-11-24，本机离线验收）**：为 `MemberTunnelGrantStore` 增加 8 个并发消费者同时竞争同一 handoff ID 的回归测试，确认只有一个消费者取得 grant，其余均取得空值，且待消费状态被清除。定向测试通过；Android 全套 JVM tests、`lintDebug`、AndroidTest 编译通过。测试用 JDK 21 与本机 Android SDK，不连接实体手机或 AVD，不启动 VPN/TUN；member admission gate 仍关闭，不证明会员线路或设备限制已通过真机验收。
+- **M8 Android 会员 grant 并发单次消费回归（2026-11-24，本机与 hosted CI 验收）**：为 `MemberTunnelGrantStore` 增加 8 个并发消费者同时竞争同一 handoff ID 的回归测试，确认只有一个消费者取得 grant，其余均取得空值，且待消费状态被清除。定向测试通过；Android 全套 JVM tests、`lintDebug`、AndroidTest 编译通过，主线 CI `45276068548` 全部 6 个 jobs 成功，包括 Android native build/JVM/lint 与其他模块检查。测试用 JDK 21 与本机 Android SDK，不连接实体手机或 AVD，不启动 VPN/TUN；member admission gate 仍关闭，不证明会员线路或设备限制已通过真机验收。
 
 - **M11 PHP/Web 容器构建与启动 smoke（2026-11-24，hosted CI）**：CI `45270026329` 成功构建 PHP 与 Web 镜像；按镜像默认命令启动 PHP `artisan serve` 并访问 Laravel `/up` 成功，启动 Nginx 镜像并请求首页成功，退出时清理容器。此证据限 hosted runner 中的镜像构建与进程/HTTP smoke，不含 staging 部署、反向代理/API 端到端、生产签名或发布放行。
 
