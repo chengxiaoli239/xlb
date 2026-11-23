@@ -79,4 +79,43 @@ class ProbeNodeHealthTest extends TestCase
             DB::table('nodes')->where('id', 'node-test-1')->value('last_health_check_at'),
         );
     }
+
+    public function test_probe_batch_limit_and_explicit_node_filter_bound_driver_targets(): void
+    {
+        $this->seed();
+        $secondNode = (array) DB::table('nodes')->where('id', 'node-test-1')->first();
+        $secondNode['id'] = 'node-test-2';
+        $secondNode['name'] = '演示节点 02';
+        DB::table('nodes')->insert($secondNode);
+
+        config(['node_health_probe.enabled' => true, 'node_health_probe.batch_size' => 1]);
+        $driver = new class implements NodeHealthProbeDriver
+        {
+            /** @var list<string> */
+            public array $nodeIds = [];
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                $this->nodeIds[] = $nodeId;
+
+                return new NodeHealthProbeResult(true, new DateTimeImmutable('2026-11-24T00:00:00Z'), latencyMs: 25);
+            }
+        };
+        $this->app->instance(NodeHealthProbeDriver::class, $driver);
+
+        $this->artisan('nodes:probe-health')
+            ->expectsOutputToContain('不构成节点连接或会员隧道验收')
+            ->assertExitCode(0);
+
+        $this->assertSame(['node-test-1'], $driver->nodeIds);
+        $this->assertDatabaseHas('node_health_probe_states', ['node_id' => 'node-test-1']);
+        $this->assertDatabaseMissing('node_health_probe_states', ['node_id' => 'node-test-2']);
+
+        $this->artisan('nodes:probe-health', ['--node' => ['node-test-2']])
+            ->expectsOutputToContain('不构成节点连接或会员隧道验收')
+            ->assertExitCode(0);
+
+        $this->assertSame(['node-test-1', 'node-test-2'], $driver->nodeIds);
+        $this->assertDatabaseHas('node_health_probe_states', ['node_id' => 'node-test-2']);
+    }
 }

@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M10 探测命令批次与节点选择边界（2026-11-24，本地 Fake Driver）**：新增 feature test 创建两条本地 available 节点，验证 `batch_size=1` 时无显式选择只探测排序首条；传入 `--node=node-test-2` 后只探测所选节点并保存相应状态。定向 `ProbeNodeHealthTest` 4/4、25 assertions；Laravel 全套 246 项中 245 通过、1 项既有跳过、2,143 assertions；Pint 通过。测试 driver 为内存 fake，不访问真实节点、不更新真实健康观测，不代表节点稳定或故障切换验收。
+
 - **Web 管理端沙箱退款与节点待回执 UI 回归（2026-11-24，本机 mock API）**：新增管理员订单详情测试，完成“已支付测试订单→填写退款原因→发送幂等退款请求→展示权益撤销和节点撤权 pending 回执”流程；断言退款请求含 `Idempotency-Key`，只调用本地 sandbox-refund API，不访问支付/checkout/charge 服务。扩展 happy-dom helper 以支持 textarea controlled input；Web 测试总计 7/7，TypeScript/Vite build 通过。mock 结果不证明 PHP/节点真实退款、资金退回或断流。
 
 - **Web 会员沙箱下单与模拟付款 UI 回归（2026-11-24，本机 mock API）**：新增会员中心交互测试，覆盖套餐选择、创建测试订单、订单详情、点击“模拟沙箱付款”、显示 `granted_test` 权益与固定订阅链接；断言前端只调用本地 `sandbox-payment` API，不向外部 payment/checkout/charge endpoint 发请求。Web 测试总计 7/7、TypeScript/Vite build 通过。该 mock 不证明 PHP API、商户沙箱或真实付款/退款已验收。
@@ -57,7 +59,7 @@
 | 模块 | 当前状态 | 证据与未完成项 | 可并行推进 / 下一关 |
 | --- | --- | --- | --- |
 | Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、VPN 权限 Activity 重建后重新签 challenge/取得 fresh grant/发起 handoff、关闭 gate 拒绝及 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；主线 CI `45237384820` 全绿 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；测试模拟权限批准回调，没有弹系统授权框或模拟 OS 进程终止；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 接着验证授权撤回的 callback 失败关闭和 service process-death 生命周期；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
-| PHP 会员 API 与设备限制 | 本机 challenge 签名、peer provisioning、逐设备 grant、撤权状态与 descriptor 校验有测试 | Laravel 全套 245 项中 244 项通过、1 项既有跳过；配置与 profile 用本地 fixture，未证明生产节点回执、实际断流或正式数据库并发 | 继续不依赖云的状态机/回归；真实会员授权和撤权验收须等节点 mTLS runtime 与回执 |
+| PHP 会员 API 与设备限制 | 本机 challenge 签名、peer provisioning、逐设备 grant、撤权状态与 descriptor 校验有测试 | Laravel 全套 246 项中 245 项通过、1 项既有跳过；配置与 profile 用本地 fixture，未证明生产节点回执、实际断流或正式数据库并发 | 继续不依赖云的状态机/回归；真实会员授权和撤权验收须等节点 mTLS runtime 与回执 |
 | Web 管理端与会员中心 | 订单/会员/节点管理已有本地页面；会员中心可创建测试订单并模拟付款后显示测试权益与固定订阅二维码/链接，后台可登记沙箱退款并显示节点回执状态 | Web 7 项测试和 TypeScript/Vite 构建通过，支付/退款 UI 流程使用 mock API；未连接真实支付商户、未真实扣款/退款，未向真实节点下发或核验配置，CA 接口不回显 | 继续检查订单刷新/对账差异呈现与后台审计；任何真实 node config、支付或资金操作需相应外部材料与批准 |
 | Node Agent / proof bridge | Go 隔离协议、设备证书、容量、peer 拒绝与撤权计量、renderer artifact 有离线/合成测试 | 可执行 Agent 只允许 `isolated-test`，runtime renderer 仍 unavailable；本地测试不等于真实节点长期运行或断流 | 可继续 runtime/协议离线测试；生产启用需要管理员提供真实 listener、反向代理、CA/证书和部署验收 |
 | 支付与权益 | provider-neutral 契约、签名沙箱渠道、事件账本、幂等发放/补偿、查单与差异对账已有本地实现 | 未连接真实商户沙箱，也没有真实扣款/退款；渠道签名/回调契约和具体续费政策未做实商户验收 | 可继续 fake provider 状态机、后台差异处理和测试；商户沙箱凭据到位后接配置注入与契约测试 |
