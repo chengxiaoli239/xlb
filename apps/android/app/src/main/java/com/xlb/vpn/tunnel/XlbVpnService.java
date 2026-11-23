@@ -39,6 +39,7 @@ public final class XlbVpnService extends VpnService {
     public static final String EXTRA_PROFILE = "profile";
     public static final String EXTRA_ROUTE_NAME = "route_name";
     public static final String EXTRA_DEBUG_TEST_ROUTE = "debug_test_route";
+    public static final String EXTRA_MEMBER_GRANT_HANDOFF_ID = "member_grant_handoff_id";
     public static final String EXTRA_STATE = "state";
     public static final String EXTRA_MESSAGE = "message";
     public static final String INTERNAL_PERMISSION = "com.xlb.vpn.permission.INTERNAL";
@@ -89,11 +90,14 @@ public final class XlbVpnService extends VpnService {
             return START_NOT_STICKY;
         }
         if (ACTION_START_MEMBER.equals(intent.getAction())) {
+            long handoffId = intent.getLongExtra(EXTRA_MEMBER_GRANT_HANDOFF_ID, 0);
+            MemberTunnelGrant grant = MemberTunnelGrantStore.consume(handoffId);
+            if (grant == null) {
+                return START_NOT_STICKY;
+            }
             currentRouteName = "";
-            MemberTunnelGrant grant = MemberTunnelGrantStore.consume();
-            if (!MemberTunnelAdmissionPolicy.mayStartMemberTunnel() || grant == null) {
-                MemberTunnelGrantStore.clear();
-                rejectStart("会员安全线路尚未接入");
+            if (!MemberTunnelAdmissionPolicy.mayStartMemberTunnel()) {
+                rejectStart("会员安全线路尚未接入", handoffId);
                 return START_NOT_STICKY;
             }
             int attempt = tunnelAttempts.begin();
@@ -101,7 +105,7 @@ public final class XlbVpnService extends VpnService {
             createChannel();
             startForeground(NOTIFICATION_ID, notification("正在连接"));
             publish(STATE_CONNECTING, null);
-            worker.execute(() -> startMemberTunnel(grant, attempt));
+            worker.execute(() -> startMemberTunnel(grant, attempt, handoffId));
             return START_NOT_STICKY;
         }
         if (!ACTION_START.equals(intent.getAction())) {
@@ -210,7 +214,7 @@ public final class XlbVpnService extends VpnService {
         }
     }
 
-    private void startMemberTunnel(MemberTunnelGrant grant, int attempt) {
+    private void startMemberTunnel(MemberTunnelGrant grant, int attempt, long handoffId) {
         if (!tunnelAttempts.isCurrent(attempt)) return;
         if (!closeMemberSession()) {
             tunnelAttempts.runIfCurrent(attempt, () -> {
@@ -232,7 +236,8 @@ public final class XlbVpnService extends VpnService {
                 return;
             }
         } catch (RuntimeException | UnsatisfiedLinkError exception) {
-            if (!tunnelAttempts.runIfCurrent(attempt, () -> rejectStart("会员线路配置不可用"))) {
+            if (!tunnelAttempts.runIfCurrent(attempt,
+                    () -> rejectStart("会员线路配置不可用", handoffId))) {
                 requestMemberSessionStop();
                 closeMemberSession();
             }
@@ -514,8 +519,16 @@ public final class XlbVpnService extends VpnService {
     }
 
     private void rejectStart(String message) {
+        rejectStart(message, 0);
+    }
+
+    private void rejectStart(String message, long memberGrantHandoffId) {
         int attempt = tunnelAttempts.invalidate();
-        MemberTunnelGrantStore.clear();
+        if (memberGrantHandoffId > 0) {
+            MemberTunnelGrantStore.clear(memberGrantHandoffId);
+        } else {
+            MemberTunnelGrantStore.clear();
+        }
         requestMemberSessionStop();
         createChannel();
         startForeground(NOTIFICATION_ID, notification("连接不可用"));

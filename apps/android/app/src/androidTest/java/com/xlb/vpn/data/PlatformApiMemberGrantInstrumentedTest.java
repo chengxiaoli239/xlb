@@ -125,7 +125,8 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             assertEquals("https://node.example.invalid:9443", grant.bridgeEndpoint());
             assertTrue("device challenge signature was not checked", server.challengeSignatureVerified());
 
-            MemberTunnelGrantStore.publish(grant);
+            long handoffId = MemberTunnelGrantStore.publish(grant);
+            start.putExtra(XlbVpnService.EXTRA_MEMBER_GRANT_HANDOFF_ID, handoffId);
             ComponentName started = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? context.startForegroundService(start)
                     : context.startService(start);
@@ -133,17 +134,19 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             assertTrue("closed production gate did not reject the server-ready grant",
                     rejected.await(5, TimeUnit.SECONDS));
             assertEquals("会员安全线路尚未接入", serviceMessage.get());
-            assertNull("service did not consume the one-shot grant", MemberTunnelGrantStore.consume());
+            assertNull("service did not consume the one-shot grant",
+                    MemberTunnelGrantStore.consume(handoffId));
             assertFalse("closed-gate rejection left the tunnel marked as a member session",
                     XlbVpnService.currentTunnelIsMember());
             assertEquals("", XlbVpnService.currentRouteName());
 
-            MemberTunnelGrantStore.publish(grant);
+            long pendingHandoffId = MemberTunnelGrantStore.publish(grant);
             ComponentName stoppedService = context.startService(stop);
             assertNotNull("VPN service did not accept the stop action", stoppedService);
             assertTrue("VPN service did not complete the local stop path",
                     expectedDisconnect.get().await(5, TimeUnit.SECONDS));
-            assertNull("stop left a pending process-local grant", MemberTunnelGrantStore.consume());
+            assertNull("stop left a pending process-local grant",
+                    MemberTunnelGrantStore.consume(pendingHandoffId));
 
             assertTrue("current-device removal did not report pending revocation",
                     api.removeDevice(MemberTunnelGrantAvdFixture.DEVICE_ID));
@@ -153,17 +156,19 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             assertEquals(PlatformApi.NodeAuthorizationStatus.UNAVAILABLE,
                     api.synchronize(account).nodeAuthorizationStatus);
             assertNull("revoked device retained a cached member grant", api.verifiedMemberTunnelGrant());
-            MemberTunnelGrantStore.publish(grant);
+            long logoutHandoffId = MemberTunnelGrantStore.publish(grant);
             expectedDisconnect.set(new CountDownLatch(1));
             ComponentName logoutStop = context.startService(stop);
             assertNotNull("VPN service did not accept the logout stop action", logoutStop);
             assertTrue("logout stop action did not complete the service stop path",
                     expectedDisconnect.get().await(5, TimeUnit.SECONDS));
-            assertNull("logout stop action did not clear the process-local grant", MemberTunnelGrantStore.consume());
+            assertNull("logout stop action did not clear the process-local grant",
+                    MemberTunnelGrantStore.consume(logoutHandoffId));
             api.logout();
             assertNull("logout left a cached member grant", api.verifiedMemberTunnelGrant());
             assertEquals("logout did not clear local session cookies", "", sessionStore.cookieHeader());
-            assertNull("logout path left a pending process-local grant", MemberTunnelGrantStore.consume());
+            assertNull("logout path left a pending process-local grant",
+                    MemberTunnelGrantStore.consume(logoutHandoffId));
             assertFalse("fake API server observed an invalid request", server.hasFailure());
         } finally {
             MemberTunnelGrantStore.clear();

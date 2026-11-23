@@ -995,12 +995,13 @@ public final class MainActivity extends Activity {
         tunnelMessage = null;
         activeTunnelRouteName = "";
         render();
-        MemberTunnelGrantStore.publish(grant);
+        long handoffId = MemberTunnelGrantStore.publish(grant);
         try {
             startForegroundService(new Intent(this, XlbVpnService.class)
-                    .setAction(XlbVpnService.ACTION_START_MEMBER));
+                    .setAction(XlbVpnService.ACTION_START_MEMBER)
+                    .putExtra(XlbVpnService.EXTRA_MEMBER_GRANT_HANDOFF_ID, handoffId));
         } catch (RuntimeException exception) {
-            MemberTunnelGrantStore.clear();
+            MemberTunnelGrantStore.clear(handoffId);
             tunnelState = XlbVpnService.STATE_ERROR;
             tunnelMessage = "无法启动系统 VPN 服务";
             render();

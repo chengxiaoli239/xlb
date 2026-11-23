@@ -15,20 +15,34 @@ public final class MemberTunnelGrantStoreTest {
     }
 
     @Test
-    public void grantCanBeConsumedOnlyOnceAndNeverNeedsIntentExtras() {
+    public void grantCanBeConsumedOnlyOnceForItsHandoffId() {
         var grant = MemberTunnelGrantTestFixture.create();
-        MemberTunnelGrantStore.publish(grant);
+        long handoffId = MemberTunnelGrantStore.publish(grant);
 
-        assertSame(grant, MemberTunnelGrantStore.consume());
-        assertNull(MemberTunnelGrantStore.consume());
+        assertSame(grant, MemberTunnelGrantStore.consume(handoffId));
+        assertNull(MemberTunnelGrantStore.consume(handoffId));
+    }
+
+    @Test
+    public void staleHandoffCannotConsumeOrClearReplacementGrant() {
+        var staleGrant = MemberTunnelGrantTestFixture.create();
+        var replacementGrant = MemberTunnelGrantTestFixture.create();
+        long staleHandoffId = MemberTunnelGrantStore.publish(staleGrant);
+        long replacementHandoffId = MemberTunnelGrantStore.publish(replacementGrant);
+
+        assertNull(MemberTunnelGrantStore.consume(staleHandoffId));
+        MemberTunnelGrantStore.clear(staleHandoffId);
+
+        assertSame(replacementGrant, MemberTunnelGrantStore.consume(replacementHandoffId));
+        assertNull(MemberTunnelGrantStore.consume(replacementHandoffId));
     }
 
     @Test
     public void clearRemovesUnconsumedGrant() {
-        MemberTunnelGrantStore.publish(MemberTunnelGrantTestFixture.create());
+        long handoffId = MemberTunnelGrantStore.publish(MemberTunnelGrantTestFixture.create());
 
         MemberTunnelGrantStore.clear();
 
-        assertNull(MemberTunnelGrantStore.consume());
+        assertNull(MemberTunnelGrantStore.consume(handoffId));
     }
 }
