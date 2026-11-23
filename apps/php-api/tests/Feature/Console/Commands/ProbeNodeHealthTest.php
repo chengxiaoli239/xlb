@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schedule;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 class ProbeNodeHealthTest extends TestCase
@@ -45,6 +46,25 @@ class ProbeNodeHealthTest extends TestCase
         );
 
         $this->assertSame([], array_values($scheduledProbes));
+    }
+
+    public function test_enabled_probe_with_http_driver_is_registered_with_the_scheduler(): void
+    {
+        $process = new Process([PHP_BINARY, base_path('artisan'), 'schedule:list'], base_path(), [
+            'APP_ENV' => 'testing',
+            'APP_KEY' => 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+            'DB_CONNECTION' => 'sqlite',
+            'DB_DATABASE' => ':memory:',
+            'CACHE_STORE' => 'file',
+            'NODE_HEALTH_PROBE_ENABLED' => 'true',
+            'NODE_HEALTH_PROBE_TRANSPORT' => 'http',
+            'NODE_HEALTH_PROBE_ENDPOINTS' => '[]',
+        ]);
+
+        $exitCode = $process->run();
+
+        $this->assertSame(0, $exitCode, $process->getErrorOutput());
+        $this->assertStringContainsString('php artisan nodes:probe-health', $process->getOutput());
     }
 
     public function test_repeated_local_probe_runs_persist_circuit_state_without_changing_node_acceptance(): void
