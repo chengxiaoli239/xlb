@@ -107,6 +107,7 @@ class NodeFleetPlanTest(unittest.TestCase):
             input=json.dumps(self.manifest()),
             text=True,
             capture_output=True,
+            timeout=5,
             check=False,
         )
 
@@ -130,6 +131,7 @@ class NodeFleetPlanTest(unittest.TestCase):
                     input=request,
                     text=True,
                     capture_output=True,
+                    timeout=5,
                     check=False,
                 )
 
