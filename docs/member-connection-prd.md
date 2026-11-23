@@ -4,7 +4,9 @@
 
 ## 开发进度（2026-11-24）
 
-- **M11 Docker 忽略规则自动回归（2026-11-24，本机 Docker）**：新增 `ops/test_docker_context.py`，在临时根构建上下文逐项尝试将 10 种合成环境凭据/运行数据 `COPY` 到 `scratch`，确认 Docker 因 `.dockerignore` 排除而拒绝；测试只使用非秘密 sentinel。ops 全套 54/54、Python 编译与 `git diff --check` 通过；CI 在 PHP/Web 镜像构建前自动执行。
+- **M10 PHP→Go TLS 1.3/mTLS provisioning 互通波动复核（2026-11-24，本机重复验收）**：针对 CI `45254810782` 曾出现的一次 peer 留在 `provisioning` 失败，单独重复同一 `NodePeerProvisioningTest` 10 次，每次 1/1、51 assertions 通过；主线 CI `45259345222` 和 `45261821374` 的 Laravel 集成 job 也通过。暂未复现，原失败原因仍未知，不据此宣称问题已根治。后续继续观察 hosted 重复运行与明确失败日志，不更改生产/节点行为。
+
+- **M11 Docker 忽略规则自动回归（2026-11-24，本机与 hosted CI）**：新增 `ops/test_docker_context.py`，在临时根构建上下文逐项尝试将 10 种合成环境凭据/运行数据 `COPY` 到 `scratch`，确认 Docker 因 `.dockerignore` 排除而拒绝；测试只使用非秘密 sentinel。ops 全套 54/54、Python 编译与 `git diff --check` 通过；主线 CI `45261821374` 中 Docker 忽略规则回归、PHP/Web 镜像构建及全套其他 jobs 均成功。
 
 - **M6/AWS 外部会话状态复核（2026-11-24，只读）**：使用项目固化的 `ops/aws-cli` 包装调用 `sts get-caller-identity --profile xlb-ops`，返回 session expired；本轮没有 AWS 读写资源操作。最近一次成功盘点是历史状态，不能当作当前资源证明。继续 M6 云端验收前需用户本人重新 `aws login`，随后先只读盘点并重新审查 TTL/费用 plan；缺失的真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供。AWS 会话过期不阻断沙箱、Android、M10 或 M11 离线工作。
 
