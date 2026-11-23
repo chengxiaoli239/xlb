@@ -1029,8 +1029,7 @@ public final class MainActivity extends Activity {
         loadedProfile = selectedRoute == null || result == null ? null : result.accountProfile;
         routeName = selectedRoute;
         testRoute = false;
-        if ((result == null || !hasActiveEntitlement(result))
-                && XlbVpnService.STATE_CONNECTED.equals(tunnelState)) {
+        if (MemberTunnelStopPolicy.shouldStop(tunnelState, hasActiveEntitlement(result))) {
             startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
         }
         render();
