@@ -57,7 +57,7 @@ CDN **不是 VPN 数据通道**，不承载任意 VPN TCP/UDP 隧道，也不替
 
 ## 6. 发布流水线与回滚
 
-已加入的 [CI workflow](../.github/workflows/ci.yml) 在 push/PR 上执行 Web build、Node API TypeScript build、Node API tests 和 Laravel tests，并从仓库根目录构建 PHP 与 Web 容器镜像。根目录 `.dockerignore` 排除所有层级的 `.env`/`.env.*`、Composer/npm/netrc 凭据文件、AWS/SSH 私有配置、密钥库和私钥格式、依赖、构建产物、SQLite 数据库、Laravel runtime storage/cache 与 `ops/.state`；`ops/test_docker_context.py` 使用 10 个临时 Docker 夹具检查本地凭据/运行数据不可被 `COPY` 读取，CI 在镜像构建前运行此回归。PHP Composer vendor stage 安装 `unzip`，并对 HTTP 502/503/504 设置最多三次下载尝试后，主线 CI `45265827064` 的 PHP/Web 镜像构建成功。该 CI 也通过 Docker 上下文回归与其他测试/build/SBOM jobs。CI 不执行部署、制品发布、环境审批、镜像推送或生产密钥注入。它是 CI，不是 CD。
+已加入的 [CI workflow](../.github/workflows/ci.yml) 在 push/PR 上执行 Web build、Node API TypeScript build、Node API tests 和 Laravel tests，并从仓库根目录构建 PHP 与 Web 容器镜像。根目录 `.dockerignore` 排除所有层级的 `.env`/`.env.*`、Composer/npm/netrc 凭据文件、AWS/SSH 私有配置、密钥库和私钥格式、依赖、构建产物、SQLite 数据库、Laravel runtime storage/cache 与 `ops/.state`；`ops/test_docker_context.py` 使用 10 个临时 Docker 夹具检查本地凭据/运行数据不可被 `COPY` 读取，CI 在镜像构建前运行此回归。PHP Composer vendor stage 安装 `unzip`，并对 HTTP 502/503/504 设置最多三次下载尝试后，hosted CI `45265827064` 的 PHP/Web 镜像构建成功；后续 CI `45270026329` 还按默认命令启动 PHP 服务并请求 `/up`、启动 Nginx 并请求首页，均返回成功。上述证据限 hosted 构建和启动 smoke。CI 不执行 staging/production 部署、制品发布、环境审批、镜像推送或生产密钥注入。它是 CI 而非 CD。
 
 现有容器定义：
 
