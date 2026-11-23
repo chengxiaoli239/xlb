@@ -3,6 +3,9 @@ package com.xlb.vpn.data;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
+import java.security.KeyStore;
+import java.security.cert.X509Certificate;
+import java.util.Enumeration;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -59,6 +62,29 @@ public final class MemberTunnelGrantAvdFixture {
                 PROFILE, profileSha256, "xlb-mihomo-bridge-v1", "1.0.0", "xlb-proof-v1", true);
         if (grant == null) throw new GeneralSecurityException("test member grant could not be created");
         return grant;
+    }
+
+    public static String trustedSystemCaPem() throws Exception {
+        KeyStore systemRoots = KeyStore.getInstance("AndroidCAStore");
+        systemRoots.load(null);
+        Enumeration<String> aliases = systemRoots.aliases();
+        while (aliases.hasMoreElements()) {
+            java.security.cert.Certificate candidate = systemRoots.getCertificate(aliases.nextElement());
+            if (!(candidate instanceof X509Certificate)) continue;
+            X509Certificate certificate = (X509Certificate) candidate;
+            boolean[] keyUsage = certificate.getKeyUsage();
+            if (certificate.getBasicConstraints() < 0 || keyUsage == null || keyUsage.length <= 5 || !keyUsage[5]) {
+                continue;
+            }
+            try {
+                certificate.checkValidity();
+            } catch (java.security.cert.CertificateExpiredException | java.security.cert.CertificateNotYetValidException ignored) {
+                continue;
+            }
+            String encoded = android.util.Base64.encodeToString(certificate.getEncoded(), android.util.Base64.NO_WRAP);
+            return "-----BEGIN CERTIFICATE-----\n" + encoded + "\n-----END CERTIFICATE-----\n";
+        }
+        throw new GeneralSecurityException("Android system trust store has no currently valid CA certificate");
     }
 
     public static void deleteInstallationKey(String installationId) throws Exception {
