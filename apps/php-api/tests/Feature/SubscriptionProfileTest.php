@@ -36,14 +36,56 @@ class SubscriptionProfileTest extends TestCase
                 $config = Yaml::parse($result->getContent());
                 $this->assertSame($mode, $config['mode']);
                 $global = collect($config['proxy-groups'])->firstWhere('name', 'GLOBAL');
+                $manual = collect($config['proxy-groups'])->firstWhere('name', '迅连宝-手动');
                 $this->assertSame('select', $global['type']);
-                $this->assertSame(['迅连宝测试'], $global['proxies']);
+                $this->assertSame(['迅连宝-手动'], $global['proxies']);
+                $this->assertContains($config['proxies'][0]['name'], $manual['proxies']);
                 $this->assertSame('198.51.100.10', $config['proxies'][0]['server']);
                 $this->assertFalse($config['allow-lan']);
                 $this->assertArrayNotHasKey('external-controller', $config);
                 $this->assertArrayNotHasKey('tun', $config);
             }
         }
+    }
+
+    public function test_account_route_profile_exposes_auto_fallback_and_manual_groups_from_published_nodes(): void
+    {
+        $url = $this->profileUrl();
+        $now = now()->utc()->toIso8601String();
+        DB::table('nodes')->insert([
+            'id' => 'node-test-2', 'name' => '演示节点 02', 'region' => '测试区域', 'protocol' => 'SOCKS5',
+            'endpoint_host' => '198.51.100.11', 'endpoint_port' => 1081, 'status' => 'available',
+            'is_test' => true, 'max_sessions' => 100, 'active_sessions' => 5, 'latency_ms' => 55,
+            'health_status' => 'verified_test', 'last_health_check_at' => $now, 'config_version' => 1, 'updated_at' => $now,
+        ]);
+        DB::table('subscription_route_nodes')->insert([
+            'id' => 'route-test-v1-node-2', 'route_version_id' => 'route-test-v1', 'node_id' => 'node-test-2',
+            'weight' => 100, 'created_at' => $now,
+        ]);
+
+        $response = $this->get($url)->assertOk();
+        $config = Yaml::parse($response->getContent());
+        $nodeNames = array_column($config['proxies'], 'name');
+        $automatic = collect($config['proxy-groups'])->firstWhere('name', '迅连宝-自动');
+        $fallback = collect($config['proxy-groups'])->firstWhere('name', '迅连宝-故障切换');
+        $manual = collect($config['proxy-groups'])->firstWhere('name', '迅连宝-手动');
+        $global = collect($config['proxy-groups'])->firstWhere('name', 'GLOBAL');
+
+        $this->assertSame(['演示节点 01', '演示节点 02'], $nodeNames);
+        $this->assertSame('url-test', $automatic['type']);
+        $this->assertSame($nodeNames, $automatic['proxies']);
+        $this->assertSame('https://www.gstatic.com/generate_204', $automatic['url']);
+        $this->assertSame(300, $automatic['interval']);
+        $this->assertSame(50, $automatic['tolerance']);
+        $this->assertSame('fallback', $fallback['type']);
+        $this->assertSame($nodeNames, $fallback['proxies']);
+        $this->assertSame('https://www.gstatic.com/generate_204', $fallback['url']);
+        $this->assertSame(300, $fallback['interval']);
+        $this->assertSame('select', $manual['type']);
+        $this->assertSame(['迅连宝-自动', '迅连宝-故障切换', ...$nodeNames, 'DIRECT'], $manual['proxies']);
+        $this->assertSame(['迅连宝-手动'], $global['proxies']);
+        $this->assertSame(['MATCH,迅连宝-手动'], $config['rules']);
+        $this->assertSame('local-test', $response->headers->get('X-XLB-Profile-Scope'));
     }
 
     public function test_user_agent_negotiation_and_explicit_format_precedence(): void
@@ -137,14 +179,17 @@ class SubscriptionProfileTest extends TestCase
     public function test_reserved_node_names_do_not_collide_with_policy_groups(): void
     {
         $url = $this->profileUrl();
-        foreach (['GLOBAL', 'DIRECT', 'REJECT', '迅连宝测试'] as $name) {
+        foreach ([
+            'GLOBAL', 'DIRECT', 'REJECT', '迅连宝测试', '迅连宝-手动', '迅连宝-自动', '迅连宝-故障切换',
+        ] as $name) {
             DB::table('nodes')->where('id', 'node-test-1')->update(['name' => $name]);
             $response = $this->get($url.'?mode=global')->assertOk();
             $config = Yaml::parse($response->getContent());
             $nodeName = $config['proxies'][0]['name'];
             $this->assertNotContains($nodeName, array_column($config['proxy-groups'], 'name'));
             $this->assertNotContains($nodeName, ['DIRECT', 'REJECT']);
-            $this->assertSame($nodeName, $config['proxy-groups'][0]['proxies'][0]);
+            $manual = collect($config['proxy-groups'])->firstWhere('name', '迅连宝-手动');
+            $this->assertContains($nodeName, $manual['proxies']);
         }
     }
 

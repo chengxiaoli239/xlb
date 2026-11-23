@@ -85,7 +85,9 @@ class SubscriptionProfileService
 
         $nodes = $route['nodes'];
         $proxies = collect($nodes)->map(function (object $node): array {
-            $nodeName = in_array($node->name, ['GLOBAL', 'DIRECT', 'REJECT', '迅连宝测试'], true)
+            $nodeName = in_array($node->name, [
+                'GLOBAL', 'DIRECT', 'REJECT', '迅连宝测试', '迅连宝-手动', '迅连宝-自动', '迅连宝-故障切换',
+            ], true)
                 ? $node->name.' · 节点'
                 : $node->name;
 
@@ -98,6 +100,10 @@ class SubscriptionProfileService
             ];
         })->all();
         $proxyNames = array_column($proxies, 'name');
+        $automaticGroupName = '迅连宝-自动';
+        $fallbackGroupName = '迅连宝-故障切换';
+        $manualGroupName = '迅连宝-手动';
+        $probeUrl = 'https://www.gstatic.com/generate_204';
         $profile = [
             'mixed-port' => 7890,
             'allow-lan' => false,
@@ -106,17 +112,32 @@ class SubscriptionProfileService
             'proxies' => $proxies,
             'proxy-groups' => [
                 [
-                    'name' => '迅连宝测试',
+                    'name' => $automaticGroupName,
+                    'type' => 'url-test',
+                    'proxies' => $proxyNames,
+                    'url' => $probeUrl,
+                    'interval' => 300,
+                    'tolerance' => 50,
+                ],
+                [
+                    'name' => $fallbackGroupName,
+                    'type' => 'fallback',
+                    'proxies' => $proxyNames,
+                    'url' => $probeUrl,
+                    'interval' => 300,
+                ],
+                [
+                    'name' => $manualGroupName,
                     'type' => 'select',
-                    'proxies' => [...$proxyNames, 'DIRECT'],
+                    'proxies' => [$automaticGroupName, $fallbackGroupName, ...$proxyNames, 'DIRECT'],
                 ],
                 [
                     'name' => 'GLOBAL',
                     'type' => 'select',
-                    'proxies' => ['迅连宝测试'],
+                    'proxies' => [$manualGroupName],
                 ],
             ],
-            'rules' => ['MATCH,迅连宝测试'],
+            'rules' => ['MATCH,'.$manualGroupName],
         ];
         $header = $route['version']->scope === 'test'
             ? "# 迅连宝本地开发配置，不包含真实节点或可用凭证。\n# 仅用于验证 Clash / Mihomo 订阅格式和导入流程。\n"

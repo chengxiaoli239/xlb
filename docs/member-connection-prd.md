@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M10 路线配置自动测速/故障切换/手动选择组（2026-11-24，本地 SQLite 沙箱）**：local/testing 账号级兼容订阅现生成 Mihomo `url-test`、`fallback` 与手动 `select` 组，候选严格来自已解析的 route version 节点；每设备 proof peer 的服务端 profile 原样返回，不经此生成器。订阅定向测试与设备订阅回归 31/31 通过，Laravel 全套 250 passed、1 个既有 skip、2,209 assertions，Pint 通过。尝试用仓库锁定的 Mihomo v1.19.34 本地 Go 模块构建 parser 时，缺失模块下载因 `proxy.golang.org` 超时，故本阶段有 YAML 结构测试，尚无 Mihomo 核心 `-t` 解析证据。配置仅限 local/testing，不证明生产节点可用、故障切换达标或严格设备线路可由客户端直跳。
+
 - **M6 / 运维文档 AWS 会话状态对齐（2026-11-24，只读事实核对）**：复核确认 `xlb-ops` 当前 STS 已过期，本轮无法取得 AWS 身份或当前资源清单；未执行 AWS 资源读取/写入。同步修正文档中把历史成功登录或历史资源快照写成当前状态的条目；真实节点、会员 profile、mTLS 与撤权回执仍缺。重新登录后必须先只读盘点和复核获批 plan，离线开发继续推进。
 
 - **M8 Android VPN service 销毁时清理未消费 grant（2026-11-24，本机与 hosted CI 验收）**：先在 `xlb-m9-recovery` AVD 复现未知 service action 触发服务销毁后，旧 `MemberTunnelGrantStore` handoff 仍可被消费；随后让 `XlbVpnService.onDestroy()` 同步清除 process-local pending grant。修后新增用例 1/1、service admission instrumentation 整组 4/4、Android 全套 JVM、lint、AndroidTest 编译和 Debug APK build 通过；主线 CI `45278603034` 六个 jobs 全绿。仅为专用 AVD 生命周期验证，不连接实体手机、系统 TUN、真实节点；生产 member admission gate 仍关闭。

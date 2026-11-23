@@ -374,7 +374,7 @@ class MemberDeviceSubscriptionTest extends TestCase
         $deviceId = $this->registerDevice('Clash Verge', 'windows');
         $subscription = $this->createReadySubscription($deviceId);
         $profile = $this->get($subscription['url'])->assertOk()->assertHeader('X-XLB-Profile-Scope', 'local-sandbox-peer');
-        $this->assertStringContainsString('sandbox-only', $profile->getContent());
+        $this->assertSame(self::SANDBOX_PROFILE, $profile->getContent());
         $this->assertStringNotContainsString('198.51.100.10', $profile->getContent());
 
         DB::table('node_access_peers')->where('id', 'peer-'.$deviceId)->update([
