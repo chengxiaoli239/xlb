@@ -20,10 +20,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -547,6 +549,125 @@ func closeNodeProbeServer(t *testing.T, server *http.Server, listener net.Listen
 	if err := listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Fatal(err)
 	}
+}
+
+func TestNodeProbeTraversesAuthenticatedDataPlaneToCanary(t *testing.T) {
+	store, err := OpenPeerStore(filepath.Join(t.TempDir(), "agent-state.json"), "node-probe-e2e", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, deviceKey := testEnsureRequest(t, "peer-probe-e2e", "ensure-peer-probe-e2e")
+	peer.NodeID = "node-probe-e2e"
+	if _, err := store.EnsurePeer(peer); err != nil {
+		t.Fatal(err)
+	}
+
+	canary, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = canary.Close() })
+	var canaryConnections atomic.Int32
+	go func() {
+		for {
+			connection, acceptErr := canary.Accept()
+			if acceptErr != nil {
+				return
+			}
+			canaryConnections.Add(1)
+			go func() {
+				defer connection.Close()
+				_, _ = io.Copy(connection, connection)
+			}()
+		}
+	}()
+
+	plane, err := NewDataPlane(store, probeTargetDialer(func(ctx context.Context, host string, port uint16) (net.Conn, error) {
+		if host != "canary.test" || port != 443 {
+			return nil, ErrTargetDenied
+		}
+		return (&net.Dialer{}).DialContext(ctx, "tcp", canary.Addr().String())
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataServer, roots := newDataPlaneTestServer(t, plane)
+	defer dataServer.Close()
+	deviceCertificate := deviceTestCertificate(t, peer, deviceKey)
+	dataClient, _ := newDataPlaneClient(t, dataServer.URL, deviceCertificate, roots)
+
+	executor := dataPlaneProbeExecutor{client: dataClient, endpoint: dataServer.URL}
+	probeClient, probeServer, _ := newMTLSTestClient(t, NewDataPlaneProbeHandler("node-probe-e2e", executor))
+	defer probeServer.Close()
+
+	challenge := make([]byte, nodeProbeChallengeBytes)
+	if _, err := rand.Read(challenge); err != nil {
+		t.Fatal(err)
+	}
+	response := postRawJSON(t, probeClient, probeServer.URL+nodeProbePath,
+		fmt.Sprintf(`{"challenge":%q}`, hex.EncodeToString(challenge)))
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("probe status=%d; want %d", response.StatusCode, http.StatusOK)
+	}
+	if response.TLS == nil || response.TLS.Version != tls.VersionTLS13 {
+		t.Fatalf("probe TLS state=%+v; want TLS 1.3", response.TLS)
+	}
+	if canaryConnections.Load() != 1 {
+		t.Fatalf("canary connections=%d; want exactly one data-plane target dial", canaryConnections.Load())
+	}
+	var result struct {
+		Data NodeDataPlaneProbeResponse `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Data.NodeID != "node-probe-e2e" || result.Data.Challenge != hex.EncodeToString(challenge) {
+		t.Fatalf("probe response=%+v; want exact node identity and challenge", result.Data)
+	}
+	if used, err := store.PeerUsage(peer.PeerID); err != nil || used.UploadBytes != int64(len(challenge)) || used.DownloadBytes != int64(len(challenge)) {
+		t.Fatalf("peer traffic=%+v err=%v; want %d bytes in each direction", used, err, len(challenge))
+	}
+}
+
+type probeTargetDialer func(context.Context, string, uint16) (net.Conn, error)
+
+func (dialer probeTargetDialer) DialTarget(ctx context.Context, host string, port uint16) (net.Conn, error) {
+	return dialer(ctx, host, port)
+}
+
+type dataPlaneProbeExecutor struct {
+	client   *http.Client
+	endpoint string
+}
+
+func (executor dataPlaneProbeExecutor) Exchange(ctx context.Context, challenge []byte) ([]byte, error) {
+	if executor.client == nil || executor.endpoint == "" || len(challenge) != nodeProbeChallengeBytes {
+		return nil, ErrInvalid
+	}
+	query := url.Values{"host": []string{"canary.test"}, "port": []string{"443"}}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		executor.endpoint+"/v1/tunnel/connect?"+query.Encode(), bytes.NewReader(challenge))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/octet-stream")
+	response, err := executor.client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.ProtoMajor != 2 {
+		return nil, fmt.Errorf("data-plane probe status/protocol: %d/HTTP %d", response.StatusCode, response.ProtoMajor)
+	}
+	echo, err := io.ReadAll(io.LimitReader(response.Body, nodeProbeChallengeBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(echo) != nodeProbeChallengeBytes {
+		return nil, errors.New("canary returned an invalid challenge length")
+	}
+	return echo, nil
 }
 
 func TestNodeProbeWithoutTransportNeverReportsHealthy(t *testing.T) {
