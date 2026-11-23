@@ -4,7 +4,9 @@
 
 ## 开发进度（2026-11-24）
 
-- **Web 会员沙箱下单与模拟付款 UI 回归（2026-11-24，本机 mock API）**：新增会员中心交互测试，覆盖套餐选择、创建测试订单、订单详情、点击“模拟沙箱付款”、显示 `granted_test` 权益与固定订阅链接；断言前端只调用本地 `sandbox-payment` API，不向外部 payment/checkout/charge endpoint 发请求。Web 测试 6/6、TypeScript/Vite build 通过。该 mock 不证明 PHP API、商户沙箱或真实付款/退款已验收。
+- **Web 管理端沙箱退款与节点待回执 UI 回归（2026-11-24，本机 mock API）**：新增管理员订单详情测试，完成“已支付测试订单→填写退款原因→发送幂等退款请求→展示权益撤销和节点撤权 pending 回执”流程；断言退款请求含 `Idempotency-Key`，只调用本地 sandbox-refund API，不访问支付/checkout/charge 服务。扩展 happy-dom helper 以支持 textarea controlled input；Web 测试总计 7/7，TypeScript/Vite build 通过。mock 结果不证明 PHP/节点真实退款、资金退回或断流。
+
+- **Web 会员沙箱下单与模拟付款 UI 回归（2026-11-24，本机 mock API）**：新增会员中心交互测试，覆盖套餐选择、创建测试订单、订单详情、点击“模拟沙箱付款”、显示 `granted_test` 权益与固定订阅链接；断言前端只调用本地 `sandbox-payment` API，不向外部 payment/checkout/charge endpoint 发请求。Web 测试总计 7/7、TypeScript/Vite build 通过。该 mock 不证明 PHP API、商户沙箱或真实付款/退款已验收。
 
 - **M8 VPN 权限回调后 fresh member grant 联合验收（2026-11-24，专用 AVD）**：补足 ActivityScenario 重建之后权限结果到达的整条离线链路。测试启动真实 `MainActivity`，local fake API 返回 member session/READY authorization，重建后确认旧 pending grant 没有恢复；模拟 VPN 权限批准回调后，App 再次读取 session、签署新的设备 challenge、校验当前 READY grant 并发起 member handoff，最后由关闭的 service gate 明确拒绝。专用 `xlb-m9-recovery` AVD 1/1 通过；Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 及 `git diff --check` 通过。该测试没有弹系统 VPN 权限对话框、没有模拟 OS 进程终止、没有创建 TUN/真实节点；只证明应用回调恢复时 fresh authorization 流程与生产关闭 gate 的本地契约。
 
@@ -56,7 +58,7 @@
 | --- | --- | --- | --- |
 | Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、VPN 权限 Activity 重建后重新签 challenge/取得 fresh grant/发起 handoff、关闭 gate 拒绝及 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；主线 CI `45237384820` 全绿 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；测试模拟权限批准回调，没有弹系统授权框或模拟 OS 进程终止；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 接着验证授权撤回的 callback 失败关闭和 service process-death 生命周期；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
 | PHP 会员 API 与设备限制 | 本机 challenge 签名、peer provisioning、逐设备 grant、撤权状态与 descriptor 校验有测试 | Laravel 全套 245 项中 244 项通过、1 项既有跳过；配置与 profile 用本地 fixture，未证明生产节点回执、实际断流或正式数据库并发 | 继续不依赖云的状态机/回归；真实会员授权和撤权验收须等节点 mTLS runtime 与回执 |
-| Web 管理端与会员中心 | 订单/会员/节点管理已有本地页面；会员中心可创建测试订单并模拟付款后显示测试权益与固定订阅二维码/链接；节点详情可配置 per-node bridge origin 与加密 CA | Web 6 项测试和 TypeScript/Vite 构建通过，新增 UI 流程使用 mock API；未连接真实支付商户、未真实扣款/退款，未向真实节点下发或核验配置，CA 接口不回显 | 继续检查订单刷新/退款呈现与后台审计；任何真实 node config、支付或资金操作需相应外部材料与批准 |
+| Web 管理端与会员中心 | 订单/会员/节点管理已有本地页面；会员中心可创建测试订单并模拟付款后显示测试权益与固定订阅二维码/链接，后台可登记沙箱退款并显示节点回执状态 | Web 7 项测试和 TypeScript/Vite 构建通过，支付/退款 UI 流程使用 mock API；未连接真实支付商户、未真实扣款/退款，未向真实节点下发或核验配置，CA 接口不回显 | 继续检查订单刷新/对账差异呈现与后台审计；任何真实 node config、支付或资金操作需相应外部材料与批准 |
 | Node Agent / proof bridge | Go 隔离协议、设备证书、容量、peer 拒绝与撤权计量、renderer artifact 有离线/合成测试 | 可执行 Agent 只允许 `isolated-test`，runtime renderer 仍 unavailable；本地测试不等于真实节点长期运行或断流 | 可继续 runtime/协议离线测试；生产启用需要管理员提供真实 listener、反向代理、CA/证书和部署验收 |
 | 支付与权益 | provider-neutral 契约、签名沙箱渠道、事件账本、幂等发放/补偿、查单与差异对账已有本地实现 | 未连接真实商户沙箱，也没有真实扣款/退款；渠道签名/回调契约和具体续费政策未做实商户验收 | 可继续 fake provider 状态机、后台差异处理和测试；商户沙箱凭据到位后接配置注入与契约测试 |
 | 路由与稳定性 | 路线版本、健康数据模型/熔断与回滚基础已有代码和离线测试 | 尚无本轮真实隔离节点观测，不能宣称可用率、自动故障切换或抗封锁稳定 | 可并行做遥测/操作审计和故障模拟；生产阈值需隔离节点与目标网络测量 |

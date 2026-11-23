@@ -128,6 +128,89 @@ describe('member sandbox purchase flow', () => {
     expect(fetchMock.mock.calls.some(([input]) => /payment|checkout|charge/i.test(String(input))
       && !String(input).includes('/sandbox-payment'))).toBe(false);
   });
+
+  it('records an admin sandbox refund with an idempotency key and pending node receipt', async () => {
+    window.history.replaceState({}, '', '/');
+    let loggedIn = false;
+    let refunded = false;
+    const admin = { id: 'admin-local-test', name: '本地管理员', email: 'admin@xlb.local', role: 'admin' };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith('/api/v1/auth/session')) return json(loggedIn ? admin : null);
+      if (path.endsWith('/api/v1/auth/login')) { loggedIn = true; return json(admin); }
+      if (path.endsWith('/api/v1/auth/csrf')) return json({ token: 'test-csrf-token' });
+      if (path.endsWith('/api/v1/me/overview')) {
+        return json({ user: admin, entitlement: null, activeSubscriptions: 0, recentOrders: [] });
+      }
+      if (path.endsWith('/api/v1/admin/summary')) {
+        return json({ memberCount: 1, activeEntitlements: 0, activeSubscriptions: 0, availableNodes: 0,
+          nodeCount: 0, pendingNodeRevocations: 0, pendingCommissionCents: 0, recentAudit: [] });
+      }
+      if (path.includes('/api/v1/admin/orders?')) {
+        return Promise.resolve(new Response(JSON.stringify({ data: [order],
+          meta: { total: 1, page: 1, per_page: 20, total_pages: 1 } }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+      if (path.endsWith('/api/v1/admin/orders/order-sandbox-test/sandbox-refund')) {
+        refunded = true;
+        return json({ order_id: order.id });
+      }
+      if (path.endsWith('/api/v1/admin/orders/order-sandbox-test')) {
+        const detail = orderDetail(true);
+        return json(refunded ? {
+          ...detail,
+          status: 'refunded_test',
+          refund: {
+            id: 'refund-event-test', amount_cents: plan.price_cents, currency: 'CNY',
+            status: 'refunded_test', reason: 'local sandbox regression', processor_name: admin.name,
+            created_at: '2026-11-24T00:02:00Z',
+          },
+          node_revocations: {
+            status: 'pending', total_count: 1, pending_count: 1, retrying_count: 0, confirmed_count: 0,
+          },
+          entitlement_grant: { ...detail.entitlement_grant!, status: 'revoked_test' },
+        } : detail);
+      }
+      return json(null);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = await render(<App />);
+    await settle();
+    const loginForm = container.querySelector<HTMLFormElement>('.login-form')!;
+    await fireEvent(loginForm, 'submit');
+    await settle();
+    expect(container.textContent).toContain('运营总览');
+
+    const ordersNav = [...container.querySelectorAll('button')]
+      .find(button => button.textContent?.includes('订单管理'))!;
+    expect(ordersNav).toBeDefined();
+    await fireEvent(ordersNav, 'click');
+    await settle();
+    expect(container.textContent).toContain('订单列表');
+    expect(container.textContent).toContain(order.id);
+    const detailButton = [...container.querySelectorAll('button')].find(button => button.textContent === '详情');
+    expect(detailButton).toBeDefined();
+    await fireEvent(detailButton!, 'click');
+    await settle();
+    await fireEvent([...container.querySelectorAll('button')]
+      .find(button => button.textContent?.includes('登记全额沙箱退款'))!, 'click');
+
+    const reason = container.querySelector<HTMLTextAreaElement>('textarea')!;
+    await fireEvent(reason, 'input', { value: 'local sandbox regression' });
+    await fireEvent([...container.querySelectorAll('button')]
+      .find(button => button.textContent?.includes('确认并撤销对应权益'))!, 'click');
+    await settle();
+
+    const refundCall = fetchMock.mock.calls.find(([input]) => String(input).includes('/sandbox-refund'));
+    expect(refundCall).toBeDefined();
+    expect((refundCall?.[1]?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy();
+    expect(container.textContent).toContain('沙箱退款已记录；节点凭证撤权等待节点回执');
+    expect(container.textContent).toContain('等待节点回执 1 台');
+    expect(fetchMock.mock.calls.some(([input]) => /payment|checkout|charge/i.test(String(input))
+      && !String(input).includes('/sandbox-refund'))).toBe(false);
+  });
 });
 
 function json(data: unknown) {
