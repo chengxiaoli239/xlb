@@ -7,6 +7,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = (
     Path(".github/workflows/ci.yml"),
     Path(".github/workflows/windows-client.yml"),
+    Path(".github/workflows/android-release-candidate.yml"),
 )
 PINNED_NODE_24_ACTIONS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -42,20 +43,68 @@ class WorkflowActionPinsTest(unittest.TestCase):
 
         self.assertEqual(
             {
-                "actions/checkout": 6,
+                "actions/checkout": 7,
                 "actions/setup-node": 3,
                 "pnpm/action-setup": 3,
-                "actions/setup-go": 3,
-                "actions/setup-java": 1,
+                "actions/setup-go": 4,
+                "actions/setup-java": 2,
                 "actions/setup-python": 1,
-                "actions/upload-artifact": 2,
-                "android-actions/setup-android": 1,
-                "gradle/actions/setup-gradle": 1,
-                "actions/attest": 4,
+                "actions/upload-artifact": 3,
+                "android-actions/setup-android": 2,
+                "gradle/actions/setup-gradle": 2,
+                "actions/attest": 5,
                 "actions/download-artifact": 2,
             },
             occurrences,
         )
+
+    def test_android_release_candidate_is_manual_main_only_and_review_only(self) -> None:
+        workflow = (
+            REPOSITORY_ROOT / ".github/workflows/android-release-candidate.yml"
+        ).read_text(encoding="utf-8")
+        candidate_job_match = re.search(
+            r"(?ms)^  signed-candidate:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:|\Z)",
+            workflow,
+        )
+
+        self.assertIn("on:\n  workflow_dispatch:", workflow)
+        self.assertNotIn("  push:\n", workflow)
+        self.assertNotIn("  pull_request:\n", workflow)
+        self.assertIsNotNone(candidate_job_match)
+        candidate_job = candidate_job_match.group("body")
+        self.assertIn("if: github.ref == 'refs/heads/main'", candidate_job)
+        self.assertIn("environment: android-release-candidate", candidate_job)
+        self.assertIn("      contents: read", candidate_job)
+        self.assertIn("      attestations: write", candidate_job)
+        self.assertIn("      id-token: write", candidate_job)
+        self.assertIn("XLB_ANDROID_RELEASE_KEYSTORE_BASE64", workflow)
+        self.assertIn("XLB_ANDROID_RELEASE_STORE_PASSWORD", workflow)
+        self.assertIn("XLB_ANDROID_RELEASE_KEY_ALIAS", workflow)
+        self.assertIn("XLB_ANDROID_RELEASE_KEY_PASSWORD", workflow)
+        self.assertIn("XLB_ANDROID_RELEASE_API_BASE_URL", workflow)
+        self.assertIn("push-to-registry: false", workflow)
+        self.assertIn("create-storage-record: false", workflow)
+        self.assertIn("retention-days: 14", workflow)
+        self.assertEqual(
+            [
+                "Check out source",
+                "Set up Java",
+                "Set up Android SDK",
+                "Install pinned Android SDK and NDK",
+                "Set up Go for Mihomo JNI",
+                "Set up Gradle",
+                "Restore release signing keystore",
+                "Build signed release candidate",
+                "Verify package identity and APK signature",
+                "Create source-bound APK manifest",
+                "Attest signed candidate APK",
+                "Upload signed candidate for review",
+            ],
+            re.findall(r"^      - name: (.+)$", candidate_job, re.MULTILINE),
+        )
+        self.assertNotIn("gh release create", workflow)
+        self.assertNotIn("softprops/action-gh-release@", workflow)
+        self.assertNotIn("r0adkll/upload-google-play@", workflow)
 
     def test_sbom_attestations_are_main_push_only_and_job_scoped(self) -> None:
         workflow = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
