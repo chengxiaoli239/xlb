@@ -22,6 +22,13 @@ final class TunnelAttemptGate {
         return true;
     }
 
+    synchronized boolean finishIfCurrent(int attempt, Runnable action) {
+        if (generation != attempt) return false;
+        generation++;
+        action.run();
+        return true;
+    }
+
     synchronized boolean runIfCurrent(int attempt, Runnable action) {
         if (generation != attempt) return false;
         action.run();

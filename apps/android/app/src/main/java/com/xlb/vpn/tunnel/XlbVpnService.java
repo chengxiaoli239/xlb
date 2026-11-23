@@ -161,8 +161,10 @@ public final class XlbVpnService extends VpnService {
     private void startTunnel(String profile, String requestedRouteName, int attempt) {
         if (!tunnelAttempts.isCurrent(attempt)) return;
         if (!closeMemberSession()) {
-            publish(STATE_ERROR, "会员线路资源尚未清理，请重试");
-            stopSelf();
+            tunnelAttempts.runIfCurrent(attempt, () -> {
+                publish(STATE_ERROR, "会员线路资源尚未清理，请重试");
+                stopSelf();
+            });
             return;
         }
         if (!tunnelAttempts.isCurrent(attempt)) return;
@@ -173,23 +175,27 @@ public final class XlbVpnService extends VpnService {
             if (tunnelAttempts.isCurrent(attempt)) {
                 boolean verified = TunnelVerifier.verify(this::probeVpnRoute,
                         () -> !tunnelAttempts.isCurrent(attempt), Thread::sleep, 5);
-                if (tunnelAttempts.isCurrent(attempt) && verified) {
-                    publish(STATE_CONNECTED, null);
-                    startForeground(NOTIFICATION_ID, notification("已连接"));
-                } else if (tunnelAttempts.finishIfCurrent(attempt)) {
+                if (verified) {
+                    tunnelAttempts.runIfCurrent(attempt, () -> {
+                        publish(STATE_CONNECTED, null);
+                        startForeground(NOTIFICATION_ID, notification("已连接"));
+                    });
+                } else {
                     closeCore();
-                    publish(STATE_ERROR, "线路连接或网络验证失败，请重试");
-                    stopSelf();
+                    tunnelAttempts.finishIfCurrent(attempt, () -> {
+                        publish(STATE_ERROR, "线路连接或网络验证失败，请重试");
+                        stopSelf();
+                    });
                 }
             } else {
                 closeCore();
             }
         } catch (TimeoutException exception) {
             operation.cancel(true);
-            if (tunnelAttempts.finishIfCurrent(attempt)) {
+            tunnelAttempts.finishIfCurrent(attempt, () -> {
                 publish(STATE_ERROR, "VPN 初始化超时，请检查订阅规则或网络");
                 stopSelf();
-            }
+            });
         } catch (ExecutionException | InterruptedException exception) {
             if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
             if (!tunnelAttempts.isCurrent(attempt)) {
@@ -197,18 +203,20 @@ public final class XlbVpnService extends VpnService {
                 currentRouteName = "";
                 return;
             }
-            if (tunnelAttempts.finishIfCurrent(attempt)) {
+            tunnelAttempts.finishIfCurrent(attempt, () -> {
                 publish(STATE_ERROR, safeMessage(exception.getCause() == null ? exception : exception.getCause()));
                 stopSelf();
-            }
+            });
         }
     }
 
     private void startMemberTunnel(MemberTunnelGrant grant, int attempt) {
         if (!tunnelAttempts.isCurrent(attempt)) return;
         if (!closeMemberSession()) {
-            publish(STATE_ERROR, "会员线路资源尚未清理，请重试");
-            stopSelf();
+            tunnelAttempts.runIfCurrent(attempt, () -> {
+                publish(STATE_ERROR, "会员线路资源尚未清理，请重试");
+                stopSelf();
+            });
             return;
         }
         MemberTunnelSession session = new MemberTunnelSession(memberTunnelRuntime(grant, attempt));
@@ -217,10 +225,17 @@ public final class XlbVpnService extends VpnService {
             memberSession = session;
         }
         try {
-            currentRouteName = MihomoCore.firstRouteName(grant.profile());
+            String routeName = MihomoCore.firstRouteName(grant.profile());
+            if (!tunnelAttempts.runIfCurrent(attempt, () -> currentRouteName = routeName)) {
+                requestMemberSessionStop();
+                closeMemberSession();
+                return;
+            }
         } catch (RuntimeException | UnsatisfiedLinkError exception) {
-            MemberTunnelGrantStore.clear();
-            rejectStart("会员线路配置不可用");
+            if (!tunnelAttempts.runIfCurrent(attempt, () -> rejectStart("会员线路配置不可用"))) {
+                requestMemberSessionStop();
+                closeMemberSession();
+            }
             return;
         }
         if (!tunnelAttempts.isCurrent(attempt)) {
@@ -237,27 +252,26 @@ public final class XlbVpnService extends VpnService {
         });
         try {
             operation.get(20, TimeUnit.SECONDS);
-            if (tunnelAttempts.isCurrent(attempt)) {
+            boolean published = tunnelAttempts.runIfCurrent(attempt, () -> {
                 publish(STATE_CONNECTED, null);
                 startForeground(NOTIFICATION_ID, notification("已连接"));
-            } else {
-                closeMemberSession();
-            }
+            });
+            if (!published) closeMemberSession();
         } catch (TimeoutException exception) {
             operation.cancel(true);
             session.requestStop();
-            if (tunnelAttempts.finishIfCurrent(attempt)) {
+            tunnelAttempts.finishIfCurrent(attempt, () -> {
                 publish(STATE_ERROR, "VPN 初始化超时，请检查线路或网络");
                 stopSelf();
-            }
+            });
         } catch (ExecutionException | InterruptedException exception) {
             if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
             if (closeMemberSession()) setMemberTunnelForAttempt(attempt, false);
-            if (tunnelAttempts.finishIfCurrent(attempt)) {
+            tunnelAttempts.finishIfCurrent(attempt, () -> {
                 Throwable cause = exception.getCause() == null ? exception : exception.getCause();
                 publish(STATE_ERROR, safeMessage(cause));
                 stopSelf();
-            }
+            });
         }
     }
 
@@ -349,8 +363,12 @@ public final class XlbVpnService extends VpnService {
             ensureCurrentTunnelAttempt(attempt);
             MihomoCore.load(profile);
             ensureCurrentTunnelAttempt(attempt);
-            currentRouteName = requestedRouteName == null ? "" : requestedRouteName;
-            publish(STATE_CONNECTING, null);
+            if (!tunnelAttempts.runIfCurrent(attempt, () -> {
+                currentRouteName = requestedRouteName == null ? "" : requestedRouteName;
+                publish(STATE_CONNECTING, null);
+            })) {
+                throw new java.util.concurrent.CancellationException("tunnel startup was canceled");
+            }
             ensureCurrentTunnelAttempt(attempt);
             establishTun();
         } catch (Exception | UnsatisfiedLinkError exception) {

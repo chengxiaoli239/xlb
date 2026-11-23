@@ -35,7 +35,9 @@
 
 **2026-11-23 Android start/stop 代次门控增量**：`TunnelAttemptGate` 将 stop/revoke/destroy 与 start 编入单调代次，service 会跳过队列中已失效的通用 start，并在 core/profile/TUN 阶段边界检查旧代次；旧尝试不能结束较新的 attempt。JVM gate tests、Android 全套 JVM tests、AndroidTest 编译、lint 通过。仅本机测试；未运行 Android TUN、实体设备或真实会员节点，会员 gate 保持关闭。
 
-**2026-11-24 Android 会员会话标记代次保护增量**：将 `currentTunnelIsMember` 变更与 VPN service 当前 attempt 的代次检查原子化，旧启动清理结果不能清除更新会员 attempt 的标记；STOP/revoke/destroy 在资源清理成功前保留旧会员标记，清理结束只由仍有效的代次发布 DISCONNECTED。新增旧 attempt 清理被替换 attempt 拒绝的 JVM 回归测试；JDK 21 下 Android 全套 JVM、AndroidTest 编译、lint、Debug/AndroidTest APK build 通过，专用 `xlb-m9-recovery` AVD 的 rapid stop/start instrumentation 1/1 通过。未运行实体手机、系统 TUN 或真实节点，member gate 仍关闭。
+**2026-11-24 Android 会员会话标记代次保护增量**：将 `currentTunnelIsMember` 变更与 VPN service 当前 attempt 的代次检查原子化，旧启动清理结果不能清除更新会员 attempt 的标记；STOP/revoke/destroy 在资源清理成功前保留旧会员标记，清理结束只由仍有效的代次发布 DISCONNECTED。新增旧 attempt 清理被替换 attempt 拒绝的 JVM 回归测试；JDK 21 下 Android 全套 JVM、AndroidTest 编译、lint、Debug/AndroidTest APK build 通过，专用 `xlb-m9-recovery` AVD 的 rapid stop/start instrumentation 1/1 通过；提交 `83591b9` 的主线 CI `45213142154` 全绿。未运行实体手机、系统 TUN 或真实节点，member gate 仍关闭。
+
+**2026-11-24 Android worker 状态广播代次保护增量**：worker 的 CONNECTED/ERROR 与 stop completion 状态只有在 `TunnelAttemptGate` 原子确认当前代次时才能发布，当前 start 的 CONNECTING 广播和路由名同样成组更新；旧终态不能覆盖新 start 的 UI/service 状态。新增 finish callback 被替换代次拒绝的 JVM 测试；Android JVM、lint、AndroidTest 编译、Debug/AndroidTest APK build 与专用 AVD rapid stop/start 1/1 均通过。未运行实体设备、会员 TUN 或真实节点。
 
 **此前 Android 增量，以主线 `342a7d8` 为准**：Android `PlatformApi` contract-shaped loopback grant→VPN service 关闭 gate、ACTION_STOP、撤权与登出清理测试通过；伪造 profile digest 时 `MemberTunnelGrant` 不产生；权益同步失效时 `CONNECTING` 与 `CONNECTED` 均触发 stop。专用 AVD 19/19 基础 instrumentation，新增 API integration cases 各 1/1，Android JVM/AndroidTest 编译/lint 通过。hosted CI run `45196145412` 全绿。测试使用 loopback 假 API 与 service 测试边界，未建立系统 TUN、未连接 PHP ready authorization 或真实节点，Android member gate 仍关闭。中间 CI run `45195474224` 的 Laravel `NodePeerProvisioningTest` 曾出现 peer 保持 provisioning 的单次失败，下一主线全套 run 通过且 PHP 代码未变，原因未复现，保留为待观察的 CI 波动。
 
