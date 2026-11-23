@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M11 Docker 忽略规则自动回归（2026-11-24，本机 Docker）**：新增 `ops/test_docker_context.py`，在临时根构建上下文逐项尝试将 10 种合成环境凭据/运行数据 `COPY` 到 `scratch`，确认 Docker 因 `.dockerignore` 排除而拒绝；测试只使用非秘密 sentinel。ops 全套 54/54、Python 编译与 `git diff --check` 通过；CI 在 PHP/Web 镜像构建前自动执行。
+
 - **M6/AWS 外部会话状态复核（2026-11-24，只读）**：使用项目固化的 `ops/aws-cli` 包装调用 `sts get-caller-identity --profile xlb-ops`，返回 session expired；本轮没有 AWS 读写资源操作。最近一次成功盘点是历史状态，不能当作当前资源证明。继续 M6 云端验收前需用户本人重新 `aws login`，随后先只读盘点并重新审查 TTL/费用 plan；缺失的真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供。AWS 会话过期不阻断沙箱、Android、M10 或 M11 离线工作。
 
 - **M11 Docker 构建上下文与 PHP/Web 镜像 CI 验收（2026-11-24，hosted run 通过）**：仓库根 `.dockerignore` 排除根级/嵌套 `.env`、Composer/npm/netrc 凭据、AWS/SSH 私有配置、私钥/密钥库、SQLite、依赖/build、Laravel runtime storage/cache 与 `ops/.state`；10 个本地 Docker 隔离构建夹具确认这些输入不可被 `COPY`。PHP Composer 阶段增加仅供构建使用的 `unzip` 后，hosted CI `45259345222` 的 PHP 与 Web 镜像构建、Android build/signing-config、Laravel/API/Web/扩展、Go、ops、SBOM provenance 全部通过。该 CI 只构建镜像，不部署 staging/production、不发布制品；本机 Docker Hub 仍返回 OCI config descriptor 错误。没有读取或提交任何真实凭据。

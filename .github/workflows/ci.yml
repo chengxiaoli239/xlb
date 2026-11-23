@@ -56,6 +56,7 @@ jobs:
 
       - name: Build PHP and Web container images
         run: |
+          python3 ops/test_docker_context.py
           docker build --file docker/Dockerfile.php --tag xlb-php:ci .
           docker build --file docker/Dockerfile.web --tag xlb-web:ci .
 
