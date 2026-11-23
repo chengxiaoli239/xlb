@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **项目持续推进哨兵报告规则更新（2026-11-24）**：更新 Codex automation「VPN 项目持续推进巡检」提示词，要求每轮按 Android、Web/API/支付、节点/Agent/M5-M10、Windows/其他客户端、M11 发布运维及外部放行依赖分别报告证据、完成门、未完成门与下一步；整体比例只在有明确分母时计算。自动化配置为 ACTIVE、20 分钟间隔；本轮未取得实际触发时刻/事件历史，因此不宣称实际 cadence 已验收。代码阶段推进和放行条件仍以主线测试、PRD、提交及云/节点回执为准。
+
 - **M11 Composer vendor 下载短暂 5xx 有界重试（2026-11-24，hosted 验收通过）**：针对两次 hosted PHP 镜像构建都在 GitHub zipball 下载遇到 HTTP/2 504，在 `docker/Dockerfile.php` 的 vendor stage 增加最多三次尝试，仅对 HTTP 502/503/504 延迟重试；依赖解析、认证及其他错误仍立即失败，非零最终状态原样返回。mock Composer 验证两次 504 后第三次成功，以及非 HTTP 错误只尝试一次；shell syntax 检查通过。主线 CI `45265827064` 的 PHP/Web 镜像构建、Docker 上下文回归与全套 Android/API/Go/ops/SBOM jobs 均通过。
 
 - **M11 hosted Docker 忽略规则回归（2026-11-24，主线 CI）**：`ops/test_docker_context.py` 在 CI `45261821374` 通过，10 个临时凭据/运行数据路径均被 Docker `.dockerignore` 拒绝，PHP/Web 镜像 job实际执行到 Composer 依赖下载阶段。此次镜像 build 随后因 GitHub API 对 `symfony/polyfill-mbstring` zipball 返回 HTTP/2 504 而失败；这不是上下文回归失败，也不是 PHP 代码测试失败。Laravel/API/Web/扩展、Go、ops、Android build/signing config/SBOM jobs 均通过。原 run 无法由 GitHub rerun 接口重跑，已更新记录并由后续主线 CI 再次验证。
