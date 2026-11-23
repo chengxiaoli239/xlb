@@ -49,6 +49,39 @@ import java.util.concurrent.atomic.AtomicReference;
 @RunWith(AndroidJUnit4.class)
 public final class PlatformApiMemberGrantInstrumentedTest {
     @Test
+    public void profileDigestMismatchNeverPublishesReadyGrant() throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SharedPreferences preferences = context.getSharedPreferences("secure_client_state", Context.MODE_PRIVATE);
+        assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+        FakeMemberApi server = new FakeMemberApi(MemberTunnelGrantAvdFixture.trustedSystemCaPem());
+        server.setProfileDigestOverride("0".repeat(64));
+        SecureSessionStore sessionStore = new SecureSessionStore(context);
+        sessionStore.installationId();
+        sessionStore.updateCookie("xlb_session", "isolated-member-session", false);
+        PlatformApi api = new PlatformApi("http://127.0.0.1:" + server.port(), sessionStore);
+        PlatformApi.MemberAccount account = new PlatformApi.MemberAccount(
+                "member-avd", "Disposable member", "member@example.invalid", "member");
+
+        try {
+            PlatformApi.ClientSnapshot snapshot = api.synchronize(account);
+
+            assertEquals(PlatformApi.NodeAuthorizationStatus.UNAVAILABLE, snapshot.nodeAuthorizationStatus);
+            assertNull("tampered profile digest produced a member grant", api.verifiedMemberTunnelGrant());
+            assertNotNull("valid device proof was lost when only its tunnel artifact failed",
+                    api.verifiedMemberDeviceProof());
+            assertTrue("device challenge signature was not checked", server.challengeSignatureVerified());
+            assertFalse("fake API server observed an invalid request", server.hasFailure());
+        } finally {
+            sessionStore.clearSession();
+            MemberTunnelGrantAvdFixture.deleteInstallationKey(sessionStore.installationId());
+            assertTrue("could not clear disposable emulator session state",
+                    preferences.edit().clear().commit());
+            server.close();
+        }
+    }
+
+    @Test
     public void authorizedSyncGrantIsConsumedByClosedServiceGateAndClearedOnLogout() throws Exception {
         requireDisposableEmulator();
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
@@ -176,6 +209,7 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         private volatile byte[] challenge;
         private volatile boolean challengeSignatureVerified;
         private volatile boolean deviceRemovalPending;
+        private volatile String profileDigestOverride;
 
         private FakeMemberApi(String trustedCa) throws IOException {
             this.trustedCa = trustedCa;
@@ -195,6 +229,10 @@ public final class PlatformApiMemberGrantInstrumentedTest {
 
         private boolean hasFailure() {
             return failure.get() != null;
+        }
+
+        private void setProfileDigestOverride(String profileDigest) {
+            profileDigestOverride = profileDigest;
         }
 
         private void serve() {
@@ -316,7 +354,7 @@ public final class PlatformApiMemberGrantInstrumentedTest {
                             .put("profile", profile)
                             .put("bridge_endpoint", "https://node.example.invalid:9443")
                             .put("bridge_server_ca_pem", trustedCa)
-                            .put("profile_sha256", sha256(profile))
+                            .put("profile_sha256", profileDigestOverride == null ? sha256(profile) : profileDigestOverride)
                             .put("profile_renderer_id", "xlb-mihomo-bridge-v1")
                             .put("profile_renderer_version", "1.0.0")
                             .put("bridge_protocol", "xlb-proof-v1")
