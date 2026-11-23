@@ -1,4 +1,8 @@
 import copy
+import json
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 from node_fleet_plan import build_plan
@@ -95,6 +99,43 @@ class NodeFleetPlanTest(unittest.TestCase):
             manifest["nodes"] = nodes
             with self.subTest(count=len(nodes)), self.assertRaises(ValueError):
                 build_plan(manifest)
+
+    def test_cli_emits_only_a_plan_for_valid_input(self):
+        script = Path(__file__).with_name("node_fleet_plan.py")
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            input=json.dumps(self.manifest()),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")
+        plan = json.loads(result.stdout)
+        self.assertEqual(plan["mode"], "plan_only")
+        self.assertFalse(plan["apply_supported"])
+
+    def test_cli_rejects_malformed_and_oversized_input_without_emitting_a_plan(self):
+        script = Path(__file__).with_name("node_fleet_plan.py")
+        invalid_inputs = (
+            ("{invalid json", "invalid_plan"),
+            (" " * (16 * 1024 + 1), "request_too_large"),
+        )
+
+        for request, error_code in invalid_inputs:
+            with self.subTest(error_code=error_code):
+                result = subprocess.run(
+                    [sys.executable, str(script)],
+                    input=request,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, "")
+                self.assertIn(error_code, result.stderr)
 
 
 if __name__ == "__main__":
