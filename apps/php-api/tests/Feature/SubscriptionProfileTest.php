@@ -124,6 +124,49 @@ class SubscriptionProfileTest extends TestCase
         $this->assertStringNotContainsString('观测过期节点', $response->getContent());
     }
 
+    public function test_next_profile_fetch_removes_a_route_candidate_after_its_health_changes(): void
+    {
+        $now = now()->utc()->toIso8601String();
+        DB::table('nodes')->insert([
+            'id' => 'node-test-2', 'name' => '演示节点 02', 'region' => '测试区域', 'protocol' => 'SOCKS5',
+            'endpoint_host' => '198.51.100.11', 'endpoint_port' => 1081, 'status' => 'available',
+            'is_test' => true, 'max_sessions' => 100, 'active_sessions' => 0, 'latency_ms' => 55,
+            'health_status' => 'verified_test', 'last_health_check_at' => $now, 'config_version' => 1, 'updated_at' => $now,
+        ]);
+        DB::table('subscription_route_nodes')->insert([
+            'id' => 'route-test-v1-node-2', 'route_version_id' => 'route-test-v1', 'node_id' => 'node-test-2',
+            'weight' => 100, 'created_at' => $now,
+        ]);
+
+        $url = $this->profileUrl();
+        $initialResponse = $this->get($url)->assertOk();
+        $initialConfig = Yaml::parse($initialResponse->getContent());
+        $this->assertSame(['演示节点 01', '演示节点 02'], array_column($initialConfig['proxies'], 'name'));
+
+        DB::table('nodes')->where('id', 'node-test-2')->update([
+            'health_status' => 'unhealthy',
+            'updated_at' => now()->utc()->toIso8601String(),
+        ]);
+
+        $updatedResponse = $this->get($url)->assertOk();
+        $updatedConfig = Yaml::parse($updatedResponse->getContent());
+        $updatedNodeNames = array_column($updatedConfig['proxies'], 'name');
+
+        $this->assertSame(['演示节点 01'], $updatedNodeNames);
+        $this->assertSame('1', $updatedResponse->headers->get('X-XLB-Route-Version'));
+        $this->assertNotSame(
+            $initialResponse->headers->get('X-XLB-Config-Version'),
+            $updatedResponse->headers->get('X-XLB-Config-Version'),
+        );
+        foreach (['迅连宝-自动', '迅连宝-故障切换'] as $groupName) {
+            $group = collect($updatedConfig['proxy-groups'])->firstWhere('name', $groupName);
+            $this->assertSame($updatedNodeNames, $group['proxies']);
+        }
+        $manual = collect($updatedConfig['proxy-groups'])->firstWhere('name', '迅连宝-手动');
+        $this->assertSame(['迅连宝-自动', '迅连宝-故障切换', '演示节点 01', 'DIRECT'], $manual['proxies']);
+        $this->assertStringNotContainsString('演示节点 02', $updatedResponse->getContent());
+    }
+
     public function test_user_agent_negotiation_and_explicit_format_precedence(): void
     {
         $url = $this->profileUrl();

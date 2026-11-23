@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M10 路由健康变化后的订阅重渲染回归（2026-11-24，本地 SQLite）**：新增 feature 回归，先确认已发布 route version 中两个健康候选都进入 local/testing 账号级 profile，再把一个候选状态改为 unhealthy 并重新拉取，确认自动/故障切换/手动组都剔除它，剩余候选不变且 `X-XLB-Config-Version` 更新。Laravel 全套 253 项中 252 passed、1 个既有 skip、2,228 assertions；Pint、PHP syntax 与 diff check 通过。该测试只证明服务端在下一次订阅拉取时重新渲染健康候选，不证明 Mihomo 实际检测、客户端拉取时延、节点故障注入、真实线路切换或会员 peer 自动切换。下一步继续离线补齐 M10 的候选与线路版本转换边界；真实故障注入仍需至少两台获批隔离节点。
+
 - **M10 路线配置自动测速/故障切换/手动选择组（2026-11-24，本地与 hosted CI）**：local/testing 账号级兼容订阅现生成 Mihomo `url-test`、`fallback` 与手动 `select` 组，候选严格来自已解析的 route version 节点；不健康或 health timestamp 超过 TTL 的节点不会进入组；每设备 proof peer 的服务端 profile 原样返回，不经此生成器。profile 定向测试与设备订阅回归 32 passed、1 个既有 skip；Laravel 全套 251 passed、1 个既有 skip、2,217 assertions，Pint 通过。主线 CI `45287506548` 验证 pinned Mihomo v1.19.34 `-t` 解析，CI `45289769190` 六个 jobs 全绿并覆盖新增健康候选过滤回归。Hosted PHPUnit 汇总为 32 passed、220 warning-classified tests、2,237 assertions；前一 run `45284036959` 为 32 passed、219 warning-classified tests，warning 分类原因尚未定位。此结果不等于真实线路故障注入或生产 failover 验收；配置仅限 local/testing，也不改变严格逐设备 peer 路径。
 
 - **M6 / 运维文档 AWS 会话状态对齐（2026-11-24，只读事实核对）**：复核确认 `xlb-ops` 当前 STS 已过期，本轮无法取得 AWS 身份或当前资源清单；未执行 AWS 资源读取/写入。同步修正文档中把历史成功登录或历史资源快照写成当前状态的条目；真实节点、会员 profile、mTLS 与撤权回执仍缺。重新登录后必须先只读盘点和复核获批 plan，离线开发继续推进。
