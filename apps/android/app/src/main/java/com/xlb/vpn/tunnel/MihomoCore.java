@@ -25,6 +25,13 @@ final class MihomoCore {
         }
     }
 
+    static void loadMemberProfile(String profile, String localUsername, String localPassword) {
+        String failure = nativeLoadMemberBridgeProfile(profile, localUsername, localPassword);
+        if (failure != null) {
+            throw new IllegalStateException("member bridge profile could not be loaded");
+        }
+    }
+
     static String firstRouteName(String profile) {
         return nativeFirstRouteName(profile.getBytes(StandardCharsets.UTF_8));
     }
@@ -42,6 +49,7 @@ final class MihomoCore {
 
     private static native void nativeInit(String home, SocketProtector protector);
     private static native String nativeLoad(byte[] profile);
+    private static native String nativeLoadMemberBridgeProfile(String profile, String localUsername, String localPassword);
     private static native String nativeFirstRouteName(byte[] profile);
     private static native String nativeStartTun(int fd);
     private static native void nativeStop();

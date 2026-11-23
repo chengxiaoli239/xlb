@@ -12,6 +12,10 @@ extern void XlbStop(void);
 extern void XlbFreeString(void *);
 extern char *XlbCreateAndroidDeviceCertificate(char *, char *, char *, int, int, char *, int);
 extern void XlbReleaseAndroidDeviceCertificate(void);
+extern char *XlbStartAndroidProofBridge(char *, int, char *, int, char *, int, char *, int);
+extern char *XlbLoadMemberBridgeProfile(char *, int, char *, int, char *, int);
+extern void XlbStopAndroidProofBridge(void);
+extern int XlbAndroidProofBridgeRunning(void);
 
 static JavaVM *vm;
 static jobject protector;
@@ -164,6 +168,76 @@ static jstring result_string(JNIEnv *env, char *result) {
     jstring value = (*env)->NewStringUTF(env, result);
     XlbFreeString(result);
     return value;
+}
+
+JNIEXPORT jstring JNICALL Java_com_xlb_vpn_data_DeviceProofCertificate_nativeStartProofBridge(
+        JNIEnv *env, jclass cls, jstring remote_url, jstring ca_bundle,
+        jstring local_username, jstring local_password) {
+    (void)cls;
+    if (remote_url == NULL || ca_bundle == NULL || local_username == NULL || local_password == NULL) {
+        return (*env)->NewStringUTF(env, "bridge configuration is required");
+    }
+    const char *remote_value = (*env)->GetStringUTFChars(env, remote_url, NULL);
+    const char *ca_value = (*env)->GetStringUTFChars(env, ca_bundle, NULL);
+    const char *username_value = (*env)->GetStringUTFChars(env, local_username, NULL);
+    const char *password_value = (*env)->GetStringUTFChars(env, local_password, NULL);
+    if (remote_value == NULL || ca_value == NULL || username_value == NULL || password_value == NULL) {
+        if (remote_value != NULL) (*env)->ReleaseStringUTFChars(env, remote_url, remote_value);
+        if (ca_value != NULL) (*env)->ReleaseStringUTFChars(env, ca_bundle, ca_value);
+        if (username_value != NULL) (*env)->ReleaseStringUTFChars(env, local_username, username_value);
+        if (password_value != NULL) (*env)->ReleaseStringUTFChars(env, local_password, password_value);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        return (*env)->NewStringUTF(env, "bridge configuration is unavailable");
+    }
+    char *failure = XlbStartAndroidProofBridge((char *)remote_value, (*env)->GetStringUTFLength(env, remote_url),
+            (char *)ca_value, (*env)->GetStringUTFLength(env, ca_bundle),
+            (char *)username_value, (*env)->GetStringUTFLength(env, local_username),
+            (char *)password_value, (*env)->GetStringUTFLength(env, local_password));
+    (*env)->ReleaseStringUTFChars(env, remote_url, remote_value);
+    (*env)->ReleaseStringUTFChars(env, ca_bundle, ca_value);
+    (*env)->ReleaseStringUTFChars(env, local_username, username_value);
+    (*env)->ReleaseStringUTFChars(env, local_password, password_value);
+    return result_string(env, failure);
+}
+
+JNIEXPORT jstring JNICALL Java_com_xlb_vpn_tunnel_MihomoCore_nativeLoadMemberBridgeProfile(
+        JNIEnv *env, jclass cls, jstring profile, jstring local_username, jstring local_password) {
+    (void)cls;
+    if (profile == NULL || local_username == NULL || local_password == NULL) {
+        return (*env)->NewStringUTF(env, "member bridge profile is unavailable");
+    }
+    const char *profile_value = (*env)->GetStringUTFChars(env, profile, NULL);
+    const char *username_value = (*env)->GetStringUTFChars(env, local_username, NULL);
+    const char *password_value = (*env)->GetStringUTFChars(env, local_password, NULL);
+    if (profile_value == NULL || username_value == NULL || password_value == NULL) {
+        if (profile_value != NULL) (*env)->ReleaseStringUTFChars(env, profile, profile_value);
+        if (username_value != NULL) (*env)->ReleaseStringUTFChars(env, local_username, username_value);
+        if (password_value != NULL) (*env)->ReleaseStringUTFChars(env, local_password, password_value);
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        return (*env)->NewStringUTF(env, "member bridge profile is unavailable");
+    }
+    jsize profile_length = (*env)->GetStringUTFLength(env, profile);
+    char *failure = XlbLoadMemberBridgeProfile((char *)profile_value, profile_length,
+            (char *)username_value, (*env)->GetStringUTFLength(env, local_username),
+            (char *)password_value, (*env)->GetStringUTFLength(env, local_password));
+    (*env)->ReleaseStringUTFChars(env, profile, profile_value);
+    (*env)->ReleaseStringUTFChars(env, local_username, username_value);
+    (*env)->ReleaseStringUTFChars(env, local_password, password_value);
+    return result_string(env, failure);
+}
+
+JNIEXPORT void JNICALL Java_com_xlb_vpn_data_DeviceProofCertificate_nativeStopProofBridge(
+        JNIEnv *env, jclass cls) {
+    (void)env;
+    (void)cls;
+    XlbStopAndroidProofBridge();
+}
+
+JNIEXPORT jboolean JNICALL Java_com_xlb_vpn_data_DeviceProofCertificate_nativeProofBridgeRunning(
+        JNIEnv *env, jclass cls) {
+    (void)env;
+    (void)cls;
+    return XlbAndroidProofBridgeRunning() == 1 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jstring JNICALL Java_com_xlb_vpn_data_DeviceProofCertificate_nativeCreateDeviceCertificate(

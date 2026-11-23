@@ -18,6 +18,7 @@ import (
 	constant "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/hub"
 	"github.com/metacubex/mihomo/hub/executor"
+	"github.com/metacubex/mihomo/listener"
 	listenerConfig "github.com/metacubex/mihomo/listener/config"
 	"github.com/metacubex/mihomo/listener/sing_tun"
 	"github.com/metacubex/mihomo/tunnel"
@@ -71,6 +72,10 @@ func XlbLoad(profile *C.char, length C.int) *C.char {
 		return C.CString(profileerrors.ValidationMessage(err))
 	}
 	hub.ApplyConfig(parsed)
+	if listener.GetPorts().MixedPort != 0 {
+		stopLocked()
+		return C.CString("isolated VPN profile exposed a local mixed inbound")
+	}
 	loaded = true
 	if len(raw.Proxy) == 0 {
 		name, _ := debugprofile.FirstRouteName(raw)
@@ -79,6 +84,47 @@ func XlbLoad(profile *C.char, length C.int) *C.char {
 			stopLocked()
 			return C.CString("proxy provider has no proxies")
 		}
+	}
+	return nil
+}
+
+//export XlbLoadMemberBridgeProfile
+func XlbLoadMemberBridgeProfile(profile *C.char, length C.int, username *C.char, usernameLength C.int,
+	password *C.char, passwordLength C.int) *C.char {
+	if profile == nil || username == nil || password == nil || length < 1 || length > 128*1024 ||
+		usernameLength < 1 || usernameLength > 255 || passwordLength < 1 || passwordLength > 255 {
+		return C.CString("invalid member bridge profile")
+	}
+	localUsername := C.GoStringN(username, usernameLength)
+	localPassword := C.GoStringN(password, passwordLength)
+	profileBytes := C.GoBytes(unsafe.Pointer(profile), length)
+	withLocalCredentials, err := debugprofile.MemberBridgeProfile(profileBytes, localUsername, localPassword)
+	if err != nil {
+		return C.CString("invalid member bridge profile")
+	}
+
+	raw, err := config.UnmarshalRawConfig(withLocalCredentials)
+	if err != nil {
+		return C.CString("invalid member bridge profile")
+	}
+	parsed, err := config.ParseRawConfig(raw)
+	if err != nil {
+		return C.CString(profileerrors.ValidationMessage(err))
+	}
+	err = androidProofBridgeManager.WithActiveCredentials(localUsername, localPassword, func() error {
+		coreLock.Lock()
+		defer coreLock.Unlock()
+		stopLocked()
+		hub.ApplyConfig(parsed)
+		if listener.GetPorts().MixedPort != 0 {
+			stopLocked()
+			return errors.New("member bridge profile exposed a local mixed inbound")
+		}
+		loaded = true
+		return nil
+	})
+	if err != nil {
+		return C.CString("member bridge authorization is unavailable")
 	}
 	return nil
 }
@@ -133,6 +179,7 @@ func XlbStartTun(fd C.int) *C.char {
 
 //export XlbStop
 func XlbStop() {
+	stopAndroidProofBridge()
 	coreLock.Lock()
 	defer coreLock.Unlock()
 	stopLocked()

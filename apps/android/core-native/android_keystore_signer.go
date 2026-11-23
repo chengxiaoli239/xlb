@@ -90,6 +90,7 @@ func XlbCreateAndroidDeviceCertificate(nodeID, peerID, deviceID *C.char,
 
 //export XlbReleaseAndroidDeviceCertificate
 func XlbReleaseAndroidDeviceCertificate() {
+	stopAndroidProofBridge()
 	androidDeviceCertificateMu.Lock()
 	androidDeviceCertificate = nil
 	androidDeviceCertificateMu.Unlock()

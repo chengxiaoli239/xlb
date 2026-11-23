@@ -138,6 +138,98 @@ func TestSOCKSBridgeUsesDeviceProofAndForwardsTCPOverHTTP2(t *testing.T) {
 	}
 }
 
+func TestSOCKSBridgeRequiresConfiguredUserPassword(t *testing.T) {
+	_, roots := newBridgeTestServerCertificate(t)
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceCertificate, err := agent.NewDeviceCertificate(agent.DeviceCertificateIdentity{
+		NodeID: "node-auth-test", PeerID: "peer-auth-test", DeviceID: "device-auth-test",
+		PeerGeneration: 1, DeviceGeneration: 1,
+	}, deviceKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, err := New(Config{
+		ListenAddress: "127.0.0.1:0", RemoteURL: "https://127.0.0.1:1", ServerRoots: roots,
+		DeviceCertificate: deviceCertificate, LocalUsername: "test-user", LocalPassword: "test-password",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- proxy.Serve(listener) }()
+	t.Cleanup(func() {
+		_ = proxy.Close()
+		select {
+		case <-serveResult:
+		case <-time.After(time.Second):
+			t.Error("bridge listener did not stop")
+		}
+	})
+
+	unauthenticated := dialSOCKSAuthTest(t, listener.Addr().String(), []byte{0})
+	var methodReply [2]byte
+	if _, err := io.ReadFull(unauthenticated, methodReply[:]); err != nil ||
+		methodReply != [2]byte{5, 0xff} {
+		t.Fatalf("no-auth method reply=%v err=%v", methodReply, err)
+	}
+	_ = unauthenticated.Close()
+
+	wrongPassword := dialSOCKSAuthTest(t, listener.Addr().String(), []byte{2})
+	if _, err := io.ReadFull(wrongPassword, methodReply[:]); err != nil ||
+		methodReply != [2]byte{5, 2} {
+		t.Fatalf("username/password method reply=%v err=%v", methodReply, err)
+	}
+	writeSOCKSAuthTest(t, wrongPassword, "test-user", "wrong-password")
+	var authReply [2]byte
+	if _, err := io.ReadFull(wrongPassword, authReply[:]); err != nil || authReply != [2]byte{1, 1} {
+		t.Fatalf("wrong-password reply=%v err=%v", authReply, err)
+	}
+	_ = wrongPassword.Close()
+
+	valid := dialSOCKSAuthTest(t, listener.Addr().String(), []byte{2})
+	if _, err := io.ReadFull(valid, methodReply[:]); err != nil ||
+		methodReply != [2]byte{5, 2} {
+		t.Fatalf("username/password method reply=%v err=%v", methodReply, err)
+	}
+	writeSOCKSAuthTest(t, valid, "test-user", "test-password")
+	if _, err := io.ReadFull(valid, authReply[:]); err != nil || authReply != [2]byte{1, 0} {
+		t.Fatalf("valid credentials reply=%v err=%v", authReply, err)
+	}
+	_ = valid.Close()
+}
+
+func dialSOCKSAuthTest(t *testing.T, address string, methods []byte) net.Conn {
+	t.Helper()
+	connection, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.SetDeadline(time.Now().Add(time.Second))
+	greeting := append([]byte{5, byte(len(methods))}, methods...)
+	if _, err := connection.Write(greeting); err != nil {
+		t.Fatal(err)
+	}
+	return connection
+}
+
+func writeSOCKSAuthTest(t *testing.T, connection net.Conn, username, password string) {
+	t.Helper()
+	request := []byte{1, byte(len(username))}
+	request = append(request, username...)
+	request = append(request, byte(len(password)))
+	request = append(request, password...)
+	if _, err := connection.Write(request); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type nonExportableSigner struct {
 	crypto.Signer
 }

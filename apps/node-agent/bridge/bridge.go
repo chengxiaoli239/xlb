@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
@@ -28,18 +29,23 @@ type Config struct {
 	RemoteDialAddress string
 	ServerRoots       *x509.CertPool
 	DeviceCertificate tls.Certificate
+	LocalUsername     string
+	LocalPassword     string
 }
 
 type Bridge struct {
-	identity  agent.DeviceCertificateIdentity
-	remoteURL *url.URL
-	client    *http.Client
-	transport *http.Transport
-	ctx       context.Context
-	cancel    context.CancelFunc
-	connected atomic.Bool
-	mu        sync.Mutex
-	listener  net.Listener
+	identity      agent.DeviceCertificateIdentity
+	remoteURL     *url.URL
+	client        *http.Client
+	transport     *http.Transport
+	ctx           context.Context
+	cancel        context.CancelFunc
+	connected     atomic.Bool
+	mu            sync.Mutex
+	credentialsMu sync.RWMutex
+	listener      net.Listener
+	localUser     []byte
+	localPass     []byte
 }
 
 func New(config Config) (*Bridge, error) {
@@ -59,6 +65,11 @@ func New(config Config) (*Bridge, error) {
 		if splitErr != nil || !isLoopbackHost(dialHost) {
 			return nil, errors.New("test bridge remote dial address must be loopback")
 		}
+	}
+	if (config.LocalUsername == "") != (config.LocalPassword == "") ||
+		len(config.LocalUsername) > 255 || len(config.LocalPassword) > 255 ||
+		strings.ContainsRune(config.LocalUsername, '\x00') || strings.ContainsRune(config.LocalPassword, '\x00') {
+		return nil, errors.New("local SOCKS credentials are invalid")
 	}
 	certificate := config.DeviceCertificate
 	if len(certificate.Certificate) == 0 || certificate.PrivateKey == nil {
@@ -107,6 +118,7 @@ func New(config Config) (*Bridge, error) {
 	bridge := &Bridge{
 		identity: identity, remoteURL: remote, client: &http.Client{Transport: transport},
 		transport: transport, ctx: ctx, cancel: cancel,
+		localUser: []byte(config.LocalUsername), localPass: []byte(config.LocalPassword),
 	}
 	go bridge.heartbeatLoop()
 	return bridge, nil
@@ -146,6 +158,14 @@ func (bridge *Bridge) Close() error {
 		_ = listener.Close()
 	}
 	bridge.transport.CloseIdleConnections()
+	bridge.credentialsMu.Lock()
+	for index := range bridge.localUser {
+		bridge.localUser[index] = 0
+	}
+	for index := range bridge.localPass {
+		bridge.localPass[index] = 0
+	}
+	bridge.credentialsMu.Unlock()
 	return nil
 }
 
@@ -190,17 +210,30 @@ func (bridge *Bridge) serveSOCKSConnection(connection net.Conn) {
 		return
 	}
 	noAuth := false
+	usernamePassword := false
 	for _, method := range methods {
 		if method == 0 {
 			noAuth = true
-			break
+		}
+		if method == 2 {
+			usernamePassword = true
 		}
 	}
-	if !noAuth {
+	authMethod := byte(0)
+	if bridge.requiresSOCKSUserPassword() {
+		if !usernamePassword {
+			_, _ = connection.Write([]byte{5, 0xff})
+			return
+		}
+		authMethod = 2
+	} else if !noAuth {
 		_, _ = connection.Write([]byte{5, 0xff})
 		return
 	}
-	if _, err := connection.Write([]byte{5, 0}); err != nil {
+	if _, err := connection.Write([]byte{5, authMethod}); err != nil {
+		return
+	}
+	if authMethod == 2 && !bridge.authenticateSOCKSUserPassword(connection) {
 		return
 	}
 	var requestHeader [4]byte
@@ -229,6 +262,43 @@ func (bridge *Bridge) serveSOCKSConnection(connection net.Conn) {
 	if err := bridge.openTunnel(connection, host, port); err != nil {
 		_ = writeSOCKSReply(connection, 5)
 	}
+}
+
+func (bridge *Bridge) authenticateSOCKSUserPassword(connection net.Conn) bool {
+	var header [2]byte
+	if _, err := io.ReadFull(connection, header[:]); err != nil || header[0] != 1 || header[1] == 0 {
+		return false
+	}
+	username := make([]byte, int(header[1]))
+	if _, err := io.ReadFull(connection, username); err != nil {
+		return false
+	}
+	var passwordLength [1]byte
+	if _, err := io.ReadFull(connection, passwordLength[:]); err != nil || passwordLength[0] == 0 {
+		return false
+	}
+	password := make([]byte, int(passwordLength[0]))
+	if _, err := io.ReadFull(connection, password); err != nil {
+		return false
+	}
+	bridge.credentialsMu.RLock()
+	valid := subtle.ConstantTimeCompare(username, bridge.localUser) &
+		subtle.ConstantTimeCompare(password, bridge.localPass)
+	bridge.credentialsMu.RUnlock()
+	status := byte(1)
+	if valid == 1 {
+		status = 0
+	}
+	if _, err := connection.Write([]byte{1, status}); err != nil {
+		return false
+	}
+	return valid == 1
+}
+
+func (bridge *Bridge) requiresSOCKSUserPassword() bool {
+	bridge.credentialsMu.RLock()
+	defer bridge.credentialsMu.RUnlock()
+	return len(bridge.localUser) > 0
 }
 
 func (bridge *Bridge) openTunnel(local net.Conn, host string, port uint16) error {
