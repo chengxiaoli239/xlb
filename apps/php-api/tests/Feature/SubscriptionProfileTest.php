@@ -147,6 +147,9 @@ class SubscriptionProfileTest extends TestCase
     {
         $binary = getenv('XLB_MIHOMO_BINARY');
         if (! is_string($binary) || $binary === '') {
+            if (getenv('GITHUB_ACTIONS') === 'true') {
+                $this->fail('Hosted CI must provide the pinned Mihomo parser binary.');
+            }
             $this->markTestSkipped('Set XLB_MIHOMO_BINARY to run the optional Mihomo parser check.');
         }
         $this->assertFileExists($binary);

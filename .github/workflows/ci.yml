@@ -121,7 +121,17 @@ jobs:
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: apps/node-agent/go.mod
-          cache-dependency-path: apps/node-agent/go.sum
+          cache-dependency-path: |
+            apps/node-agent/go.sum
+            apps/android/core-native/go.sum
+
+      - name: Build the pinned Mihomo profile parser
+        working-directory: apps/android/core-native
+        run: |
+          mihomo_version=$(go list -m -f '{{.Version}}' github.com/metacubex/mihomo)
+          mkdir -p "$RUNNER_TEMP/mihomo-bin"
+          GOBIN="$RUNNER_TEMP/mihomo-bin" go install "github.com/metacubex/mihomo@${mihomo_version}"
+          echo "XLB_MIHOMO_BINARY=$RUNNER_TEMP/mihomo-bin/mihomo" >> "$GITHUB_ENV"
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
