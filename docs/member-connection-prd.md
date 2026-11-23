@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-24）
 
-- **M8 Android VPN service 销毁时清理未消费 grant（2026-11-24，本机与 hosted CI 验收）**：先在 `xlb-m9-recovery` AVD 复现未知 service action 触发服务销毁后，旧 `MemberTunnelGrantStore` handoff 仍可被消费；随后让 `XlbVpnService.onDestroy()` 同步清除 process-local pending grant，并以同一 instrumentation 回归确认销毁后该 ID 不再取得 grant。定向 instrumentation 1/1、Android 全套 JVM、lint、AndroidTest 编译和 Debug APK build 通过；主线 CI `45278603034` 六个 jobs 全绿。仅为专用 AVD 生命周期验证，不连接实体手机、系统 TUN、真实节点；生产 member admission gate 仍关闭。
+- **M8 Android VPN service 销毁时清理未消费 grant（2026-11-24，本机与 hosted CI 验收）**：先在 `xlb-m9-recovery` AVD 复现未知 service action 触发服务销毁后，旧 `MemberTunnelGrantStore` handoff 仍可被消费；随后让 `XlbVpnService.onDestroy()` 同步清除 process-local pending grant。修后新增用例 1/1、service admission instrumentation 整组 4/4、Android 全套 JVM、lint、AndroidTest 编译和 Debug APK build 通过；主线 CI `45278603034` 六个 jobs 全绿。仅为专用 AVD 生命周期验证，不连接实体手机、系统 TUN、真实节点；生产 member admission gate 仍关闭。
 
 - **M8 Android 会员 grant 并发单次消费回归（2026-11-24，本机与 hosted CI 验收）**：为 `MemberTunnelGrantStore` 增加 8 个并发消费者同时竞争同一 handoff ID 的回归测试，确认只有一个消费者取得 grant，其余均取得空值，且待消费状态被清除。定向测试通过；Android 全套 JVM tests、`lintDebug`、AndroidTest 编译通过，主线 CI `45276068548` 全部 6 个 jobs 成功，包括 Android native build/JVM/lint 与其他模块检查。测试用 JDK 21 与本机 Android SDK，不连接实体手机或 AVD，不启动 VPN/TUN；member admission gate 仍关闭，不证明会员线路或设备限制已通过真机验收。
 
