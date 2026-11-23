@@ -35,8 +35,14 @@ type DataSession struct {
 }
 
 func NewDeviceCertificate(identity DeviceCertificateIdentity, signer crypto.Signer) (tls.Certificate, error) {
+	return NewDeviceCertificateWithLifetime(identity, signer, 12*time.Hour)
+}
+
+func NewDeviceCertificateWithLifetime(identity DeviceCertificateIdentity, signer crypto.Signer,
+	lifetime time.Duration) (tls.Certificate, error) {
 	if signer == nil || identity.NodeID == "" || identity.PeerID == "" || identity.DeviceID == "" ||
 		identity.PeerGeneration < 1 || identity.DeviceGeneration < 1 ||
+		lifetime <= 0 || lifetime > 12*time.Hour ||
 		(identity.SubscriptionID == "" && identity.SubscriptionGeneration != 0) ||
 		(identity.SubscriptionID != "" && identity.SubscriptionGeneration < 1) {
 		return tls.Certificate{}, ErrInvalid
@@ -58,7 +64,7 @@ func NewDeviceCertificate(identity DeviceCertificateIdentity, signer crypto.Sign
 		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: identity.PeerID},
 		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(12 * time.Hour),
+		NotAfter:              now.Add(lifetime),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,

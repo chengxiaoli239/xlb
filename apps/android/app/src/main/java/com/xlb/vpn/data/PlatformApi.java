@@ -208,6 +208,11 @@ public final class PlatformApi {
             public String signChallengeBase64Url(byte[] challenge) throws GeneralSecurityException {
                 return deviceKeyStore.sign(installationId, DeviceBindingProof.encode(challenge));
             }
+
+            @Override
+            public byte[] signDigest(byte[] digest) throws GeneralSecurityException {
+                return deviceKeyStore.signDigestBytes(installationId, digest);
+            }
         };
     }
 

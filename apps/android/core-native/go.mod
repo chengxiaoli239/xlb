@@ -2,7 +2,10 @@ module xlb/android/core
 
 go 1.24.0
 
-require github.com/metacubex/mihomo v1.19.34
+require (
+	github.com/metacubex/mihomo v1.19.34
+	xlb/node-agent v0.0.0-00010101000000-000000000000
+)
 
 require (
 	github.com/RyuaNerin/go-krypto v1.3.0 // indirect
@@ -141,3 +144,5 @@ require (
 )
 
 replace google.golang.org/protobuf => github.com/metacubex/protobuf-go v0.0.0-20260306035419-7ceee0674686
+
+replace xlb/node-agent => ../../node-agent

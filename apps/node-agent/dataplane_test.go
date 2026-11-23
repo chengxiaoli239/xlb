@@ -104,6 +104,24 @@ func TestDataPlaneReservesCapacityForConcurrentDeviceSessions(t *testing.T) {
 	}
 }
 
+func TestDeviceCertificateLifetimeIsBounded(t *testing.T) {
+	request, key := testEnsureRequest(t, "peer-certificate-lifetime", "ensure-certificate-lifetime")
+	lifetime := 10 * time.Minute
+	certificate, err := NewDeviceCertificateWithLifetime(deviceIdentityFor(request), key, lifetime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining := time.Until(certificate.Leaf.NotAfter); remaining <= 0 || remaining > lifetime {
+		t.Fatalf("certificate remaining lifetime = %s; want positive and at most %s", remaining, lifetime)
+	}
+
+	for _, invalidLifetime := range []time.Duration{0, -time.Minute, 12*time.Hour + time.Second} {
+		if _, err := NewDeviceCertificateWithLifetime(deviceIdentityFor(request), key, invalidLifetime); !errors.Is(err, ErrInvalid) {
+			t.Errorf("lifetime %s error = %v; want ErrInvalid", invalidLifetime, err)
+		}
+	}
+}
+
 func TestQuotaEnforcedDataPlaneRequiresAQuotaProvider(t *testing.T) {
 	store := openTestStore(t, 1)
 	plane, err := NewQuotaEnforcedDataPlane(store, newEchoTargetDialer(t), nil)

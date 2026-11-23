@@ -235,6 +235,11 @@ public final class ProofBridgeSupervisorTest {
         public String signChallengeBase64Url(byte[] challenge) {
             return challenge.length == 32 ? "signed-challenge" : "";
         }
+
+        @Override
+        public byte[] signDigest(byte[] digest) {
+            return digest.length == 32 ? new byte[64] : new byte[0];
+        }
     }
 
     private static final class FakeProcess implements ProofBridgeSupervisor.ManagedProcess {

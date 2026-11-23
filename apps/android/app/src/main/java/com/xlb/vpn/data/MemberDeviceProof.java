@@ -14,6 +14,7 @@ public final class MemberDeviceProof {
     public interface Signer {
         String publicKeySpkiBase64Url() throws GeneralSecurityException;
         String signChallengeBase64Url(byte[] challenge) throws GeneralSecurityException;
+        byte[] signDigest(byte[] digest) throws GeneralSecurityException;
     }
 
     private final String memberId;
