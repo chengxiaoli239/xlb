@@ -25,6 +25,7 @@ import org.junit.runner.RunWith;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @RunWith(AndroidJUnit4.class)
@@ -141,6 +142,57 @@ public final class XlbVpnServiceAdmissionInstrumentedTest {
         } finally {
             context.unregisterReceiver(receiver);
             context.stopService(start);
+        }
+    }
+
+    @Test
+    public void stopInvalidatesQueuedDebugTunnelStartWithoutPublishingConnected() throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        CountDownLatch disconnected = new CountDownLatch(1);
+        AtomicReference<CountDownLatch> expectedDisconnect = new AtomicReference<>(disconnected);
+        AtomicInteger connectedStates = new AtomicInteger();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context receiverContext, Intent intent) {
+                String state = intent.getStringExtra(XlbVpnService.EXTRA_STATE);
+                if (XlbVpnService.STATE_CONNECTED.equals(state)) {
+                    connectedStates.incrementAndGet();
+                } else if (XlbVpnService.STATE_DISCONNECTED.equals(state)) {
+                    expectedDisconnect.get().countDown();
+                }
+            }
+        };
+        registerReceiver(context, receiver, new IntentFilter(XlbVpnService.ACTION_STATE));
+        Intent stop = new Intent(context, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP);
+        Intent start = new Intent(context, XlbVpnService.class)
+                .setAction(XlbVpnService.ACTION_START)
+                .putExtra(XlbVpnService.EXTRA_PROFILE, MemberTunnelGrantAvdFixture.PROFILE)
+                .putExtra(XlbVpnService.EXTRA_ROUTE_NAME, "disposable-race-test")
+                .putExtra(XlbVpnService.EXTRA_DEBUG_TEST_ROUTE, true);
+
+        try {
+            context.startService(stop);
+            assertTrue("VPN service did not reach the initial stopped state",
+                    disconnected.await(5, TimeUnit.SECONDS));
+            CountDownLatch stoppedAfterRace = new CountDownLatch(1);
+            expectedDisconnect.set(stoppedAfterRace);
+
+            ComponentName started = context.startForegroundService(start);
+            assertNotNull("VPN service did not accept the disposable debug start", started);
+            ComponentName stopped = context.startService(stop);
+            assertNotNull("VPN service did not accept the stop after queued start", stopped);
+
+            assertTrue("VPN service did not finish the stop after queued start",
+                    stoppedAfterRace.await(10, TimeUnit.SECONDS));
+            assertEquals(XlbVpnService.STATE_DISCONNECTED, XlbVpnService.currentState());
+            assertEquals("stale start reported a connected tunnel", 0, connectedStates.get());
+            assertFalse("debug start left service marked as a member tunnel",
+                    XlbVpnService.currentTunnelIsMember());
+        } finally {
+            context.unregisterReceiver(receiver);
+            context.stopService(start);
+            context.stopService(stop);
         }
     }
 

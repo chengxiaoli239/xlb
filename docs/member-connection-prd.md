@@ -4,6 +4,10 @@
 
 ## 开发进度（2026-11-23）
 
+- **M8 Android 异步 stop/new-start 代次门控（2026-11-23，本机离线验收）**：新增 `TunnelAttemptGate` 为 start、stop/revoke/destroy 分配单调代次，过期 start 在排队 worker 开始和清理旧 session 后被丢弃；core 初始化、profile 加载后、发布启动状态及建立 TUN 前均复查代次。过期 attempt 的 timeout/failure 不能推进或结束较新的 attempt。新增单测验证 stop 会使排队 start 失效、较旧失败不能结束新 attempt；Android JVM tests、AndroidTest 编译、lint、diff check 通过。未运行实体设备/TUN，native 调用本身的并发终止仍按 session stop-request 边界处理；不代表会员线路或节点回执验收。下一步继续检查更新授权替换场景的 grant 代次关联，并保持 member gate 关闭。
+
+- **M8 Android service rapid stop/start 集成验收（2026-11-23，专用 AVD 通过）**：`XlbVpnServiceAdmissionInstrumentedTest.stopInvalidatesQueuedDebugTunnelStartWithoutPublishingConnected` 在独占 `xlb-m9-recovery` AVD 上先建立 DISCONNECTED 基线，再快速排入 Debug loopback profile start 与 ACTION_STOP，最终观察到 DISCONNECTED、无 CONNECTED 状态、service 未标记为会员隧道。单测覆盖的 attempt gate 与该 service instrumentation 相互补充；Android JVM、AndroidTest 编译、lint 与独立 AVD case 1/1 通过。未使用实体手机/真实账号、未建立生产会员 TUN 或节点线路；此场景验证取消竞态而非连接成功。专用 AVD 已停止，真实会员授权/节点回执仍未验收。
+
 - **M8 Android 会员隧道五阶段取消竞态回归（2026-11-23，本机离线验收）**：将 `MemberTunnelSessionTest.stopRequestDoesNotWaitForAnUnresponsiveStartupStage` 从只阻塞 `verifyTunnel` 扩展为逐一阻塞证书创建、proof bridge、member profile、TUN 建立及线路验证。每个边界并发发出 stop request，断言请求 250ms 内返回、恢复阻塞调用后不再进入后续启动阶段，并依次清理 TUN/core、bridge、凭据及证书。session 定向 JVM 5/5、Android 全套 `testDebugUnitTest`、`lintDebug`、`git diff --check` 通过。该用例模拟 JNI/native 调用暂不响应中断，不证明永久不返回时能完成资源清理，也不证明真实 TUN 或节点撤权断流。下一步继续检查 service 对异步 stop 与新 start 的状态代次竞争，真实节点验收仍需受控 endpoint/CA/mTLS 材料及回执。
 
 - **M8 Android 节点授权失效时停止会员隧道（2026-11-23，本机 JVM 与专用 AVD 验收）**：service 现在只在 server-ready grant 通过准入后标记当前会话为会员隧道，并在成功清理后解除标记；若同步发现权益失效，或当前会员隧道的 node authorization 不再为 `READY`，连接中/已连接状态都会发送 ACTION_STOP。通用 Debug 测试线路不因缺少会员 node authorization 而被停止；资源清理未完成时保留会员会话标记，不发布虚假的断开状态。状态策略 JVM 覆盖权益、授权和隧道类型组合；Android JVM tests、AndroidTest 编译、lint 和专用 AVD 隔离 harness 通过。AVD production gate 仍关闭，新增真机测试只确认 grant 被 gate 拒绝时不会留下会员会话标记；没有实测活动的会员 TUN、真实撤权 API 响应或节点断流。下一步要在获批真实节点材料具备后验证授权状态变化与匹配撤权回执，随后做双真机复测。

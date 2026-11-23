@@ -33,6 +33,8 @@
 
 **2026-11-23 Android session cancel-boundary 增量**：`MemberTunnelSessionTest` 现对证书创建、proof bridge、profile 加载、TUN 建立、线路验证五个启动边界逐项模拟不响应中断的操作，证明 stop request 本身不被这些阶段阻塞；阶段恢复后 startup 不跨越下一边界，并按序执行资源清理。定向 session 测试 5/5、Android 全套 JVM 与 lint 通过。它不能保证 native 调用永久不返回时资源最终释放，不建立系统 TUN，也未使用真实节点；会员 gate 保持关闭。
 
+**2026-11-23 Android start/stop 代次门控增量**：`TunnelAttemptGate` 将 stop/revoke/destroy 与 start 编入单调代次，service 会跳过队列中已失效的通用 start，并在 core/profile/TUN 阶段边界检查旧代次；旧尝试不能结束较新的 attempt。JVM gate tests、Android 全套 JVM tests、AndroidTest 编译、lint 通过。仅本机测试；未运行 Android TUN、实体设备或真实会员节点，会员 gate 保持关闭。
+
 **此前 Android 增量，以主线 `342a7d8` 为准**：Android `PlatformApi` contract-shaped loopback grant→VPN service 关闭 gate、ACTION_STOP、撤权与登出清理测试通过；伪造 profile digest 时 `MemberTunnelGrant` 不产生；权益同步失效时 `CONNECTING` 与 `CONNECTED` 均触发 stop。专用 AVD 19/19 基础 instrumentation，新增 API integration cases 各 1/1，Android JVM/AndroidTest 编译/lint 通过。hosted CI run `45196145412` 全绿。测试使用 loopback 假 API 与 service 测试边界，未建立系统 TUN、未连接 PHP ready authorization 或真实节点，Android member gate 仍关闭。中间 CI run `45195474224` 的 Laravel `NodePeerProvisioningTest` 曾出现 peer 保持 provisioning 的单次失败，下一主线全套 run 通过且 PHP 代码未变，原因未复现，保留为待观察的 CI 波动。
 
 | 发布阶段 | 状态 | 下一退出门 |
