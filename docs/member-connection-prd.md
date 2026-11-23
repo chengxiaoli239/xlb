@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M9 Android 登录表单去除本地种子邮箱预填（2026-11-24，本机离线验收）**：Android 登录邮箱初始为空，与 Web 会员中心及 `ClientPreview` 一致；本地测试会员仍由 PHP seeder/env 提供，应用不携带或显示本地账号密码。Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK 构建通过。修改仅影响登录输入默认值，不变更会话、账号或设备绑定状态。
+
 - **M9 Web 登录表单去除本地种子凭据预填（2026-11-24，本机）**：会员中心和 `ClientPreview` 登录邮箱/密码初始值都改为空，移除管理/会员演示账号与本地密码的页面展示，改为提示从当前环境配置读取账户并手动输入。新增 UI 回归断言两个字段留空且页面不展示演示密码；Web 测试 8/8、TypeScript/Vite build 通过。测试使用 `example.test` 虚构邮箱，不包含本地 seed 邮箱或密码。
 
 - **M10 未知 probe node selector 不扩大探测范围（2026-11-24，本地 Fake Driver）**：在批次/显式节点测试中增加不存在节点 ID 的负例，命令返回“没有可探测的可用节点”，driver 调用列表不变，避免无效 selector 回退为全量探测。定向 `ProbeNodeHealthTest` 6/6、32 assertions；Laravel 全套 248 项中 247 通过、1 项既有跳过、2,150 assertions；Pint 通过。未访问真实节点，不形成健康状态或稳定性证据。
@@ -66,7 +68,7 @@
 
 | 模块 | 当前状态 | 证据与未完成项 | 可并行推进 / 下一关 |
 | --- | --- | --- | --- |
-| Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、VPN 权限 Activity 重建后重新签 challenge/取得 fresh grant/发起 handoff、关闭 gate 拒绝及 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；主线 CI `45237384820` 全绿 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；测试模拟权限批准回调，没有弹系统授权框或模拟 OS 进程终止；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 接着验证授权撤回的 callback 失败关闭和 service process-death 生命周期；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
+| Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、VPN 权限 Activity 重建后重新签 challenge/取得 fresh grant/发起 handoff、登录表单不预填种子账号、关闭 gate 拒绝及 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；主线 CI `45237384820` 全绿 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；测试模拟权限批准回调，没有弹系统授权框或模拟 OS 进程终止；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 接着验证授权撤回的 callback 失败关闭和 service process-death 生命周期；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
 | PHP 会员 API 与设备限制 | 本机 challenge 签名、peer provisioning、逐设备 grant、撤权状态与 descriptor 校验有测试 | Laravel 全套 248 项中 247 项通过、1 项既有跳过、2,150 assertions；配置与 profile 用本地 fixture，未证明生产节点回执、实际断流或正式数据库并发 | 继续不依赖云的状态机/回归；真实会员授权和撤权验收须等节点 mTLS runtime 与回执 |
 | Web 管理端与会员中心 | 订单/会员/节点管理已有本地页面；会员中心可创建测试订单并模拟付款后显示测试权益与固定订阅二维码/链接，后台可登记沙箱退款并显示节点回执状态；登录表单不再预填本地 seed 凭据 | Web 8 项测试和 TypeScript/Vite 构建通过，支付/退款 UI 流程使用 mock API；未连接真实支付商户、未真实扣款/退款，未向真实节点下发或核验配置，CA 接口不回显 | 继续检查订单刷新/对账差异呈现与后台审计；任何真实 node config、支付或资金操作需相应外部材料与批准 |
 | Node Agent / proof bridge | Go 隔离协议、设备证书、容量、peer 拒绝与撤权计量、renderer artifact 有离线/合成测试 | 可执行 Agent 只允许 `isolated-test`，runtime renderer 仍 unavailable；本地测试不等于真实节点长期运行或断流 | 可继续 runtime/协议离线测试；生产启用需要管理员提供真实 listener、反向代理、CA/证书和部署验收 |

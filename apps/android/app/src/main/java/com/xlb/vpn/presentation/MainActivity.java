@@ -382,7 +382,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout card = card();
         card.addView(text("会员邮箱", 13, COLOR_INK, true));
-        EditText email = input("member@xlb.local", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        EditText email = input("", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         card.addView(email, spacedParams(7, 17));
         card.addView(text("登录密码", 13, COLOR_INK, true));
         EditText password = input("输入账户密码", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);

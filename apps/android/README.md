@@ -45,7 +45,7 @@ adb -s <设备序列号> install --no-streaming -r -d app/build/outputs/apk/debu
 adb -s <设备序列号> shell monkey -p com.xlb.vpn.debug 1
 ```
 
-调试构建的 API 地址是 `http://127.0.0.1:4175`，只在执行 ADB reverse 的测试设备上有效。默认本地会员是 `member@xlb.local`，密码读取 `apps/php-api/.env` 的 `LOCAL_MEMBER_PASSWORD`；没有覆盖时使用项目默认值。不要把这个账号或密码用于生产。
+调试构建的 API 地址是 `http://127.0.0.1:4175`，只在执行 ADB reverse 的测试设备上有效。本地测试会员由 `apps/php-api` seeder 创建，密码由其 `LOCAL_MEMBER_PASSWORD` 环境配置提供；Android 登录页不预填邮箱或密码。不要把本地测试凭据用于生产。
 
 Release 构建的默认 API 地址是保留的 `https://api.xlb.invalid`，在正式 API 域名、证书和移动端认证联调通过之前不会连接旧站。
 
