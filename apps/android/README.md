@@ -26,6 +26,8 @@ Android 客户端采用 GPL-3.0，来源和发布源码要求见 [NOTICE](NOTICE
 
 The workflow runs Release unit tests/lint, verifies APK signature and package ID, emits a source-commit/hash manifest, creates GitHub build provenance attestation, and uploads the APK plus manifest as a 14-day review artifact. It does not create a GitHub Release, upload to a store, publish to users, or override the default Android member bridge gate. A candidate artifact is not a release approval or proof of production member VPN behavior.
 
+The regular Android CI also runs `scripts/verify-release-signing-config.sh` with a one-day ephemeral test key and the reserved `release-signing-ci.test` origin. It verifies that the APK signer matches the temporary key and that the package ID is correct, then removes the temporary keystore, APK, and isolated Gradle build directory. That test signing key is never uploaded or accepted by the signed candidate workflow.
+
 Before the protected workflow can run, a repository owner must configure the environment protection reviewers and secrets through GitHub settings. A valid signing keystore and production API origin are external release inputs, not repository defaults.
 
 ### Debug installation

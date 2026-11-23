@@ -183,6 +183,9 @@ jobs:
         working-directory: apps/android
         run: ./gradlew assembleDebug testDebugUnitTest compileDebugAndroidTestJavaWithJavac lintDebug --no-daemon
 
+      - name: Verify release signing configuration with ephemeral test key
+        run: apps/android/scripts/verify-release-signing-config.sh
+
       - name: Generate resolved Android release runtime SBOM
         working-directory: apps/android
         run: ./gradlew :app:cyclonedxDirectBom --no-daemon
