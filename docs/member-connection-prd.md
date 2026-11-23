@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-24）
 
-- **M8 VPN 权限弹窗期间 Activity 重建后重新验证会员 grant（2026-11-24，本机离线验收）**：会员连接触发系统 VPN 授权时，只把“待完成会员授权请求”布尔状态保存在 Activity instance state，不持久化 grant/profile/凭据；若系统 Activity 回调返回时进程内 grant 已因配置重建或进程恢复丢失，则用当前会话重新调用 `PlatformApi.synchronize`，要求权益有效、节点授权 `READY` 且生成完整 grant 后才启动 member handoff。撤权/会话失效/无 grant 时显示不可用并保持关闭准入。新增策略用例验证仅“会员请求 + 用户已批准 + grant 已丢失”才触发重新同步；Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 通过。没有真机权限弹窗/进程杀测试，未运行系统 TUN 或真实节点，不证明生产授权/线路。下一步补 Activity 重建与授权回调的专用 AVD 集成覆盖，再继续服务生命周期恢复边界。
+- **M8 VPN 权限回调后的会员 grant 恢复（2026-11-24，本机与专用 AVD 离线验收）**：会员连接触发系统 VPN 授权时，只把“待完成会员授权请求”布尔状态保存在 Activity instance state，不持久化 grant/profile/凭据；若系统 Activity 回调返回时进程内 grant 已因 Activity 重建丢失，则用当前会话重新调用 `PlatformApi.synchronize`，要求权益有效、节点授权 `READY` 且生成完整 grant 后才启动 member handoff。撤权/会话失效/无 grant 时显示不可用并保持关闭准入。策略用例验证仅“会员请求 + 用户已批准 + grant 已丢失”才触发重新同步；专用 AVD 实际 `ActivityScenario.recreate()` 测试确认待完成标记恢复且 grant 对象未恢复。Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 通过。未触发真实系统 VPN 权限弹窗、未模拟进程被系统杀死、未运行系统 TUN 或真实节点，不证明生产授权/线路。下一步用隔离 fake API 覆盖授权回调后重新同步及撤权失败关闭，再继续服务生命周期恢复边界。
 
 - **M8 Android 启动自动连接使用已验证会员 grant（2026-11-24，本机离线验收）**：修正启动自动连接策略此前仅检查权益和账户配置文本、随后调用 generic tunnel 的不匹配。现在只有用户显式开启自动连接、系统 VPN 权限已授予、会员权益有效、`PlatformApi` 已产出完整身份绑定 `MemberTunnelGrant` 且当前无活动隧道时才经会员 grant handoff 启动；不再把账号配置文本当授权或绕过 member admission gate。单测覆盖缺 grant、缺 VPN 权限、无权益、开关关闭和隧道已活动均不启动；Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 通过。member gate 仍关闭，测试未运行系统 TUN 或真实节点；没有可验证服务端 grant 时启动自动连接继续失败关闭。下一步继续检查 process/service 重建后是否可能把过期 grant 重新连接，并维持真实节点验收门。
 
