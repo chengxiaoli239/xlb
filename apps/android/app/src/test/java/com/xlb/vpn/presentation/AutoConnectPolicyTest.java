@@ -30,5 +30,6 @@ public final class AutoConnectPolicyTest {
         assertFalse(MemberTunnelAdmissionPolicy.mayStart(true, false));
         assertFalse(MemberTunnelAdmissionPolicy.mayStart(false, false));
         assertFalse(MemberTunnelAdmissionPolicy.MEMBER_PROOF_BRIDGE_INTEGRATED);
+        assertFalse(MemberTunnelAdmissionPolicy.mayStartMemberTunnel());
     }
 }

@@ -33,7 +33,6 @@ func androidProofBridgeRunning() bool {
 }
 
 //export XlbStartAndroidProofBridge
-
 func XlbStartAndroidProofBridge(remoteURL *C.char, remoteURLLength C.int,
 	caBundle *C.char, caBundleLength C.int, localUsername *C.char, localUsernameLength C.int,
 	localPassword *C.char, localPasswordLength C.int) *C.char {

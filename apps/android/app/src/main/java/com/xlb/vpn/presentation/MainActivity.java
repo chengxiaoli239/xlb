@@ -35,10 +35,12 @@ import android.widget.TextView;
 import com.xlb.vpn.BuildConfig;
 import com.xlb.vpn.R;
 import com.xlb.vpn.data.PlatformApi;
+import com.xlb.vpn.data.MemberTunnelGrant;
 import com.xlb.vpn.data.DebugProfileFetcher;
 import com.xlb.vpn.data.SecureSessionStore;
 import com.xlb.vpn.data.SubscriptionQrParser;
 import com.xlb.vpn.tunnel.MemberTunnelAdmissionPolicy;
+import com.xlb.vpn.tunnel.MemberTunnelGrantStore;
 import com.xlb.vpn.tunnel.XlbVpnService;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
@@ -86,6 +88,7 @@ public final class MainActivity extends Activity {
     private int selectedTab;
     private String pendingProfile;
     private String pendingRouteName;
+    private MemberTunnelGrant pendingMemberGrant;
     private String loadedProfile;
     private boolean testRoute;
     private boolean routeSyncing;
@@ -172,13 +175,16 @@ public final class MainActivity extends Activity {
         if (requestCode != VPN_PERMISSION_REQUEST) return;
         String profile = pendingProfile;
         String selectedRoute = pendingRouteName;
+        MemberTunnelGrant memberGrant = pendingMemberGrant;
         pendingProfile = null;
         pendingRouteName = null;
-        if (resultCode != RESULT_OK || profile == null) {
+        pendingMemberGrant = null;
+        if (resultCode != RESULT_OK || (profile == null && memberGrant == null)) {
             showMessage("VPN 授权未完成", true);
             return;
         }
-        startVpn(profile, selectedRoute);
+        if (memberGrant != null) startMemberVpn(memberGrant);
+        else startVpn(profile, selectedRoute);
     }
 
     private void renderLoading() {
@@ -776,6 +782,18 @@ public final class MainActivity extends Activity {
             startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
             return;
         }
+        MemberTunnelGrant memberGrant = api.verifiedMemberTunnelGrant();
+        if (memberGrant != null) {
+            pendingMemberGrant = memberGrant;
+            Intent approval = VpnService.prepare(this);
+            if (approval == null) {
+                pendingMemberGrant = null;
+                startMemberVpn(memberGrant);
+            } else {
+                startActivityForResult(approval, VPN_PERMISSION_REQUEST);
+            }
+            return;
+        }
         if (loadedProfile == null || routeName == null) {
             showMessage(hasActiveEntitlement(snapshot) ? "服务线路暂不可用，请重试同步。" : "请先开通会员。", true);
             return;
@@ -966,6 +984,23 @@ public final class MainActivity extends Activity {
         try {
             startForegroundService(start);
         } catch (RuntimeException exception) {
+            tunnelState = XlbVpnService.STATE_ERROR;
+            tunnelMessage = "无法启动系统 VPN 服务";
+            render();
+        }
+    }
+
+    private void startMemberVpn(MemberTunnelGrant grant) {
+        tunnelState = XlbVpnService.STATE_CONNECTING;
+        tunnelMessage = null;
+        activeTunnelRouteName = "";
+        render();
+        MemberTunnelGrantStore.publish(grant);
+        try {
+            startForegroundService(new Intent(this, XlbVpnService.class)
+                    .setAction(XlbVpnService.ACTION_START_MEMBER));
+        } catch (RuntimeException exception) {
+            MemberTunnelGrantStore.clear();
             tunnelState = XlbVpnService.STATE_ERROR;
             tunnelMessage = "无法启动系统 VPN 服务";
             render();

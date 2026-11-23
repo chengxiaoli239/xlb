@@ -16,6 +16,8 @@ import android.os.ParcelFileDescriptor;
 
 import com.xlb.vpn.BuildConfig;
 import com.xlb.vpn.R;
+import com.xlb.vpn.data.DeviceProofCertificate;
+import com.xlb.vpn.data.MemberTunnelGrant;
 import com.xlb.vpn.presentation.MainActivity;
 
 import java.io.File;
@@ -32,6 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class XlbVpnService extends VpnService {
     public static final String ACTION_START = "com.xlb.vpn.START_TUNNEL";
+    public static final String ACTION_START_MEMBER = "com.xlb.vpn.START_MEMBER_TUNNEL";
     public static final String ACTION_STOP = "com.xlb.vpn.STOP_TUNNEL";
     public static final String ACTION_STATE = "com.xlb.vpn.TUNNEL_STATE";
     public static final String EXTRA_PROFILE = "profile";
@@ -56,7 +59,9 @@ public final class XlbVpnService extends VpnService {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService tunnelWorker = Executors.newSingleThreadExecutor();
     private final AtomicInteger connectionAttempt = new AtomicInteger();
+    private final Object memberSessionLock = new Object();
     private ParcelFileDescriptor tun;
+    private MemberTunnelSession memberSession;
 
     public static String currentState() {
         return currentState;
@@ -74,7 +79,24 @@ public final class XlbVpnService extends VpnService {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
             connectionAttempt.incrementAndGet();
+            MemberTunnelGrantStore.clear();
+            requestMemberSessionStop();
             worker.execute(this::stopTunnel);
+            return START_NOT_STICKY;
+        }
+        if (ACTION_START_MEMBER.equals(intent.getAction())) {
+            currentRouteName = "";
+            MemberTunnelGrant grant = MemberTunnelGrantStore.consume();
+            if (!MemberTunnelAdmissionPolicy.mayStartMemberTunnel() || grant == null) {
+                MemberTunnelGrantStore.clear();
+                rejectStart("会员安全线路尚未接入");
+                return START_NOT_STICKY;
+            }
+            createChannel();
+            startForeground(NOTIFICATION_ID, notification("正在连接"));
+            publish(STATE_CONNECTING, null);
+            int attempt = connectionAttempt.incrementAndGet();
+            worker.execute(() -> startMemberTunnel(grant, attempt));
             return START_NOT_STICKY;
         }
         if (!ACTION_START.equals(intent.getAction())) {
@@ -112,6 +134,7 @@ public final class XlbVpnService extends VpnService {
     @Override
     public void onRevoke() {
         connectionAttempt.incrementAndGet();
+        requestMemberSessionStop();
         worker.execute(this::stopTunnel);
         super.onRevoke();
     }
@@ -119,13 +142,23 @@ public final class XlbVpnService extends VpnService {
     @Override
     public void onDestroy() {
         connectionAttempt.incrementAndGet();
-        worker.execute(this::closeCore);
+        MemberTunnelGrantStore.clear();
+        requestMemberSessionStop();
+        worker.execute(() -> {
+            closeMemberSession();
+            closeCore();
+        });
         worker.shutdown();
         tunnelWorker.shutdownNow();
         super.onDestroy();
     }
 
     private void startTunnel(String profile, String requestedRouteName, int attempt) {
+        if (!closeMemberSession()) {
+            publish(STATE_ERROR, "会员线路资源尚未清理，请重试");
+            stopSelf();
+            return;
+        }
         Future<?> operation = tunnelWorker.submit(() -> startTunnelInternal(profile, requestedRouteName));
         try {
             operation.get(20, TimeUnit.SECONDS);
@@ -158,6 +191,118 @@ public final class XlbVpnService extends VpnService {
         }
     }
 
+    private void startMemberTunnel(MemberTunnelGrant grant, int attempt) {
+        if (connectionAttempt.get() != attempt) return;
+        if (!closeMemberSession()) {
+            publish(STATE_ERROR, "会员线路资源尚未清理，请重试");
+            stopSelf();
+            return;
+        }
+        MemberTunnelSession session = new MemberTunnelSession(memberTunnelRuntime(grant, attempt));
+        synchronized (memberSessionLock) {
+            if (connectionAttempt.get() != attempt) return;
+            memberSession = session;
+        }
+        try {
+            currentRouteName = MihomoCore.firstRouteName(grant.profile());
+        } catch (RuntimeException | UnsatisfiedLinkError exception) {
+            MemberTunnelGrantStore.clear();
+            rejectStart("会员线路配置不可用");
+            return;
+        }
+        if (connectionAttempt.get() != attempt) {
+            requestMemberSessionStop();
+            closeMemberSession();
+            return;
+        }
+        Future<?> operation = tunnelWorker.submit(() -> {
+            try {
+                session.start(grant);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        });
+        try {
+            operation.get(20, TimeUnit.SECONDS);
+            if (connectionAttempt.get() == attempt) {
+                publish(STATE_CONNECTED, null);
+                startForeground(NOTIFICATION_ID, notification("已连接"));
+            } else {
+                closeMemberSession();
+            }
+        } catch (TimeoutException exception) {
+            operation.cancel(true);
+            session.requestStop();
+            if (connectionAttempt.compareAndSet(attempt, attempt + 1)) {
+                publish(STATE_ERROR, "VPN 初始化超时，请检查线路或网络");
+                stopSelf();
+            }
+        } catch (ExecutionException | InterruptedException exception) {
+            if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
+            closeMemberSession();
+            if (connectionAttempt.compareAndSet(attempt, attempt + 1)) {
+                Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+                publish(STATE_ERROR, safeMessage(cause));
+                stopSelf();
+            }
+        }
+    }
+
+    private MemberTunnelSession.Runtime memberTunnelRuntime(MemberTunnelGrant grant, int attempt) {
+        return new MemberTunnelSession.Runtime() {
+            private DeviceProofCertificate certificate;
+            private DeviceProofCertificate.BridgeCredentials credentials;
+
+            @Override
+            public MemberTunnelSession.ProofHandle createDeviceCertificate(MemberTunnelGrant authorizedGrant)
+                    throws Exception {
+                initializeCore();
+                certificate = DeviceProofCertificate.create(authorizedGrant.deviceProof());
+                return certificate::close;
+            }
+
+            @Override
+            public AutoCloseable startBridge(MemberTunnelSession.ProofHandle ignored,
+                    MemberTunnelGrant authorizedGrant) throws Exception {
+                if (certificate == null) throw new IllegalStateException("device proof certificate is unavailable");
+                credentials = certificate.startProofBridge(
+                        authorizedGrant.bridgeEndpoint(), authorizedGrant.trustedServerCaPem());
+                return credentials::clear;
+            }
+
+            @Override
+            public void loadMemberProfile(MemberTunnelGrant authorizedGrant, AutoCloseable ignored) {
+                if (credentials == null) throw new IllegalStateException("proof bridge credentials are unavailable");
+                MihomoCore.loadMemberProfile(authorizedGrant.profile(),
+                        credentials.usernameForProfile(), credentials.passwordForProfile());
+            }
+
+            @Override
+            public void establishTun() throws Exception {
+                XlbVpnService.this.establishTun();
+            }
+
+            @Override
+            public void verifyTunnel() throws Exception {
+                if (!TunnelVerifier.verify(XlbVpnService.this::probeVpnRoute,
+                        () -> connectionAttempt.get() != attempt, Thread::sleep, 5)) {
+                    throw new IOException("线路连接或网络验证失败");
+                }
+            }
+
+            @Override
+            public void stopTunAndCore() {
+                closeCore();
+            }
+
+            @Override
+            public void stopBridge() {
+                if (certificate != null) certificate.stopProofBridge();
+            }
+        };
+    }
+
+
     private boolean probeVpnRoute() throws IOException {
         ConnectivityManager manager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         Network network = manager == null ? null : manager.getActiveNetwork();
@@ -185,34 +330,42 @@ public final class XlbVpnService extends VpnService {
     private void startTunnelInternal(String profile, String requestedRouteName) {
         try {
             closeCore();
-            File home = new File(getFilesDir(), "mihomo");
-            if (!home.exists() && !home.mkdirs()) {
-                throw new IOException("无法创建内核工作目录");
-            }
-            MihomoCore.initialize(home, this::protect);
+            initializeCore();
             MihomoCore.load(profile);
             currentRouteName = requestedRouteName == null ? "" : requestedRouteName;
             publish(STATE_CONNECTING, null);
-            if (VpnService.prepare(this) != null) {
-                throw new IllegalStateException("系统 VPN 授权已失效");
-            }
-            tun = new Builder()
-                    .setSession("迅连宝")
-                    .setMtu(9000)
-                    .addAddress("172.19.0.1", 30)
-                    .addAddress("fdfe:dcba:9876::1", 126)
-                    .addRoute("0.0.0.0", 0)
-                    .addRoute("::", 0)
-                    .addDnsServer("172.19.0.2")
-                    .addDnsServer("fdfe:dcba:9876::2")
-                    .establish();
-            if (tun == null) {
-                throw new IllegalStateException("系统未能建立 VPN 通道");
-            }
-            MihomoCore.startTun(tun);
+            establishTun();
         } catch (Exception | UnsatisfiedLinkError exception) {
             throw new IllegalStateException(safeMessage(exception), exception);
         }
+    }
+
+    private void initializeCore() throws IOException {
+        File home = new File(getFilesDir(), "mihomo");
+        if (!home.exists() && !home.mkdirs()) {
+            throw new IOException("无法创建内核工作目录");
+        }
+        MihomoCore.initialize(home, this::protect);
+    }
+
+    private void establishTun() {
+        if (VpnService.prepare(this) != null) {
+            throw new IllegalStateException("系统 VPN 授权已失效");
+        }
+        tun = new Builder()
+                .setSession("迅连宝")
+                .setMtu(9000)
+                .addAddress("172.19.0.1", 30)
+                .addAddress("fdfe:dcba:9876::1", 126)
+                .addRoute("0.0.0.0", 0)
+                .addRoute("::", 0)
+                .addDnsServer("172.19.0.2")
+                .addDnsServer("fdfe:dcba:9876::2")
+                .establish();
+        if (tun == null) {
+            throw new IllegalStateException("系统未能建立 VPN 通道");
+        }
+        MihomoCore.startTun(tun);
     }
 
     static String safeMessage(Throwable exception) {
@@ -253,10 +406,41 @@ public final class XlbVpnService extends VpnService {
     }
 
     private void stopTunnel() {
+        if (!closeMemberSession()) {
+            closeCore();
+            currentRouteName = "";
+            publish(STATE_ERROR, "VPN 资源清理尚未完成，请重试");
+            stopSelf();
+            return;
+        }
         closeCore();
         currentRouteName = "";
         publish(STATE_DISCONNECTED, null);
         stopSelf();
+    }
+
+    private boolean closeMemberSession() {
+        MemberTunnelSession active;
+        synchronized (memberSessionLock) {
+            active = memberSession;
+        }
+        if (active == null) return true;
+        try {
+            active.close();
+            synchronized (memberSessionLock) {
+                if (memberSession == active) memberSession = null;
+            }
+            return true;
+        } catch (Exception ignored) {
+            // Keep the session reference so a later stop can retry any failed resource cleanup.
+            return false;
+        }
+    }
+
+    private void requestMemberSessionStop() {
+        synchronized (memberSessionLock) {
+            if (memberSession != null) memberSession.requestStop();
+        }
     }
 
     private void closeCore() {
@@ -284,9 +468,19 @@ public final class XlbVpnService extends VpnService {
 
     private void rejectStart(String message) {
         connectionAttempt.incrementAndGet();
+        MemberTunnelGrantStore.clear();
+        requestMemberSessionStop();
         createChannel();
         startForeground(NOTIFICATION_ID, notification("连接不可用"));
         worker.execute(() -> {
+            if (!closeMemberSession()) {
+                closeCore();
+                currentRouteName = "";
+                publish(STATE_ERROR, "VPN 资源清理尚未完成，请重试");
+                stopForeground(STOP_FOREGROUND_REMOVE);
+                stopSelf();
+                return;
+            }
             closeCore();
             currentRouteName = "";
             publish(STATE_ERROR, message);

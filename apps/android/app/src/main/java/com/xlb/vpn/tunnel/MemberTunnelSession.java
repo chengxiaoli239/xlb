@@ -26,6 +26,7 @@ final class MemberTunnelSession implements AutoCloseable {
     private boolean tunStopped;
     private boolean bridgeStopped;
     private boolean closed;
+    private volatile boolean stopRequested;
 
     MemberTunnelSession(Runtime runtime) {
         if (runtime == null) throw new IllegalArgumentException("member tunnel runtime is required");
@@ -34,6 +35,7 @@ final class MemberTunnelSession implements AutoCloseable {
 
     synchronized void start(MemberTunnelGrant grant) throws Exception {
         if (closed) throw new IllegalStateException("member tunnel session is closed");
+        if (stopRequested) throw new IllegalStateException("member tunnel session stop was requested");
         if (tunStopped || bridgeStopped) throw new IllegalStateException("member tunnel session cleanup is incomplete");
         if (started || certificate != null || credentials != null) {
             throw new IllegalStateException("member tunnel session is already active");
@@ -43,11 +45,16 @@ final class MemberTunnelSession implements AutoCloseable {
         try {
             certificate = runtime.createDeviceCertificate(grant);
             if (certificate == null) throw new IllegalStateException("device proof certificate is unavailable");
+            checkStopRequested();
             credentials = runtime.startBridge(certificate, grant);
             if (credentials == null) throw new IllegalStateException("proof bridge credentials are unavailable");
+            checkStopRequested();
             runtime.loadMemberProfile(grant, credentials);
+            checkStopRequested();
             runtime.establishTun();
+            checkStopRequested();
             runtime.verifyTunnel();
+            checkStopRequested();
             started = true;
         } catch (Exception exception) {
             stopAfterFailure(exception);
@@ -60,6 +67,10 @@ final class MemberTunnelSession implements AutoCloseable {
 
     synchronized boolean isStarted() {
         return started;
+    }
+
+    void requestStop() {
+        stopRequested = true;
     }
 
     @Override
@@ -111,5 +122,9 @@ final class MemberTunnelSession implements AutoCloseable {
         } catch (Exception cleanupFailure) {
             original.addSuppressed(cleanupFailure);
         }
+    }
+
+    private void checkStopRequested() {
+        if (stopRequested) throw new IllegalStateException("member tunnel session stop was requested");
     }
 }

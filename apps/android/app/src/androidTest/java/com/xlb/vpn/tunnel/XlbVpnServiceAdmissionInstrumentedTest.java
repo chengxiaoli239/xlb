@@ -2,6 +2,7 @@ package com.xlb.vpn.tunnel;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.BroadcastReceiver;
@@ -24,6 +25,38 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @RunWith(AndroidJUnit4.class)
 public final class XlbVpnServiceAdmissionInstrumentedTest {
+    @Test
+    public void memberStartActionIsRejectedWhenProductionBridgeGateIsClosed() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        CountDownLatch rejected = new CountDownLatch(1);
+        AtomicReference<String> message = new AtomicReference<>();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context receiverContext, Intent intent) {
+                if (XlbVpnService.STATE_ERROR.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                    message.set(intent.getStringExtra(XlbVpnService.EXTRA_MESSAGE));
+                    rejected.countDown();
+                }
+            }
+        };
+        registerReceiver(context, receiver, new IntentFilter(XlbVpnService.ACTION_STATE));
+        Intent start = new Intent(context, XlbVpnService.class).setAction(XlbVpnService.ACTION_START_MEMBER);
+
+        try {
+            ComponentName started = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    ? context.startForegroundService(start)
+                    : context.startService(start);
+            assertNotNull("VPN service did not start", started);
+            assertTrue("member service action was not rejected",
+                    rejected.await(5, TimeUnit.SECONDS));
+            assertEquals("会员安全线路尚未接入", message.get());
+            assertNull(MemberTunnelGrantStore.consume());
+        } finally {
+            context.unregisterReceiver(receiver);
+            context.stopService(start);
+        }
+    }
+
     @Test
     public void memberProfileIsRejectedBeforeTunnelStartupWhenBridgeIsDisabled() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();

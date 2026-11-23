@@ -7,6 +7,11 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -93,6 +98,52 @@ public final class MemberTunnelSessionTest {
         }
     }
 
+    @Test
+    public void stopRequestDoesNotWaitForAnUnresponsiveStartupStage() throws Exception {
+        BlockingRuntime runtime = new BlockingRuntime();
+        MemberTunnelSession session = new MemberTunnelSession(runtime);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> startup = executor.submit(() -> {
+                try {
+                    session.start(grant());
+                    fail("startup should observe the stop request");
+                } catch (Exception expected) {
+                    // The pending stop aborts startup after the blocked operation returns.
+                }
+            });
+            assertTrue(runtime.verificationStarted.await(2, TimeUnit.SECONDS));
+
+            Future<?> stopRequest = executor.submit(session::requestStop);
+            stopRequest.get(250, TimeUnit.MILLISECONDS);
+            runtime.releaseVerification.countDown();
+            startup.get(2, TimeUnit.SECONDS);
+            assertFalse(session.isStarted());
+            assertTrue(runtime.events.contains("stop-tun"));
+            assertTrue(runtime.events.contains("stop-bridge"));
+        } finally {
+            runtime.releaseVerification.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void stopRequestedBeforeStartPreventsResourceCreation() throws Exception {
+        FakeRuntime runtime = new FakeRuntime(null, false);
+        MemberTunnelSession session = new MemberTunnelSession(runtime);
+        session.requestStop();
+
+        try {
+            session.start(grant());
+            fail("startup should reject an earlier stop request");
+        } catch (IllegalStateException expected) {
+            assertEquals("member tunnel session stop was requested", expected.getMessage());
+        }
+
+        assertTrue(runtime.events.isEmpty());
+        assertFalse(session.isStarted());
+    }
+
     private static MemberTunnelGrant grant() {
         return MemberTunnelGrantTestFixture.create();
     }
@@ -151,6 +202,52 @@ public final class MemberTunnelSessionTest {
         private void step(String name) {
             events.add(name);
             if (name.equals(failureStage)) throw new IllegalStateException(name);
+        }
+    }
+
+    private static final class BlockingRuntime implements MemberTunnelSession.Runtime {
+        private final CountDownLatch verificationStarted = new CountDownLatch(1);
+        private final CountDownLatch releaseVerification = new CountDownLatch(1);
+        private final List<String> events = new ArrayList<>();
+
+        @Override
+        public MemberTunnelSession.ProofHandle createDeviceCertificate(MemberTunnelGrant grant) {
+            return () -> events.add("close-certificate");
+        }
+
+        @Override
+        public AutoCloseable startBridge(MemberTunnelSession.ProofHandle certificate, MemberTunnelGrant grant) {
+            return () -> events.add("clear-credentials");
+        }
+
+        @Override
+        public void loadMemberProfile(MemberTunnelGrant grant, AutoCloseable credentials) {}
+
+        @Override
+        public void establishTun() {}
+
+        @Override
+        public void verifyTunnel() {
+            verificationStarted.countDown();
+            boolean released = false;
+            while (!released) {
+                try {
+                    releaseVerification.await();
+                    released = true;
+                } catch (InterruptedException ignored) {
+                    // Simulate a native/network operation that does not promptly honor cancellation.
+                }
+            }
+        }
+
+        @Override
+        public void stopTunAndCore() {
+            events.add("stop-tun");
+        }
+
+        @Override
+        public void stopBridge() {
+            events.add("stop-bridge");
         }
     }
 }
