@@ -159,6 +159,8 @@ public final class DeviceProofCertificateInstrumentedTest {
         requireDisposableEmulator();
         String installationId = UUID.randomUUID().toString();
         String alias = KEY_ALIAS_PREFIX + installationId;
+        String copiedInstallationId = UUID.randomUUID().toString();
+        String copiedAlias = KEY_ALIAS_PREFIX + copiedInstallationId;
         String publicKey = new DeviceKeyStore().publicKey(installationId);
         String stateDirectory = new File(
                 InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(),
@@ -213,11 +215,37 @@ public final class DeviceProofCertificateInstrumentedTest {
                 assertArrayEquals(payload, response);
             }
             assertTrue(certificate.proofBridgeRunning());
+
+            certificate.close();
+            certificate = null;
+
+            DeviceKeyStore copiedDeviceKeyStore = new DeviceKeyStore();
+            String copiedPublicKey = copiedDeviceKeyStore.publicKey(copiedInstallationId);
+            MemberDeviceProof copiedProof = authorizedProof(copiedInstallationId, copiedPublicKey,
+                    copiedDeviceKeyStore,
+                    digest -> copiedDeviceKeyStore.signDigestBytes(copiedInstallationId, digest));
+            certificate = DeviceProofCertificate.create(copiedProof);
+            credentials = certificate.startProofBridge(fixture.getString("endpoint"), fixture.getString("ca_pem"));
+            try (Socket copiedConnection = new Socket("127.0.0.1", 17890)) {
+                copiedConnection.setSoTimeout(5000);
+                negotiateSocksUserPassword(copiedConnection, credentials);
+                byte[] host = "bridge.test".getBytes(StandardCharsets.US_ASCII);
+                copiedConnection.getOutputStream().write(new byte[]{5, 1, 0, 3, (byte) host.length});
+                copiedConnection.getOutputStream().write(host);
+                copiedConnection.getOutputStream().write(new byte[]{1, (byte) 187});
+                byte[] copiedReply = new byte[10];
+                readFully(copiedConnection, copiedReply);
+                assertEquals("Node Agent accepted a copied peer identity", 5, copiedReply[1]);
+                JSONObject rejection = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus());
+                assertEquals(403, rejection.getInt("status"));
+                assertTrue(rejection.getString("body").contains("unauthorized"));
+            }
         } finally {
             if (certificate != null) certificate.close();
             DeviceProofJni.stopNodeAgentFixture();
             keyStore.load(null);
             if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias);
+            if (keyStore.containsAlias(copiedAlias)) keyStore.deleteEntry(copiedAlias);
             deleteRecursively(stateDirectoryFile);
         }
     }
