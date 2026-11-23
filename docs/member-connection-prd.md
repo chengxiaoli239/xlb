@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M10 健康探测 CAS 冲突重算回归（2026-11-24，本机内存状态桩）**：模拟另一个探测在 CAS 写入失败期间先递增失败 streak，验证当前探测会读取最新状态并重算，第三次连续失败正确打开熔断且不丢计数。定向 `NodeHealthProbeCoordinatorTest` 7/7、27 assertions；Laravel 全套 249 项中 248 通过、1 项既有跳过、2,155 assertions；Pint 和 `git diff --check` 通过。仅覆盖状态存储并发契约，不执行真实节点探测、不写真实健康记录、不证明节点稳定。下一步完善离线发布与回滚契约，不因真实节点材料缺失停掉可离线工作。
+
 - **M11 Android 签名候选发布边界回归（2026-11-24，本机离线验收）**：扩展 Actions SHA pin 检查覆盖手动 Android signed release-candidate workflow，并验证任务限 main、使用受保护环境和只读仓库权限、签名密钥从环境 secrets 注入、attestation 不推 registry/不建 storage record、候选仅保留 14 天供审核，且任务步骤不包含商店/Release 发布。ops 全套 53/53、语法检查与 `git diff --check` 通过。该测试不配置 GitHub environment/secrets、不生成签名制品、不代表受控试点可发布；主线 CI 尚待本次提交触发后核验。下一步继续实现 staging/回滚与发布可观测性离线契约。
 
 - **M9 Android 登录表单去除本地种子邮箱预填（2026-11-24，本机离线验收）**：Android 登录邮箱初始为空，与 Web 会员中心及 `ClientPreview` 一致；本地测试会员仍由 PHP seeder/env 提供，应用不携带或显示本地账号密码。Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK 构建通过。修改仅影响登录输入默认值，不变更会话、账号或设备绑定状态。

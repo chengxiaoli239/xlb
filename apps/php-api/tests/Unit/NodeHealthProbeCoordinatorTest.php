@@ -8,6 +8,7 @@ use App\Services\NodeHealthProbeCoordinator;
 use App\Services\NodeHealthProbeDriver;
 use App\Services\NodeHealthProbeResult;
 use App\Services\NodeHealthState;
+use App\Services\NodeHealthStateStore;
 use DateTimeImmutable;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -142,6 +143,71 @@ class NodeHealthProbeCoordinatorTest extends TestCase
         $this->assertTrue($assessment->transition->ignoredAsStale);
         $this->assertSame($state, $assessment->transition->state);
         $this->assertSame($state, $stateStore->get('node-1'));
+    }
+
+    public function test_compare_and_swap_retry_recomputes_against_the_latest_failure_streak(): void
+    {
+        $start = new DateTimeImmutable('2026-11-24T10:00:00Z');
+        $concurrentState = new NodeHealthState('healthy', 2, 0, $start->modify('+15 seconds'));
+        $stateStore = new class($start, $concurrentState) implements NodeHealthStateStore
+        {
+            public int $compareAndSwapCalls = 0;
+
+            private NodeHealthState $state;
+
+            public function __construct(
+                private readonly DateTimeImmutable $start,
+                private readonly NodeHealthState $concurrentState,
+            ) {
+                $this->state = new NodeHealthState('healthy', 1, 0, $start);
+            }
+
+            public function get(string $nodeId): ?NodeHealthState
+            {
+                return $this->state;
+            }
+
+            public function put(string $nodeId, NodeHealthState $state): void
+            {
+                $this->state = $state;
+            }
+
+            public function compareAndSwap(string $nodeId, ?NodeHealthState $expected, NodeHealthState $next): bool
+            {
+                $this->compareAndSwapCalls++;
+                if ($this->compareAndSwapCalls === 1) {
+                    $this->state = $this->concurrentState;
+
+                    return false;
+                }
+
+                if ($expected !== $this->state) {
+                    return false;
+                }
+
+                $this->state = $next;
+
+                return true;
+            }
+        };
+        $driver = new class($start->modify('+30 seconds')) implements NodeHealthProbeDriver
+        {
+            public function __construct(private readonly DateTimeImmutable $observedAt) {}
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                return new NodeHealthProbeResult(false, $this->observedAt, failureCode: 'timeout');
+            }
+        };
+
+        $assessment = (new NodeHealthProbeCoordinator($driver, new NodeHealthCircuitBreaker, $stateStore))
+            ->probe('node-1');
+
+        $this->assertSame(2, $stateStore->compareAndSwapCalls);
+        $this->assertTrue($assessment->transition->openedCircuit);
+        $this->assertSame(3, $assessment->transition->state->failureStreak);
+        $this->assertSame('unhealthy', $assessment->transition->state->status);
+        $this->assertSame($assessment->transition->state, $stateStore->get('node-1'));
     }
 
     public function test_coordinator_requires_a_node_id_before_calling_the_driver(): void
