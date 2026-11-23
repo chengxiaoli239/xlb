@@ -3,6 +3,9 @@
 #include "callbacks.h"
 #ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
 extern int XlbCompleteAndroidSignerHandshake(const char *, int);
+extern char *XlbStartAndroidNodeAgentFixture(char *, int);
+extern void XlbStopAndroidNodeAgentFixture(void);
+extern char *XlbAndroidNodeAgentFixtureStatus(void);
 #endif
 extern void XlbInit(char *, int (*)(int));
 extern char *XlbLoad(char *, int);
@@ -150,6 +153,49 @@ JNIEXPORT jboolean JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeCompleteTl
         return JNI_FALSE;
     }
     return valid == 1 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeStartNodeAgentFixture(
+    JNIEnv *env, jclass type, jstring request_json) {
+    (void)type;
+#ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
+    if (request_json == NULL) return (*env)->NewStringUTF(env, "{\"error\":\"fixture request is invalid\"}");
+    const char *request_value = (*env)->GetStringUTFChars(env, request_json, NULL);
+    if (request_value == NULL) return NULL;
+    char *response_value = XlbStartAndroidNodeAgentFixture(
+            (char *)request_value, (*env)->GetStringUTFLength(env, request_json));
+    (*env)->ReleaseStringUTFChars(env, request_json, request_value);
+    if (response_value == NULL) return (*env)->NewStringUTF(env, "{\"error\":\"fixture could not start\"}");
+    jstring response = (*env)->NewStringUTF(env, response_value);
+    XlbFreeString(response_value);
+    return response;
+#else
+    (void)request_json;
+    return (*env)->NewStringUTF(env, "{\"error\":\"fixture is unavailable\"}");
+#endif
+}
+
+JNIEXPORT void JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeStopNodeAgentFixture(
+    JNIEnv *env, jclass type) {
+    (void)env;
+    (void)type;
+#ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
+    XlbStopAndroidNodeAgentFixture();
+#endif
+}
+
+JNIEXPORT jstring JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeNodeAgentFixtureStatus(
+    JNIEnv *env, jclass type) {
+    (void)type;
+#ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
+    char *status = XlbAndroidNodeAgentFixtureStatus();
+    if (status == NULL) return (*env)->NewStringUTF(env, "{\"status\":0,\"body\":\"\"}");
+    jstring response = (*env)->NewStringUTF(env, status);
+    XlbFreeString(status);
+    return response;
+#else
+    return (*env)->NewStringUTF(env, "{\"status\":0,\"body\":\"\"}");
+#endif
 }
 #endif
 

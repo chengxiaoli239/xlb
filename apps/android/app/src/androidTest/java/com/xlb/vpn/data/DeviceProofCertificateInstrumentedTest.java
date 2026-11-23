@@ -1,5 +1,6 @@
 package com.xlb.vpn.data;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -17,20 +18,21 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyStore;
+import java.security.MessageDigest;
 import java.security.PublicKey;
-import java.util.Enumeration;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Enumeration;
 import java.util.UUID;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 
 @RunWith(AndroidJUnit4.class)
 public final class DeviceProofCertificateInstrumentedTest {
@@ -152,6 +154,74 @@ public final class DeviceProofCertificateInstrumentedTest {
         }
     }
 
+    @Test
+    public void keystoreSignerConnectsThroughNativeBridgeToAuthorizedIsolatedNodePeer() throws Exception {
+        requireDisposableEmulator();
+        String installationId = UUID.randomUUID().toString();
+        String alias = KEY_ALIAS_PREFIX + installationId;
+        String publicKey = new DeviceKeyStore().publicKey(installationId);
+        String stateDirectory = new File(
+                InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(),
+                "isolated-node-agent-" + UUID.randomUUID()).getAbsolutePath();
+        JSONObject request = new JSONObject()
+                .put("node_id", NODE_ID)
+                .put("peer_id", PEER_ID)
+                .put("entitlement_id", "81000000-0000-4000-8000-000000000004")
+                .put("request_id", "81000000-0000-4000-8000-000000000005")
+                .put("generation", 3)
+                .put("device_id", DEVICE_ID)
+                .put("device_name", "Disposable AVD proof bridge")
+                .put("device_public_key", publicKey)
+                .put("device_key_fingerprint", fingerprint(DeviceBindingProof.decode(publicKey)))
+                .put("device_binding_generation", 7)
+                .put("peer_generation", 3)
+                .put("device_generation", 7)
+                .put("expires_at", Instant.now().plus(1, ChronoUnit.HOURS).toString())
+                .put("credential", "isolated-test-credential")
+                .put("state_path", stateDirectory + "/peer-store.json");
+
+        KeyStore keyStore = KeyStore.getInstance(KEY_STORE);
+        DeviceProofCertificate certificate = null;
+        DeviceProofCertificate.BridgeCredentials credentials = null;
+        File stateDirectoryFile = new File(stateDirectory);
+        assertTrue(stateDirectoryFile.mkdirs());
+        try {
+            JSONObject fixture = new JSONObject(DeviceProofJni.startNodeAgentFixture(request.toString()));
+            assertFalse("isolated Node Agent fixture did not start", fixture.has("error"));
+            MemberDeviceProof proof = authorizedProof(installationId, publicKey, new DeviceKeyStore(),
+                    digest -> new DeviceKeyStore().signDigestBytes(installationId, digest));
+            certificate = DeviceProofCertificate.create(proof);
+            credentials = certificate.startProofBridge(fixture.getString("endpoint"), fixture.getString("ca_pem"));
+            assertTrue(certificate.proofBridgeRunning());
+
+            try (Socket connection = new Socket("127.0.0.1", 17890)) {
+                connection.setSoTimeout(5000);
+                negotiateSocksUserPassword(connection, credentials);
+                byte[] host = "bridge.test".getBytes(StandardCharsets.US_ASCII);
+                connection.getOutputStream().write(new byte[]{5, 1, 0, 3, (byte) host.length});
+                connection.getOutputStream().write(host);
+                connection.getOutputStream().write(new byte[]{1, (byte) 187});
+                byte[] connectReply = new byte[10];
+                readFully(connection, connectReply);
+                assertEquals("Node Agent did not authorize this installation key: "
+                        + DeviceProofJni.nodeAgentFixtureStatus(), 0, connectReply[1]);
+
+                byte[] payload = "Android Keystore proof bridge integration".getBytes(StandardCharsets.UTF_8);
+                connection.getOutputStream().write(payload);
+                byte[] response = new byte[payload.length];
+                readFully(connection, response);
+                assertArrayEquals(payload, response);
+            }
+            assertTrue(certificate.proofBridgeRunning());
+        } finally {
+            if (certificate != null) certificate.close();
+            DeviceProofJni.stopNodeAgentFixture();
+            keyStore.load(null);
+            if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias);
+            deleteRecursively(stateDirectoryFile);
+        }
+    }
+
     private static MemberDeviceProof authorizedProof(String installationId, String publicKey,
             DeviceKeyStore keyStore, DigestSigner digestSigner) {
         MemberDeviceProof.Signer signer = new MemberDeviceProof.Signer() {
@@ -201,6 +271,49 @@ public final class DeviceProofCertificateInstrumentedTest {
             return "-----BEGIN CERTIFICATE-----\n" + encoded + "\n-----END CERTIFICATE-----\n";
         }
         throw new GeneralSecurityException("Android system trust store has no currently valid CA certificate");
+    }
+
+    private static String fingerprint(byte[] publicKey) throws GeneralSecurityException {
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(publicKey);
+        StringBuilder encoded = new StringBuilder(digest.length * 2);
+        for (byte value : digest) {
+            encoded.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+        }
+        return encoded.toString();
+    }
+
+    private static void negotiateSocksUserPassword(
+            Socket socket, DeviceProofCertificate.BridgeCredentials credentials) throws Exception {
+        socket.getOutputStream().write(new byte[]{5, 1, 2});
+        assertEquals(5, socket.getInputStream().read());
+        assertEquals(2, socket.getInputStream().read());
+        byte[] username = credentials.usernameForProfile().getBytes(StandardCharsets.UTF_8);
+        byte[] password = credentials.passwordForProfile().getBytes(StandardCharsets.UTF_8);
+        socket.getOutputStream().write(new byte[]{1, (byte) username.length});
+        socket.getOutputStream().write(username);
+        socket.getOutputStream().write(new byte[]{(byte) password.length});
+        socket.getOutputStream().write(password);
+        assertEquals(1, socket.getInputStream().read());
+        assertEquals(0, socket.getInputStream().read());
+    }
+
+    private static void readFully(Socket socket, byte[] buffer) throws Exception {
+        int offset = 0;
+        while (offset < buffer.length) {
+            int count = socket.getInputStream().read(buffer, offset, buffer.length - offset);
+            if (count < 0) throw new java.io.IOException("unexpected end of proof bridge response");
+            offset += count;
+        }
+    }
+
+    private static void deleteRecursively(File file) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) deleteRecursively(child);
+            }
+        }
+        if (file.exists()) file.delete();
     }
 
     private static void writeSocksUserPassword(Socket socket, DeviceProofCertificate.BridgeCredentials credentials)
