@@ -1,5 +1,7 @@
 # M5/M6 隔离节点验收计划
 
+- **当前只读复核（2026-11-23，`xlb-ops` 已恢复）**：`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回账号 `289069331089` root 身份。us-west-2 活动 XLB CloudFormation 栈只有既有 `xlb-node-manager-access-usw2`，状态 `CREATE_COMPLETE`；精确查询 `xlb-lab-us-20261121-m5m6` 和 `xlb-lab-access-usw2` 均为不存在。`ManagedBy=xlb-node-lab` 标签下无 EC2/EBS/ENI/安全组/EIP/Scheduler；SSM managed instances 为空；`XlbLab*` IAM role/instance profile 为空；历史安全组 `sg-0db2cef785cbeeba3` 不存在。本轮只读，没有 apply、创建、删除、延长 TTL 或其他云写入。11-21 合成 peer live harness 已通过，peer-store/data-plane 代码之后没有协议变更；真实 M6 member profile、节点 endpoint/身份及可注入 mTLS 材料仍未提供，因此不为重复合成验收重建资源。只有获批的新协议复测或真实会员节点材料到位后，才按下文范围重新生成和复核 plan；不扩大公网入站或接入会员流量。
+
 - **当前只读复核（2026-11-22，用户重新 `aws login` 后）**：经项目 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 验证获批账号会话有效。`us-west-2` 仅有既有 `xlb-node-manager-access-usw2` 处于 `CREATE_COMPLETE`；所有 `xlb-lab-*` CloudFormation 历史栈为 `DELETE_COMPLETE`。只读查询确认无 `ManagedBy=xlb-node-lab` EC2、EBS、ENI、安全组、公网地址或 Scheduler，无 SSM managed instance，无 `XlbLab*` IAM role/instance profile；历史安全组 `sg-0db2cef785cbeeba3` 不存在。默认 VPC `vpc-00ded9986e9e37539` 的 us-west-2a 默认子网 `subnet-01b72ddfdcc197d20` 可用且经 main route table/IGW 出网；当前 AL2023 x86_64 最新 SSM 参数解析为 `ami-09f6e62a9fe578f92`（Owner `137112412989`、`available`）。本轮没有执行 `--apply`：11-21 M5/M6 synthetic live harness 已通过，之后 peer-store/data-plane 文件无改动，重建节点只会重复已完成验收。若后续有新的获批协议变更或真实会员节点阶段，须先重新生成/复核 plan；此计划不授权扩大到公网入站或真实会员隧道。
 
 日期：2026-11-19
