@@ -15,6 +15,21 @@
 - **M6 隔离节点资源状态复核（2026-11-23，本轮只读未完成）**：通过固化 `ops/aws-cli` 的 `sts get-caller-identity --profile xlb-ops` 一度成功；随后 CloudFormation 栈、`ManagedBy=xlb-node-lab` 资源、Scheduler、SSM 五项只读盘点均返回 AWS `Your session has expired`。因此不能确认隔离节点窗口或当前资源状态；本轮没有 `--apply`、建删资源或费用。下一步需用户本人重新 `aws login`，再经 `ops/aws-cli` 重做只读盘点；只有资源状态确认、计划复核通过后，才进入已授权 M5/M6 隔离协议复测。真实会员隧道仍需真实 endpoint/CA/mTLS runtime 配置和节点回执，离线测试不替代。
 - **M8 Node Agent 文档状态对齐（2026-11-23）**：修正 Node Agent README 中“PHP 尚未持久化/返回 bridge descriptor”等已被本轮实现过时的描述，改为准确记录每节点配置与授权响应现状，同时明确可执行 Agent 仍拒绝 production mode、renderer 未接入，离线 mTLS fixture 不证明会员隧道或生产节点已就绪。
 
+### Android + 网站/API 受控试点全景（2026-11-23）
+
+| 模块 | 当前状态 | 证据与未完成项 | 可并行推进 / 下一关 |
+| --- | --- | --- | --- |
+| Android 会员连接 | 离线 grant→service 生命周期和授权字段校验已实现，准入 gate 仍关闭 | JVM / service instrumentation 使用隔离 AVD、mock 或 loopback；没有真实节点的 CA/endpoint 与线路证据，不能放行会员 TUN | 继续本机安全失败路径和 grant 测试；节点数据面通过验收后再做两台独立 P-256 真机复测 |
+| PHP 会员 API 与设备限制 | 本机 challenge 签名、peer provisioning、逐设备 grant、撤权状态与 descriptor 校验有测试 | Laravel 全套 245 项中 244 项通过、1 项既有跳过；配置与 profile 用本地 fixture，未证明生产节点回执、实际断流或正式数据库并发 | 继续不依赖云的状态机/回归；真实会员授权和撤权验收须等节点 mTLS runtime 与回执 |
+| Web 管理端 | 订单/会员/节点管理已有本地页面；节点详情可配置 per-node bridge origin 与加密 CA | Web 5 项测试和 TypeScript/Vite 构建通过；未向真实节点下发或核验配置，CA 接口不回显 | 可继续管理端输入校验与试点运营流程；任何真实 node config 需先完成资源盘点及授权操作计划 |
+| Node Agent / proof bridge | Go 隔离协议、设备证书、容量、peer 拒绝与撤权计量、renderer artifact 有离线/合成测试 | 可执行 Agent 只允许 `isolated-test`，runtime renderer 仍 unavailable；本地测试不等于真实节点长期运行或断流 | 可继续 runtime/协议离线测试；生产启用需要管理员提供真实 listener、反向代理、CA/证书和部署验收 |
+| 支付与权益 | provider-neutral 契约、签名沙箱渠道、事件账本、幂等发放/补偿、查单与差异对账已有本地实现 | 未连接真实商户沙箱，也没有真实扣款/退款；渠道签名/回调契约和具体续费政策未做实商户验收 | 可继续 fake provider 状态机、后台差异处理和测试；商户沙箱凭据到位后接配置注入与契约测试 |
+| 路由与稳定性 | 路线版本、健康数据模型/熔断与回滚基础已有代码和离线测试 | 尚无本轮真实隔离节点观测，不能宣称可用率、自动故障切换或抗封锁稳定 | 可并行做遥测/操作审计和故障模拟；生产阈值需隔离节点与目标网络测量 |
+| 其他客户端 | 首发决策不要求 iOS、Windows、macOS、扩展或多云放量 | 这些平台不构成当前 Android + 网站/API 受控试点完成证据 | 作为后续独立阶段排期，不阻塞当前首发范围 |
+| 签名发布、合规与运营 | 未达到正式上线放行 | 本地 Debug/Release build 不是签名发布；地区/用途、服务条款、隐私与日志政策、退款投诉、值班回滚和责任人放行仍需逐项验证 | 可离线准备发布/回滚清单；正式放行需要对应责任人提供签名制品、书面审查与试运行结论 |
+
+**当前顺序与外部依赖**：云端操作暂停在 xlb-ops session expired，用户本人重新 `aws login` 后先只读盘点，再 review 计划；不得直接创建或更新资源。节点责任人还需提供真实 DataPlane listener/反向代理路径、每节点 HTTPS origin/CA 与可部署 mTLS runtime。此后才能做隔离节点协议复测，再接两台真机验证登录、授权、线路、退款撤权及匹配节点回执。支付 fake channel、Web/Android 离线校验、发布清单整理可并行，不以真实商户资料或云会话为由暂停。当前上线规划仍为 2027-02 至 2027-05 的低置信区间，不承诺单日，也不代表已可发布。
+
 - **M8 Node Agent member bridge trust descriptor artifact（2026-11-23，本机离线验收）**：扩展 Go 生产形状 `ProfileArtifact`，使受信配置创建的 renderer 必须同时注入 node data-plane HTTPS origin 与有效 CA PEM；profile 请求从 `PeerStore` 受信 renderer 配置生成，Go 校验 HTTPS origin、CA constraints/keyCertSign/有效期、响应 descriptor 与可信请求完全相同，profile 内容仍只含 loopback SOCKS bridge。补充非法 origin、伪造 CA 与 artifact descriptor 篡改测试。Node Agent `go test -race ./...` 113 项、vet/build 通过；PHP→Go 本地 mTLS provisioning Feature 8 项/92 assertions 通过。此阶段仅实现 Node Agent artifact 数据契约，不启用 executable renderer；PHP 目前尚未校验/持久化/返回 descriptor，Android grant 无法由当前生产 API 创建。示例 endpoint 与 CA 仅测试临时材料，不对应真实节点；生产 gate 仍关闭。下一步在 PHP acknowledgement/persistence/authorization response 中校验 endpoint 与管理员信任边界、加密保存 CA 并在授权响应输出，缺少受信 node runtime 实际 endpoint/CA 时继续失败关闭。
 
 - **M8 Android member grant→VPN service 默认关闭接线（2026-11-23，本机及隔离 AVD 验收）**：新增 `ACTION_START_MEMBER` 和进程内单次 grant handoff，Intent 不携带 member profile、peer credential、CA 或证书；Android service 按 Keystore device certificate→proof bridge→authenticated Mihomo member profile→TUN→HTTPS network probe 启动，并将 stop/revoke/destroy/超时转为取消信号，在各阶段边界检查并清理。修复 stop-before-session-publish 竞态；清理未完成时显示错误状态，不广播“已断开”。会员准入仍绑定 `MEMBER_PROOF_BRIDGE_INTEGRATED=false`，service instrumentation 验证 gate 关闭时拒绝会员 action；两项 service admission + 原 Keystore/匿名恢复 instrumentation 共 13/13 通过，使用专用 `xlb-m9-recovery` AVD、临时 SQLite 和 loopback API，未连接实体手机/AWS/真实节点。完整 Android JVM tests、lint、Debug/Release native/APK build、AndroidTest 编译、Node Agent bridge race 4 项、core-native race 13 项、Node Agent vet/build 通过。AVD 实测发现 cgo 导出指令与 `XlbStartAndroidProofBridge` 声明间空行导致 native symbol 缺失，已修复并通过 instrumentation 及 `nm` 确认符号导出。残余故障边界是底层 JNI/native 调用若永久不返回，超时可报告错误但资源最终清理仍依赖该调用返回；本阶段未宣称清理或断流已在永久阻塞条件下得到保证。PHP 授权 API 尚无 endpoint/CA/profile artifact 字段，grant 目前不能由服务端生成，生产 gate 未打开，不证明会员隧道、节点可用、限设备或撤权断流。下一步补 API 侧受信 node artifact 契约和 test-only 双机/假节点集成验证。
