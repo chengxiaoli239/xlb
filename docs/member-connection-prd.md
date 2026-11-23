@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-24）
 
-- **M11 Composer vendor 下载短暂 5xx 有界重试（2026-11-24，本机 shell 验证）**：针对两次 hosted PHP 镜像构建都在 GitHub zipball 下载遇到 HTTP/2 504，在 `docker/Dockerfile.php` 的 vendor stage 增加最多三次尝试，仅对 HTTP 502/503/504 延迟重试；依赖解析、认证及其他错误仍立即失败，非零最终状态原样返回。用 mock Composer 验证两次 504 后第三次成功，以及非 HTTP 错误只尝试一次；shell syntax 与 diff check 通过。hosted 镜像 build 仍需由后续 CI 确认。
+- **M11 Composer vendor 下载短暂 5xx 有界重试（2026-11-24，hosted 验收通过）**：针对两次 hosted PHP 镜像构建都在 GitHub zipball 下载遇到 HTTP/2 504，在 `docker/Dockerfile.php` 的 vendor stage 增加最多三次尝试，仅对 HTTP 502/503/504 延迟重试；依赖解析、认证及其他错误仍立即失败，非零最终状态原样返回。mock Composer 验证两次 504 后第三次成功，以及非 HTTP 错误只尝试一次；shell syntax 检查通过。主线 CI `45265827064` 的 PHP/Web 镜像构建、Docker 上下文回归与全套 Android/API/Go/ops/SBOM jobs 均通过。
 
 - **M11 hosted Docker 忽略规则回归（2026-11-24，主线 CI）**：`ops/test_docker_context.py` 在 CI `45261821374` 通过，10 个临时凭据/运行数据路径均被 Docker `.dockerignore` 拒绝，PHP/Web 镜像 job实际执行到 Composer 依赖下载阶段。此次镜像 build 随后因 GitHub API 对 `symfony/polyfill-mbstring` zipball 返回 HTTP/2 504 而失败；这不是上下文回归失败，也不是 PHP 代码测试失败。Laravel/API/Web/扩展、Go、ops、Android build/signing config/SBOM jobs 均通过。原 run 无法由 GitHub rerun 接口重跑，已更新记录并由后续主线 CI 再次验证。
 
