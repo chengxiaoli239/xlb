@@ -75,6 +75,7 @@ public final class MainActivity extends Activity {
     private static final String MESSAGE_TAG = "operation_message";
     private static final String PREF_DARK_MODE = "dark_mode";
     private static final String PREF_AUTO_CONNECT_ON_START = "auto_connect_on_start";
+    private static final String STATE_PENDING_MEMBER_VPN_PERMISSION = "pending_member_vpn_permission";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -89,6 +90,7 @@ public final class MainActivity extends Activity {
     private String pendingProfile;
     private String pendingRouteName;
     private MemberTunnelGrant pendingMemberGrant;
+    private boolean pendingMemberVpnPermission;
     private String loadedProfile;
     private boolean testRoute;
     private boolean routeSyncing;
@@ -113,6 +115,8 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         darkMode = getPreferences(MODE_PRIVATE).getBoolean(PREF_DARK_MODE, false);
         autoConnectOnStart = getPreferences(MODE_PRIVATE).getBoolean(PREF_AUTO_CONNECT_ON_START, false);
+        pendingMemberVpnPermission = savedInstanceState != null
+                && savedInstanceState.getBoolean(STATE_PENDING_MEMBER_VPN_PERMISSION, false);
         applyTheme();
         api = new PlatformApi(BuildConfig.API_BASE_URL, new SecureSessionStore(this));
         if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -156,6 +160,12 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        outState.putBoolean(STATE_PENDING_MEMBER_VPN_PERMISSION, pendingMemberVpnPermission);
+        super.onSaveInstanceState(outState);
+    }
+
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == IntentIntegrator.REQUEST_CODE) {
@@ -176,15 +186,59 @@ public final class MainActivity extends Activity {
         String profile = pendingProfile;
         String selectedRoute = pendingRouteName;
         MemberTunnelGrant memberGrant = pendingMemberGrant;
+        boolean memberRequest = pendingMemberVpnPermission;
         pendingProfile = null;
         pendingRouteName = null;
         pendingMemberGrant = null;
-        if (resultCode != RESULT_OK || (profile == null && memberGrant == null)) {
+        pendingMemberVpnPermission = false;
+        if (resultCode != RESULT_OK || (profile == null && memberGrant == null && !memberRequest)) {
+            showMessage("VPN 授权未完成", true);
+            return;
+        }
+        if (MemberVpnPermissionRecoveryPolicy.shouldResynchronize(memberRequest,
+                resultCode == RESULT_OK, memberGrant != null)) {
+            refreshMemberGrantAfterPermission();
+            return;
+        }
+        if (resultCode != RESULT_OK) {
             showMessage("VPN 授权未完成", true);
             return;
         }
         if (memberGrant != null) startMemberVpn(memberGrant);
         else startVpn(profile, selectedRoute);
+    }
+
+    private void refreshMemberGrantAfterPermission() {
+        showMessage("正在重新验证会员线路授权…", false);
+        worker.execute(() -> {
+            PlatformApi.ClientSnapshot result = null;
+            MemberTunnelGrant grant = null;
+            String failure = null;
+            try {
+                PlatformApi.MemberAccount account = api.currentAccount();
+                if (account != null) result = api.synchronize(account);
+                grant = api.verifiedMemberTunnelGrant();
+            } catch (PlatformApi.PlatformApiException exception) {
+                failure = exception.getMessage();
+            }
+            PlatformApi.ClientSnapshot refreshed = result;
+            MemberTunnelGrant refreshedGrant = grant;
+            String error = failure;
+            String syncedRoute = accountRouteName(result);
+            mainHandler.post(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (refreshed == null || refreshedGrant == null
+                        || !hasActiveEntitlement(refreshed)
+                        || refreshed.nodeAuthorizationStatus != PlatformApi.NodeAuthorizationStatus.READY) {
+                    applySyncedSnapshot(refreshed, syncedRoute);
+                    showMessage(error == null ? "会员线路授权已变化，请重试同步。" : error, true);
+                    return;
+                }
+                startupAutoConnectChecked = true;
+                applySyncedSnapshot(refreshed, syncedRoute);
+                startMemberVpn(refreshedGrant);
+            });
+        });
     }
 
     private void renderLoading() {
@@ -785,9 +839,11 @@ public final class MainActivity extends Activity {
         MemberTunnelGrant memberGrant = api.verifiedMemberTunnelGrant();
         if (memberGrant != null) {
             pendingMemberGrant = memberGrant;
+            pendingMemberVpnPermission = true;
             Intent approval = VpnService.prepare(this);
             if (approval == null) {
                 pendingMemberGrant = null;
+                pendingMemberVpnPermission = false;
                 startMemberVpn(memberGrant);
             } else {
                 startActivityForResult(approval, VPN_PERMISSION_REQUEST);
