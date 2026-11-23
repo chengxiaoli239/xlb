@@ -1,11 +1,13 @@
 package com.xlb.vpn.data;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.os.Build;
+import android.util.Base64;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -20,12 +22,15 @@ import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyStore;
 import java.security.PublicKey;
+import java.util.Enumeration;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 
 @RunWith(AndroidJUnit4.class)
 public final class DeviceProofCertificateInstrumentedTest {
@@ -103,6 +108,50 @@ public final class DeviceProofCertificateInstrumentedTest {
         }
     }
 
+    @Test
+    public void keystoreSignerStartsAuthenticatedNativeProofBridgeOnLoopback() throws Exception {
+        requireDisposableEmulator();
+        String installationId = UUID.randomUUID().toString();
+        String alias = KEY_ALIAS_PREFIX + installationId;
+        DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
+        KeyStore keyStore = KeyStore.getInstance(KEY_STORE);
+        DeviceProofCertificate certificate = null;
+        DeviceProofCertificate.BridgeCredentials credentials = null;
+
+        try {
+            String publicKey = deviceKeyStore.publicKey(installationId);
+            MemberDeviceProof proof = authorizedProof(installationId, publicKey, deviceKeyStore,
+                    digest -> deviceKeyStore.signDigestBytes(installationId, digest));
+            certificate = DeviceProofCertificate.create(proof);
+            credentials = certificate.startProofBridge("https://127.0.0.1:1", trustedNodeCaBundle());
+
+            assertTrue(certificate.proofBridgeRunning());
+            try (Socket unauthenticated = new Socket("127.0.0.1", 17890)) {
+                unauthenticated.setSoTimeout(2000);
+                unauthenticated.getOutputStream().write(new byte[]{5, 1, 0});
+                assertEquals(5, unauthenticated.getInputStream().read());
+                assertEquals(0xff, unauthenticated.getInputStream().read());
+            }
+
+            try (Socket authenticated = new Socket("127.0.0.1", 17890)) {
+                authenticated.setSoTimeout(2000);
+                authenticated.getOutputStream().write(new byte[]{5, 1, 2});
+                assertEquals(5, authenticated.getInputStream().read());
+                assertEquals(2, authenticated.getInputStream().read());
+                writeSocksUserPassword(authenticated, credentials);
+                assertEquals(1, authenticated.getInputStream().read());
+                assertEquals(0, authenticated.getInputStream().read());
+            }
+
+            certificate.stopProofBridge();
+            assertFalse(certificate.proofBridgeRunning());
+        } finally {
+            if (certificate != null) certificate.close();
+            keyStore.load(null);
+            if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias);
+        }
+    }
+
     private static MemberDeviceProof authorizedProof(String installationId, String publicKey,
             DeviceKeyStore keyStore, DigestSigner digestSigner) {
         MemberDeviceProof.Signer signer = new MemberDeviceProof.Signer() {
@@ -129,6 +178,40 @@ public final class DeviceProofCertificateInstrumentedTest {
     private static X509Certificate parseCertificate(byte[] encoded) throws Exception {
         return (X509Certificate) CertificateFactory.getInstance("X.509")
                 .generateCertificate(new ByteArrayInputStream(encoded));
+    }
+
+    private static String trustedNodeCaBundle() throws Exception {
+        KeyStore systemRoots = KeyStore.getInstance("AndroidCAStore");
+        systemRoots.load(null);
+        Enumeration<String> aliases = systemRoots.aliases();
+        while (aliases.hasMoreElements()) {
+            java.security.cert.Certificate candidate = systemRoots.getCertificate(aliases.nextElement());
+            if (!(candidate instanceof X509Certificate)) continue;
+            X509Certificate certificate = (X509Certificate) candidate;
+            boolean[] keyUsage = certificate.getKeyUsage();
+            if (certificate.getBasicConstraints() < 0 || keyUsage == null || keyUsage.length <= 5 || !keyUsage[5]) {
+                continue;
+            }
+            try {
+                certificate.checkValidity();
+            } catch (java.security.cert.CertificateExpiredException | java.security.cert.CertificateNotYetValidException ignored) {
+                continue;
+            }
+            String encoded = Base64.encodeToString(certificate.getEncoded(), Base64.NO_WRAP);
+            return "-----BEGIN CERTIFICATE-----\n" + encoded + "\n-----END CERTIFICATE-----\n";
+        }
+        throw new GeneralSecurityException("Android system trust store has no currently valid CA certificate");
+    }
+
+    private static void writeSocksUserPassword(Socket socket, DeviceProofCertificate.BridgeCredentials credentials)
+            throws Exception {
+        byte[] username = credentials.usernameForProfile().getBytes(StandardCharsets.UTF_8);
+        byte[] password = credentials.passwordForProfile().getBytes(StandardCharsets.UTF_8);
+        socket.getOutputStream().write(new byte[]{1, (byte) username.length});
+        socket.getOutputStream().write(username);
+        socket.getOutputStream().write(new byte[]{(byte) password.length});
+        socket.getOutputStream().write(password);
+        socket.getOutputStream().flush();
     }
 
     private static byte[] unwrapOctetString(byte[] encoded) {
