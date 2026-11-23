@@ -79,10 +79,10 @@ jobs:
           php_container_id="$(docker run --detach --rm --publish 127.0.0.1::8000 xlb-php:ci)"
           web_address="$(docker port "$web_container_id" 80/tcp)"
           php_address="$(docker port "$php_container_id" 8000/tcp)"
-          curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 \
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 \
             --max-time 3 --output /dev/null --write-out 'Web container returned HTTP %{http_code}\n' \
             "http://${web_address}/"
-          curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 \
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 \
             --max-time 3 --output /dev/null --write-out 'PHP container returned HTTP %{http_code}\n' \
             "http://${php_address}/up"
 
