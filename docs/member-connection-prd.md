@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-24）
 
-- **M10 路线配置自动测速/故障切换/手动选择组（2026-11-24，本地与 hosted CI）**：local/testing 账号级兼容订阅现生成 Mihomo `url-test`、`fallback` 与手动 `select` 组，候选严格来自已解析的 route version 节点；每设备 proof peer 的服务端 profile 原样返回，不经此生成器。订阅定向测试与设备订阅回归 31/31 通过，Laravel 全套 250 passed、1 个既有 skip、2,209 assertions，Pint 通过。主线 CI `45287506548` 六个 jobs 全绿；测试 job 用仓库锁定的 Mihomo v1.19.34 构建 parser，且 GitHub Actions 下缺失 parser 会直接失败，Laravel 配置 `-t` 用例实际运行。CI PHPUnit 汇总仍有 219 个 warning 标记，与未启用 parser 的前一 run `45284036959` 相同；本机全套没有新增失败。此结果不等于真实线路故障注入或生产 failover 验收；配置仅限 local/testing，也不改变严格逐设备 peer 路径。
+- **M10 路线配置自动测速/故障切换/手动选择组（2026-11-24，本地与 hosted CI）**：local/testing 账号级兼容订阅现生成 Mihomo `url-test`、`fallback` 与手动 `select` 组，候选严格来自已解析的 route version 节点；不健康或 health timestamp 超过 TTL 的节点不会进入组；每设备 proof peer 的服务端 profile 原样返回，不经此生成器。profile 定向测试与设备订阅回归 32 passed、1 个既有 skip；Laravel 全套 251 passed、1 个既有 skip、2,217 assertions，Pint 通过。主线 CI `45287506548` 六个 jobs 全绿；测试 job 用仓库锁定的 Mihomo v1.19.34 构建 parser，且 GitHub Actions 下缺失 parser 会直接失败，Laravel 配置 `-t` 用例实际运行。CI PHPUnit 汇总有 219 个 warning 标记，与未启用 parser 的前一 run `45284036959` 数量相同；新加的候选过滤回归尚待下一主线 CI复验。此结果不等于真实线路故障注入或生产 failover 验收；配置仅限 local/testing，也不改变严格逐设备 peer 路径。
 
 - **M6 / 运维文档 AWS 会话状态对齐（2026-11-24，只读事实核对）**：复核确认 `xlb-ops` 当前 STS 已过期，本轮无法取得 AWS 身份或当前资源清单；未执行 AWS 资源读取/写入。同步修正文档中把历史成功登录或历史资源快照写成当前状态的条目；真实节点、会员 profile、mTLS 与撤权回执仍缺。重新登录后必须先只读盘点和复核获批 plan，离线开发继续推进。
 

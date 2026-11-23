@@ -88,6 +88,42 @@ class SubscriptionProfileTest extends TestCase
         $this->assertSame('local-test', $response->headers->get('X-XLB-Profile-Scope'));
     }
 
+    public function test_route_groups_exclude_unhealthy_and_stale_nodes(): void
+    {
+        $now = now()->utc();
+        foreach ([
+            ['node-test-2', '不健康节点', '198.51.100.11', 'unhealthy', $now],
+            ['node-test-3', '观测过期节点', '198.51.100.12', 'verified_test', $now->copy()->subMinutes(10)],
+        ] as [$nodeId, $nodeName, $endpointHost, $healthStatus, $lastHealthCheckAt]) {
+            DB::table('nodes')->insert([
+                'id' => $nodeId, 'name' => $nodeName, 'region' => '测试区域', 'protocol' => 'SOCKS5',
+                'endpoint_host' => $endpointHost, 'endpoint_port' => 1080, 'status' => 'available',
+                'is_test' => true, 'max_sessions' => 100, 'active_sessions' => 0, 'latency_ms' => 60,
+                'health_status' => $healthStatus, 'last_health_check_at' => $lastHealthCheckAt->toIso8601String(),
+                'config_version' => 1, 'updated_at' => $now->toIso8601String(),
+            ]);
+            DB::table('subscription_route_nodes')->insert([
+                'id' => 'route-test-v1-'.$nodeId, 'route_version_id' => 'route-test-v1', 'node_id' => $nodeId,
+                'weight' => 100, 'created_at' => $now->toIso8601String(),
+            ]);
+        }
+
+        $url = $this->profileUrl();
+        $response = $this->get($url)->assertOk();
+        $config = Yaml::parse($response->getContent());
+        $nodeNames = array_column($config['proxies'], 'name');
+
+        $this->assertSame(['演示节点 01'], $nodeNames);
+        foreach (['迅连宝-自动', '迅连宝-故障切换'] as $groupName) {
+            $group = collect($config['proxy-groups'])->firstWhere('name', $groupName);
+            $this->assertSame($nodeNames, $group['proxies']);
+        }
+        $manual = collect($config['proxy-groups'])->firstWhere('name', '迅连宝-手动');
+        $this->assertSame(['迅连宝-自动', '迅连宝-故障切换', '演示节点 01', 'DIRECT'], $manual['proxies']);
+        $this->assertStringNotContainsString('不健康节点', $response->getContent());
+        $this->assertStringNotContainsString('观测过期节点', $response->getContent());
+    }
+
     public function test_user_agent_negotiation_and_explicit_format_precedence(): void
     {
         $url = $this->profileUrl();
