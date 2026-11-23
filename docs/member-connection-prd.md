@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M8 Android 会员 grant 并发单次消费回归（2026-11-24，本机离线验收）**：为 `MemberTunnelGrantStore` 增加 8 个并发消费者同时竞争同一 handoff ID 的回归测试，确认只有一个消费者取得 grant，其余均取得空值，且待消费状态被清除。定向测试通过；Android 全套 JVM tests、`lintDebug`、AndroidTest 编译通过。测试用 JDK 21 与本机 Android SDK，不连接实体手机或 AVD，不启动 VPN/TUN；member admission gate 仍关闭，不证明会员线路或设备限制已通过真机验收。
+
 - **M11 PHP/Web 容器构建与启动 smoke（2026-11-24，hosted CI）**：CI `45270026329` 成功构建 PHP 与 Web 镜像；按镜像默认命令启动 PHP `artisan serve` 并访问 Laravel `/up` 成功，启动 Nginx 镜像并请求首页成功，退出时清理容器。此证据限 hosted runner 中的镜像构建与进程/HTTP smoke，不含 staging 部署、反向代理/API 端到端、生产签名或发布放行。
 
 - **项目持续推进哨兵报告规则更新（2026-11-24）**：更新 Codex automation「VPN 项目持续推进巡检」提示词，要求每轮按 Android、Web/API/支付、节点/Agent/M5-M10、Windows/其他客户端、M11 发布运维及外部放行依赖分别报告证据、完成门、未完成门与下一步；整体比例只在有明确分母时计算。自动化配置为 ACTIVE、20 分钟间隔；本轮未取得实际触发时刻/事件历史，因此不宣称实际 cadence 已验收。代码阶段推进和放行条件仍以主线测试、PRD、提交及云/节点回执为准。
