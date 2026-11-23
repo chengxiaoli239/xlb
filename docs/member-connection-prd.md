@@ -50,7 +50,7 @@
 
 | 模块 | 当前状态 | 证据与未完成项 | 可并行推进 / 下一关 |
 | --- | --- | --- | --- |
-| Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、关闭 gate 拒绝与 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；提交 `83591b9`、`c7ab282`、`d718d90` 对应 CI 全绿 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 继续验证 service 重启/进程恢复边界的 grant/attempt 生命周期组合；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
+| Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、VPN 权限 Activity 重建后仅恢复请求标记并重新同步授权、关闭 gate 拒绝及 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；此前阶段 CI 全绿，当前 Activity 重建测试提交 `b19b7e1` 的主线 CI 运行中 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；ActivityScenario 覆盖配置重建，不覆盖真实系统 VPN 权限弹窗或 OS 进程终止；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 用隔离 fake API 覆盖批准回调后重新同步、授权撤回失败关闭，再检查 service process-death 生命周期；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
 | PHP 会员 API 与设备限制 | 本机 challenge 签名、peer provisioning、逐设备 grant、撤权状态与 descriptor 校验有测试 | Laravel 全套 245 项中 244 项通过、1 项既有跳过；配置与 profile 用本地 fixture，未证明生产节点回执、实际断流或正式数据库并发 | 继续不依赖云的状态机/回归；真实会员授权和撤权验收须等节点 mTLS runtime 与回执 |
 | Web 管理端 | 订单/会员/节点管理已有本地页面；节点详情可配置 per-node bridge origin 与加密 CA | Web 5 项测试和 TypeScript/Vite 构建通过；未向真实节点下发或核验配置，CA 接口不回显 | 可继续管理端输入校验与试点运营流程；任何真实 node config 需先完成资源盘点及授权操作计划 |
 | Node Agent / proof bridge | Go 隔离协议、设备证书、容量、peer 拒绝与撤权计量、renderer artifact 有离线/合成测试 | 可执行 Agent 只允许 `isolated-test`，runtime renderer 仍 unavailable；本地测试不等于真实节点长期运行或断流 | 可继续 runtime/协议离线测试；生产启用需要管理员提供真实 listener、反向代理、CA/证书和部署验收 |
