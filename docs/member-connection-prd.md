@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-23）
 
-- **E2 fleet plan CLI 失败关闭入口验收（2026-11-23，离线完成）**：新增子进程级 CLI tests，覆盖合法请求仅输出 `plan_only` 且 `apply_supported=false`、格式错误 JSON 和超过 16 KiB 输入均以非零状态退出、stdout 不产生计划。ops 全套 44 项、相关 Python 编译与 `git diff --check` 通过。未调用 AWS、未创建资源；此阶段仅验证 bounded plan CLI，不是批量执行、失败回收或云端编排能力。下一步按 node-retirement 约束定义并测试可恢复失败的显式意图/资源清单校验，执行器与任何云写操作仍须另外审查授权和成本。
+- **E2 fleet plan CLI 失败关闭入口验收（2026-11-23，hosted CI 全绿）**：新增子进程级 CLI tests，覆盖合法请求仅输出 `plan_only` 且 `apply_supported=false`、格式错误 JSON 和超过 16 KiB 输入均以非零状态退出、stdout 不产生计划；两个子进程都设 5 秒 timeout。ops 全套 44 项、相关 Python 编译与 `git diff --check` 通过，主线 CI run `45114412530` 全部成功。未调用 AWS、未创建资源；此阶段仅验证 bounded plan CLI，不是批量执行、失败回收或云端编排能力。下一步按 node-retirement 约束定义并测试可恢复失败的显式意图/资源清单校验，执行器与任何云写操作仍须另外审查授权和成本。
 
 - **M10 Node Agent probe 经隔离 DataPlane 到 canary 的端到端本地验收（2026-11-23，hosted CI 全绿）**：新增 test-only executor fixture，使受信 TLS 1.3/mTLS probe 请求的随机 32-byte challenge 经 Node Agent 实际 peer 证书授权的 TLS 1.3/HTTP2 `/v1/tunnel/connect`，到达仅由测试 TargetDialer 映射的 loopback echo canary 并原样返回；断言目标连接恰好一次、node ID/challenge 匹配，PeerStore 对该 peer 记录双向各 32 bytes。定向测试与 race 重复 20 次通过；全套 `go test -race ./...` 110 项、`go vet ./...`、`go build ./...` 通过；主线 CI run `45113339149` 全部成功。fixture 和 executor 仅在 `server_test.go`，未注册 runnable Agent、未写健康状态、未访问 AWS/真实节点；不代表云端节点健康、长期稳定或生产故障切换。下一步仍需将可审核 canary transport/身份材料接入隔离节点并核验真实 challenge echo，再单独评估持久健康状态和 route filter，保持默认关闭。
 
