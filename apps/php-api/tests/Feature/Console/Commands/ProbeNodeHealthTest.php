@@ -149,5 +149,11 @@ class ProbeNodeHealthTest extends TestCase
 
         $this->assertSame(['node-test-1', 'node-test-2'], $driver->nodeIds);
         $this->assertDatabaseHas('node_health_probe_states', ['node_id' => 'node-test-2']);
+
+        $this->artisan('nodes:probe-health', ['--node' => ['missing-node']])
+            ->expectsOutputToContain('没有可探测的可用节点')
+            ->assertExitCode(0);
+
+        $this->assertSame(['node-test-1', 'node-test-2'], $driver->nodeIds);
     }
 }
