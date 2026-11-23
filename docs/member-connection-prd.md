@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-23）
 
-- **E2 fleet failure recovery review-only contract（2026-11-23，离线完成）**：新增 `ops/node_fleet_recovery.py`，只根据调用方传入的批次、release intent 与资源快照生成 review-only 预览；评估时间由 CLI 本机 UTC 时钟产生、不可由请求回拨。拒绝过期/撤销意图、release request 重复、batch/generation 不匹配、超过 5 分钟的库存快照、共享或控制面角色、归属标签/账号区域/Stack identity 不匹配及不可恢复状态；CLI 对无效或超过 64 KiB 请求失败且不输出计划。ops 全套 52 项、相关 Python 编译、diff check 通过。代码不访问 AWS、不验证输入快照签名/真实性、不删除资源，候选仅为人工复核入口，不能作为 AWS 当前状态或删除授权证明。下一步需由受控后端提供可认证的只读 inventory/release-intent 数据源，并单独评审执行器、幂等回执和资源费用；目前不实现 apply。
+- **E2 fleet failure recovery review-only contract（2026-11-23，hosted CI 全绿）**：新增 `ops/node_fleet_recovery.py`，只根据调用方传入的批次、release intent 与资源快照生成 review-only 预览；评估时间由 CLI 本机 UTC 时钟产生、不可由请求回拨。拒绝过期/撤销意图、release request 重复、batch/generation 不匹配、超过 5 分钟的库存快照、共享或控制面角色、归属标签/账号区域/Stack identity 不匹配及不可恢复状态；CLI 对无效或超过 64 KiB 请求失败且不输出计划。ops 全套 52 项、相关 Python 编译、diff check 通过；主线 CI run `45116749400` 全部成功，独立审查无可操作发现。代码不访问 AWS、不验证输入快照签名/真实性、不删除资源，候选仅为人工复核入口，不能作为 AWS 当前状态或删除授权证明。下一步需由受控后端提供可认证的只读 inventory/release-intent 数据源，并单独评审执行器、幂等回执和资源费用；目前不实现 apply。
 
 - **E2 fleet plan CLI 失败关闭入口验收（2026-11-23，hosted CI 全绿）**：新增子进程级 CLI tests，覆盖合法请求仅输出 `plan_only` 且 `apply_supported=false`、格式错误 JSON 和超过 16 KiB 输入均以非零状态退出、stdout 不产生计划；两个子进程都设 5 秒 timeout。ops 全套 44 项、相关 Python 编译与 `git diff --check` 通过，主线 CI run `45114412530` 全部成功。未调用 AWS、未创建资源；此阶段仅验证 bounded plan CLI，不是批量执行、失败回收或云端编排能力。下一步按 node-retirement 约束定义并测试可恢复失败的显式意图/资源清单校验，执行器与任何云写操作仍须另外审查授权和成本。
 
