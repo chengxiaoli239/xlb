@@ -54,6 +54,11 @@ jobs:
       - name: Build API TypeScript
         run: pnpm --filter @xlb/api build
 
+      - name: Build PHP and Web container images
+        run: |
+          docker build --file docker/Dockerfile.php --tag xlb-php:ci .
+          docker build --file docker/Dockerfile.web --tag xlb-web:ci .
+
   tests:
     name: Tests
     runs-on: ubuntu-latest

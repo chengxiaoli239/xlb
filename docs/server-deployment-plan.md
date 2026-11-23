@@ -1,6 +1,6 @@
 # 服务器部署规划
 
-更新日期：2026-11-21
+更新日期：2026-11-24
 状态：**规划文档，未授权或证明任何生产部署**。本文件收敛现有工程规划与运维 runbook；环境地址、域名、账号、凭据、容量与密钥均须由责任人按环境另行配置，不在仓库记录真实值。
 
 ## 1. 部署总览与环境分层
@@ -57,7 +57,7 @@ CDN **不是 VPN 数据通道**，不承载任意 VPN TCP/UDP 隧道，也不替
 
 ## 6. 发布流水线与回滚
 
-已加入的 [CI workflow](../.github/workflows/ci.yml) 在 push/PR 上执行 Web build、Node API TypeScript build、Node API tests 和 Laravel tests。它没有部署步骤、制品发布、环境审批、镜像推送或生产密钥注入。它是 CI，不是 CD。
+已加入的 [CI workflow](../.github/workflows/ci.yml) 在 push/PR 上执行 Web build、Node API TypeScript build、Node API tests 和 Laravel tests，并已配置从仓库根目录构建 PHP 与 Web 容器镜像。根目录 `.dockerignore` 排除所有层级的 `.env`/`.env.*`、Composer/npm/netrc 凭据文件、AWS/SSH 私有配置、密钥库和私钥格式、依赖、构建产物、SQLite 数据库、Laravel runtime storage/cache 与 `ops/.state`；10 个 Docker 隔离夹具确认环境文件、认证配置、私钥、AWS/SSH 文件、session 与 Laravel cache 不可被 `COPY` 读取。本机 Docker Hub 拉取 `nginx:1.27-alpine` 与 `php:8.4-cli` 时返回 OCI config descriptor 错误，因此当前镜像构建仍待 hosted CI 实际结果。CI 仍没有部署步骤、制品发布、环境审批、镜像推送或生产密钥注入。它是 CI，不是 CD。
 
 现有容器定义：
 

@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M11 Docker 构建上下文排除本地凭据与运行数据（2026-11-24，本机隔离构建夹具）**：把忽略规则放到仓库根 `.dockerignore`，覆盖根级和嵌套 `.env`/`.env.*`、Composer/npm/netrc 凭据、AWS/SSH 私有配置、`.key`/`.pem`/`.p8` 和密钥库格式、SQLite、依赖目录、构建输出、Laravel runtime storage/cache 与 `ops/.state`；移除不会用于根目录构建上下文的 `docker/.dockerignore`。10 个本地 Docker 隔离夹具验证环境文件、认证配置、私钥、AWS/SSH 文件、session 和 Laravel cache 均无法被 `COPY` 读取，并把 PHP/Web 容器构建加入 PR CI。实际镜像构建尚未验证：本机 Docker Hub 对 `nginx:1.27-alpine` 与 `php:8.4-cli` 均返回 OCI config descriptor `not found`，重试仍复现；提交后的 hosted CI 将验证镜像构建。没有读取或提交任何真实凭据，不代表镜像已在 staging/production 部署。
+
 - **支付沙箱退款补偿失败重试回归（2026-11-24，本地 SQLite）**：用受控无效订单状态触发退款 worker 暂时失败，确认 compensation outbox 保留 pending、记录失败次数、权益仍有效且未提前写退款事件；恢复订单状态后重试，恰好完成一次沙箱撤权和 compensation。支付定向 `ProviderPaymentEventLedgerTest` 11/11、97 assertions；Laravel 全套 250 项中 249 通过、1 项既有跳过、2,171 assertions；Pint 与 `git diff --check` 通过。仅覆盖 local/testing 账本与沙箱 worker，不涉及商户真实退款或真实资金；节点撤权若无匹配回执仍不得宣称断流。下一步继续补齐上线所需外部支付契约和 staging 放行材料之外的离线验证。
 
 - **M10 健康探测 CAS 冲突重算回归（2026-11-24，本机内存状态桩）**：模拟另一个探测在 CAS 写入失败期间先递增失败 streak，验证当前探测会读取最新状态并重算，第三次连续失败正确打开熔断且不丢计数。定向 `NodeHealthProbeCoordinatorTest` 7/7、27 assertions；Laravel 全套 249 项中 248 通过、1 项既有跳过、2,155 assertions；Pint 和 `git diff --check` 通过。仅覆盖状态存储并发契约，不执行真实节点探测、不写真实健康记录、不证明节点稳定。下一步完善离线发布与回滚契约，不因真实节点材料缺失停掉可离线工作。
