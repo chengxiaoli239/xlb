@@ -38,6 +38,7 @@ pnpm dev
 - 会员可创建测试订单、在弹框查看套餐快照和状态记录、二次确认取消；管理员可分页查看全部订单并按状态筛选。金额由服务端计算，同一请求标识重复提交只产生一笔订单；套餐变更后不能用旧版本新下单。
 - 测试订单有效期为 30 分钟，到期立即按已超时展示；到期任务以条件更新持久化状态和系统事件。仅本地会员可模拟沙箱付款：付款事件、订单状态和权益发放流水在一个事务中落账，幂等重试不重复生成；新权益期限接在当前权益之后。此续期规则仅为本地演示假设，待正式业务政策确认。
 - 超时测试订单的模拟付款只记待核验事件，不改变订单状态或发放权益；取消订单、预置已支付样例不能再次模拟付款。沙箱模拟不请求支付渠道、不扣款、不生成代理佣金，生产环境始终拒绝该入口。
+- 独立于“模拟付款”按钮，PHP payment layer 已有 provider-neutral 创建会话、回调验签、主动查单、分页对账契约和签名假渠道；规范化事件账本、幂等权益发放 outbox 与退款补偿 worker 有 Feature/Unit 覆盖。它验证的是注入式假渠道逻辑，不代表已连接真实商户，也不证明真实签名、扣款或退款。
 - 用户订阅凭证创建、轮换、撤销；数据库只存 SHA-256 摘要，原始 URL 只在创建/轮换响应中返回一次。
 - Mihomo YAML 测试配置。
 - 管理员的用户、测试节点台账和只读佣金页面。
@@ -55,7 +56,7 @@ pnpm dev
 
 到期状态在读取时即时计算，不依赖定时器。若需写入到期事件，可在 `apps/php-api` 运行 `php artisan orders:expire-test`；持续本地开发时另开终端运行 `php artisan schedule:work`，按分钟执行任务。`pnpm dev` 不自动启动调度器。重复运行不会重复写入事件。
 
-会员可在订单详情中选择“模拟沙箱付款”。付款确认仅写入本地测试事件，并在同一事务内将订单标记为 `paid_test`、创建权益和发放流水；重复请求返回原记录。付款事件与发放流水使用订单唯一约束防重。此流程不验证真实渠道回调签名，也不代表支付渠道联调通过。正式支付前仍需接入商户沙箱、验签、金额核对、乱序/重复回调和退款补偿；续费叠加、流量重置与跨套餐规则待业务确认。
+会员可在订单详情中选择“模拟沙箱付款”。付款确认仅写入本地测试事件，并在同一事务内将订单标记为 `paid_test`、创建权益和发放流水；重复请求返回原记录。付款事件与发放流水使用订单唯一约束防重。另有的 provider-neutral 假渠道测试已覆盖签名时间窗、订单/交易/金额/币种校验、重复/乱序事件、查单、分页对账、发放重试及退款补偿。真实支付仍需商户沙箱资料和回调契约，并按真实渠道规范单独验收；续费期限、流量重置、跨套餐和部分退款规则待业务确认。
 
 该功能仅在 local/testing 环境允许会员创建、取消测试订单，数据库为本地 SQLite。唯一约束和事务覆盖本地重复提交；正式数据库的并发、锁等待及支付回调竞态仍需专项验证。预置的 `paid_test` 订单是展示样例，没有真实渠道付款。
 
@@ -67,10 +68,10 @@ pnpm dev
 
 - 真实支付、退款和财务/代理结算操作。
 - 正式会员节点的用户级鉴权、到期断开、流量采集和会话迁移。管理员独立 AWS 测试节点的自动部署、真实协议验证及到期整栈回收已接通，见 [节点运维](docs/node-retirement-and-reclamation.md)。
-- Android 已有原生 Debug 原型（登录、设备 challenge、Mihomo TUN、匿名注册同意）；还未验收真实会员节点/bridge、跨重启 Keystore 恢复和撤权断流，Release 不是可发布成品。
+- Android 已有原生 Debug 原型和 server-verified member grant→VPN service 的默认关闭接线；proof bridge、设备 challenge、Mihomo profile 与服务生命周期有离线/隔离 AVD 测试。会员准入 gate 仍关闭，未验收实体会员真机上的真实节点线路、bridge 握手或匹配撤权断流；Release 不是已签名发布制品或可发布成品。
 - Web 会员控制台和 Chrome 扩展原型已在本地 API 上使用会话；匿名身份展示/扩展订阅展示有 mock 测试。扩展未完成浏览器商店发布/真实会员线路验收。
 - Windows 已有 Tauri/React 账户壳（登录、恢复、权益/设备摘要），路径限定 Windows hosted run `44945777899` 的 MSVC build 与临时 Credential Manager 测试通过；Mihomo/TUN/proof bridge 数据面、安装签名和运行验收尚未实现。macOS/iOS 自有客户端仍未实现；Android/Windows 先行，macOS/iOS 后续。
 - Clash Verge Rev / Clash Mi 的真实迅连宝会员逐设备线路导入、复用拒绝与撤权仍未验收；现有 YAML/保留地址和第三方测试订阅不算会员节点支持。
 - 生产部署和商用合规审查。
 
-当前全景、M1–M11/E0–E7 状态、并行工作包和发布阻塞门见 [上线工程总体规划 §0.1](docs/launch-engineering-master-plan.md)，逐阶段事实以 PRD 顶部开发进度为准。Android 匿名账号恢复已在隔离 API 35 arm64 emulator 完成 instrumentation；M10 有持久健康状态、默认关闭 fake-driver worker 和默认关闭路由过滤，但没有真实 probe driver 或生产调度；M11 已有 80 请求/并发 1 与 4 的本机临时 SQLite smoke 报告，不是生产容量基线。Windows 账户壳 MSVC build 和 Credential Manager 临时往返已由 hosted run `44945777899` 验证，但 Mihomo/TUN/proof bridge 尚缺。真实会员隔离线路/节点回执、生产 mTLS/合规书面结论和需拍板的账号升级/路由口径仍属于放行门。M6 现有两台真机各自独立 P-256 身份已就绪，不需要第三台手机；会员线路下复制拒绝与撤权回执仍待验收。
+当前全景、M1–M11/E0–E7 状态、并行工作包和发布阻塞门见 [PRD 开发进度](docs/member-connection-prd.md) 与 [上线工程总体规划 §0.1](docs/launch-engineering-master-plan.md)。Android 匿名账号恢复已在隔离 API 35 arm64 emulator 完成 instrumentation；M10 有持久健康状态、默认关闭 fake-driver worker 和默认关闭路由过滤，但没有真实 probe driver 或生产调度；M11 已有 80 请求/并发 1 与 4 的本机临时 SQLite smoke 报告，不是生产容量基线。Windows 账户壳 MSVC build 和 Credential Manager 临时往返已由 hosted run 验证，但 Mihomo/TUN/proof bridge 尚缺。首发范围已定为 Android + Web/API 单服务商受控试点，真实会员隔离线路/节点回执、生产 mTLS、商户沙箱、合规书面结论与书面发布放行仍属于门槛。M6 两台现有手机各自独立 P-256 身份已有记录，不需要第三台手机；会员线路下复制拒绝与撤权回执仍待验收。当前 AWS `xlb-ops` 资源盘点请求返回 session expired，恢复盘点需用户本人重新 `aws login`。
