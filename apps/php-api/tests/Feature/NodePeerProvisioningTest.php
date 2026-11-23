@@ -172,13 +172,17 @@ class NodePeerProvisioningTest extends TestCase
             $this->assertSame(1, app(NodePeerProvisioningProcessor::class)->processDue());
 
             $peer = DB::table('node_access_peers')->where('device_id', 'device-provision-1')->first();
-            $outboxAfterProcessing = DB::table('node_access_provisioning_outbox')
-                ->where('peer_id', 'peer-provision-1')->first();
             $this->assertNotNull($peer);
+            $outboxAfterProcessing = DB::table('node_access_provisioning_outbox')
+                ->where('peer_id', $peer->id)->first();
+            $this->assertNotNull($outboxAfterProcessing);
+            $this->assertSame('confirmed', $outboxAfterProcessing->status);
+            $this->assertSame(1, (int) $outboxAfterProcessing->attempts);
             $this->assertSame('active', $peer->status, json_encode([
-                'outbox_status' => $outboxAfterProcessing->status ?? null,
-                'last_error_code' => $outboxAfterProcessing->last_error_code ?? null,
-                'attempts' => $outboxAfterProcessing->attempts ?? null,
+                'peer_id' => $peer->id,
+                'outbox_status' => $outboxAfterProcessing->status,
+                'last_error_code' => $outboxAfterProcessing->last_error_code,
+                'attempts' => $outboxAfterProcessing->attempts,
             ]));
             $this->assertSame('confirmed', $peer->provision_confirmation_status);
             $this->assertSame('mihomo-yaml', $peer->profile_format);
