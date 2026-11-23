@@ -14,6 +14,7 @@
 
 - **M6 隔离节点资源状态复核（2026-11-23，本轮只读未完成）**：通过固化 `ops/aws-cli` 的 `sts get-caller-identity --profile xlb-ops` 一度成功；随后 CloudFormation 栈、`ManagedBy=xlb-node-lab` 资源、Scheduler、SSM 五项只读盘点均返回 AWS `Your session has expired`。因此不能确认隔离节点窗口或当前资源状态；本轮没有 `--apply`、建删资源或费用。下一步需用户本人重新 `aws login`，再经 `ops/aws-cli` 重做只读盘点；只有资源状态确认、计划复核通过后，才进入已授权 M5/M6 隔离协议复测。真实会员隧道仍需真实 endpoint/CA/mTLS runtime 配置和节点回执，离线测试不替代。
 - **M8 Node Agent 文档状态对齐（2026-11-23）**：修正 Node Agent README 中“PHP 尚未持久化/返回 bridge descriptor”等已被本轮实现过时的描述，改为准确记录每节点配置与授权响应现状，同时明确可执行 Agent 仍拒绝 production mode、renderer 未接入，离线 mTLS fixture 不证明会员隧道或生产节点已就绪。
+- **本轮主线整仓 CI 验收（2026-11-23）**：提交 `0a44dca` 对应 hosted CI run `45165750184` 全绿，覆盖静态检查/Web/API/扩展、PHP 全套、Go race/vet/build、Android pinned native/JVM/lint、源码与 Android SBOM 及两份 provenance attestations。CI 证明提交的源码构建与测试通过，不改变生产 renderer/member tunnel gate，不是节点连接、签名发布或上线验收。
 
 ### Android + 网站/API 受控试点全景（2026-11-23）
 
