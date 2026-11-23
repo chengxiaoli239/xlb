@@ -14,6 +14,8 @@ final class NodeAccessAgentAcknowledgement
      *     profile_renderer_id:string,
      *     profile_renderer_version:string,
      *     profile_sha256:string,
+     *     bridge_endpoint:string,
+     *     bridge_server_ca_pem:string,
      *     confirmation_status:string
      * }
      */
@@ -51,12 +53,14 @@ final class NodeAccessAgentAcknowledgement
             'profile_renderer_id' => $artifact['renderer_id'],
             'profile_renderer_version' => $artifact['renderer_version'],
             'profile_sha256' => $artifact['sha256'],
+            'bridge_endpoint' => $artifact['bridge_endpoint'],
+            'bridge_server_ca_pem' => $artifact['bridge_server_ca_pem'],
             'confirmation_status' => $confirmationStatus,
         ];
     }
 
     /**
-     * @return array{format:string,renderer_id:string,renderer_version:string,sha256:string,content:string}
+     * @return array{format:string,renderer_id:string,renderer_version:string,sha256:string,content:string,bridge_endpoint:string,bridge_server_ca_pem:string}
      */
     private static function profileArtifact(
         mixed $artifact,
@@ -91,6 +95,8 @@ final class NodeAccessAgentAcknowledgement
         $rendererVersion = $artifact['renderer_version'] ?? null;
         $content = $artifact['content'] ?? null;
         $sha256 = $artifact['sha256'] ?? null;
+        $bridgeEndpoint = $artifact['bridge_endpoint'] ?? null;
+        $bridgeServerCaPem = $artifact['bridge_server_ca_pem'] ?? null;
         $rendererFormats = [
             'xlb-mihomo-bridge-v1' => 'mihomo-yaml',
             'xlb-native-bridge-v1' => 'xlb-client-manifest-v1',
@@ -102,6 +108,7 @@ final class NodeAccessAgentAcknowledgement
             || ! hash_equals($sha256, hash('sha256', $content))
             || ($artifact['bridge_protocol'] ?? null) !== 'xlb-proof-v1'
             || ($artifact['connectable'] ?? null) !== true
+            || ! self::isApprovedMemberBridgeDescriptor($bridgeEndpoint, $bridgeServerCaPem, $node)
             || self::containsClientSecret($content)) {
             throw new RuntimeException('The production profile artifact does not satisfy the renderer contract.');
         }
@@ -112,7 +119,94 @@ final class NodeAccessAgentAcknowledgement
             'renderer_version' => $rendererVersion,
             'sha256' => $sha256,
             'content' => $content,
+            'bridge_endpoint' => $bridgeEndpoint,
+            'bridge_server_ca_pem' => $bridgeServerCaPem,
         ];
+    }
+
+    public static function isApprovedMemberBridgeDescriptor(mixed $endpoint, mixed $caBundle, object $node): bool
+    {
+        if (! is_string($endpoint) || strlen($endpoint) > 2048 || ! is_string($caBundle)
+            || $caBundle === '' || strlen($caBundle) > 65536) {
+            return false;
+        }
+        $endpointParts = parse_url($endpoint);
+        $nodeAgentParts = parse_url((string) ($node->agent_endpoint ?? ''));
+        if (! is_array($endpointParts) || strtolower((string) ($endpointParts['scheme'] ?? '')) !== 'https'
+            || empty($endpointParts['host']) || isset($endpointParts['user']) || isset($endpointParts['pass'])
+            || ! in_array((string) ($endpointParts['path'] ?? ''), ['', '/'], true)
+            || isset($endpointParts['query']) || isset($endpointParts['fragment'])
+            || ! is_array($nodeAgentParts) || strtolower((string) ($nodeAgentParts['scheme'] ?? '')) !== 'https'
+            || empty($nodeAgentParts['host']) || ! hash_equals(
+                strtolower((string) $nodeAgentParts['host']), strtolower((string) $endpointParts['host']),
+            )) {
+            return false;
+        }
+        $port = $endpointParts['port'] ?? null;
+        if ($port !== null && (! is_int($port) || $port < 1 || $port > 65535)) {
+            return false;
+        }
+
+        $approvedBundlePath = config('node_access.member_bridge.ca_bundle');
+        if (! is_string($approvedBundlePath) || $approvedBundlePath === '' || ! is_file($approvedBundlePath)
+            || ! is_readable($approvedBundlePath)) {
+            return false;
+        }
+        $approvedBundle = file_get_contents($approvedBundlePath);
+        if (! is_string($approvedBundle)) {
+            return false;
+        }
+        $approvedFingerprints = self::caFingerprints($approvedBundle);
+        $descriptorFingerprints = self::caFingerprints($caBundle);
+        if ($approvedFingerprints === [] || $descriptorFingerprints === []) {
+            return false;
+        }
+        foreach ($descriptorFingerprints as $fingerprint) {
+            if (! in_array($fingerprint, $approvedFingerprints, true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** @return list<string> */
+    private static function caFingerprints(string $bundle): array
+    {
+        if ($bundle === '' || strlen($bundle) > 65536
+            || preg_match_all('/-----BEGIN CERTIFICATE-----\s*[A-Za-z0-9+\/=\r\n]+?-----END CERTIFICATE-----/', $bundle, $matches) < 1) {
+            return [];
+        }
+        $remainder = preg_replace('/-----BEGIN CERTIFICATE-----\s*[A-Za-z0-9+\/=\r\n]+?-----END CERTIFICATE-----/', '', $bundle);
+        if (! is_string($remainder) || trim($remainder) !== '' || count($matches[0]) > 8) {
+            return [];
+        }
+        $fingerprints = [];
+        foreach ($matches[0] as $pem) {
+            $certificate = openssl_x509_read($pem);
+            if ($certificate === false) {
+                return [];
+            }
+            $details = openssl_x509_parse($certificate, false);
+            $extensions = is_array($details) ? ($details['extensions'] ?? []) : [];
+            $basicConstraints = $extensions['basicConstraints'] ?? '';
+            $keyUsage = $extensions['keyUsage'] ?? '';
+            $validFrom = is_array($details) ? ($details['validFrom_time_t'] ?? 0) : 0;
+            $validTo = is_array($details) ? ($details['validTo_time_t'] ?? 0) : 0;
+            if (! is_string($basicConstraints) || ! str_contains($basicConstraints, 'CA:TRUE')
+                || ! is_string($keyUsage) || ! str_contains($keyUsage, 'Certificate Sign')
+                || ! is_int($validFrom) || $validFrom > time()
+                || ! is_int($validTo) || $validTo <= time()) {
+                return [];
+            }
+            $fingerprint = openssl_x509_fingerprint($certificate, 'sha256');
+            if (! is_string($fingerprint) || $fingerprint === '') {
+                return [];
+            }
+            $fingerprints[] = strtolower(str_replace(':', '', $fingerprint));
+        }
+
+        return $fingerprints;
     }
 
     private static function containsClientSecret(string $content): bool

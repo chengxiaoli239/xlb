@@ -39,7 +39,7 @@ func main() {
 	nodeID := flag.String("node-id", "", "isolated node identity")
 	capacity := flag.Int("capacity", 1, "isolated node capacity")
 	bridgeAddress := flag.String("bridge-listen-address", "127.0.0.1:17890", "loopback-only profile bridge address")
-	bridgeEndpoint := flag.String("bridge-endpoint", "https://node.example.invalid:9444", "test-only node data-plane HTTPS origin")
+	bridgeEndpoint := flag.String("bridge-endpoint", "", "test-only node data-plane HTTPS origin; defaults to the temporary Node Agent origin")
 	flag.Parse()
 	if *directory == "" || *nodeID == "" || *capacity < 1 {
 		fmt.Fprintln(os.Stderr, "directory, node ID, and positive capacity are required")
@@ -49,6 +49,13 @@ func main() {
 	files, err := writeCertificates(*directory)
 	if err != nil {
 		fail("create temporary mTLS credentials")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fail("listen for loopback Node Agent")
+	}
+	if *bridgeEndpoint == "" {
+		*bridgeEndpoint = "https://" + listener.Addr().String()
 	}
 	bridgeServerCA, err := os.ReadFile(files.caCertificate)
 	if err != nil {
@@ -68,10 +75,6 @@ func main() {
 		fail("configure loopback Node Agent")
 	}
 	server.ErrorLog = log.New(io.Discard, "", 0)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		fail("listen for loopback Node Agent")
-	}
 
 	configuredHandler := server.Handler
 	server.Handler = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

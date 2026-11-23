@@ -115,6 +115,7 @@ class NodeAccessRevocationProcessor
             DB::table('node_access_peers')->where('id', $job->peer_id)->update([
                 'status' => 'revoked', 'upload_bytes' => $finalUploadBytes, 'download_bytes' => $finalDownloadBytes,
                 'credential_ciphertext' => null, 'profile_ciphertext' => null,
+                'bridge_endpoint' => null, 'bridge_server_ca_ciphertext' => null,
                 'revoked_at' => $at, 'updated_at' => $at,
             ]);
             DB::table('nodes')->where('id', $peer->node_id)->update([

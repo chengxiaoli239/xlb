@@ -394,6 +394,8 @@ class MemberDeviceApiTest extends TestCase
             'expires_at' => now()->addYear()->utc()->toIso8601String(),
             'credential_ciphertext' => encrypt('member-device-credential'),
             'profile_ciphertext' => null,
+            'bridge_endpoint' => 'https://node.example.invalid:9444',
+            'bridge_server_ca_ciphertext' => encrypt('test-only-public-ca'),
             'provision_request_id' => 'provision-member-device-1',
             'status' => 'revocation_pending',
             'upload_bytes' => 0,
@@ -434,6 +436,9 @@ class MemberDeviceApiTest extends TestCase
         ]);
         $this->assertSame(1, app(NodeAccessRevocationProcessor::class)->processDue());
         $this->assertDatabaseHas('member_devices', ['id' => $deviceId, 'status' => 'revoked']);
+        $this->assertDatabaseHas('node_access_peers', [
+            'id' => 'peer-member-device-1', 'bridge_endpoint' => null, 'bridge_server_ca_ciphertext' => null,
+        ]);
         $this->getJson('/api/v1/me/devices')->assertJsonPath('data.registered_count', 0);
     }
 

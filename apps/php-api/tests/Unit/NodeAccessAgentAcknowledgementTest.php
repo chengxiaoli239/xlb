@@ -8,6 +8,21 @@ use Tests\TestCase;
 
 class NodeAccessAgentAcknowledgementTest extends TestCase
 {
+    /** @var list<string> */
+    private array $temporaryDirectories = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->temporaryDirectories as $directory) {
+            foreach (glob($directory.'/*') ?: [] as $path) {
+                @unlink($path);
+            }
+            @rmdir($directory);
+        }
+
+        parent::tearDown();
+    }
+
     public function test_provision_acknowledgement_must_match_node_peer_request_and_generation(): void
     {
         $result = [
@@ -122,6 +137,7 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
     {
         $content = 'profile-renderer-contract-test-payload';
         $fingerprint = str_repeat('a', 64);
+        $trust = $this->trustedBridgeTrustBundle();
         $result = [
             'node_id' => 'node-1', 'peer_id' => 'peer-1', 'request_id' => 'request-1',
             'generation' => 2, 'acknowledgement_id' => 'ack-1', 'confirmation_status' => 'confirmed',
@@ -133,12 +149,15 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
                 'format' => 'mihomo-yaml', 'renderer_id' => 'xlb-mihomo-bridge-v1',
                 'renderer_version' => '1.2.3', 'sha256' => hash('sha256', $content),
                 'bridge_protocol' => 'xlb-proof-v1', 'connectable' => true, 'content' => $content,
+                'bridge_endpoint' => 'https://node-agent.example.invalid:9444',
+                'bridge_server_ca_pem' => $trust['pem'],
             ],
         ];
+        config(['node_access.member_bridge.ca_bundle' => $trust['path']]);
 
         $validated = NodeAccessAgentAcknowledgement::provision(
             $result,
-            (object) ['id' => 'node-1'],
+            (object) ['id' => 'node-1', 'agent_endpoint' => 'https://node-agent.example.invalid:443'],
             (object) [
                 'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
                 'device_key_fingerprint' => $fingerprint, 'device_binding_generation' => 3,
@@ -151,6 +170,126 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
         $this->assertSame('mihomo-yaml', $validated['profile_format']);
         $this->assertSame('xlb-mihomo-bridge-v1', $validated['profile_renderer_id']);
         $this->assertSame(hash('sha256', $content), $validated['profile_sha256']);
+        $this->assertSame($result['profile_artifact']['bridge_endpoint'], $validated['bridge_endpoint']);
+        $this->assertSame($trust['pem'], $validated['bridge_server_ca_pem']);
+    }
+
+    public function test_production_profile_artifact_rejects_unbound_endpoint_and_unapproved_ca(): void
+    {
+        $trust = $this->trustedBridgeTrustBundle();
+        config(['node_access.member_bridge.ca_bundle' => $trust['path']]);
+        $content = 'profile-renderer-contract-test-payload';
+        $artifact = [
+            'node_id' => 'node-1', 'peer_id' => 'peer-1', 'request_id' => 'request-1',
+            'entitlement_id' => 'entitlement-1', 'device_id' => 'device-1',
+            'device_key_fingerprint' => str_repeat('a', 64), 'generation' => 2,
+            'device_binding_generation' => 3, 'format' => 'mihomo-yaml',
+            'renderer_id' => 'xlb-mihomo-bridge-v1', 'renderer_version' => '1.2.3',
+            'sha256' => hash('sha256', $content), 'bridge_protocol' => 'xlb-proof-v1',
+            'connectable' => true, 'content' => $content,
+            'bridge_endpoint' => 'https://attacker.invalid:9444', 'bridge_server_ca_pem' => $trust['pem'],
+        ];
+
+        try {
+            NodeAccessAgentAcknowledgement::provision(
+                [
+                    'node_id' => 'node-1', 'peer_id' => 'peer-1', 'request_id' => 'request-1',
+                    'generation' => 2, 'acknowledgement_id' => 'ack-1', 'confirmation_status' => 'confirmed',
+                    'profile_artifact' => $artifact,
+                ],
+                (object) ['id' => 'node-1', 'agent_endpoint' => 'https://node-agent.example.invalid:443'],
+                (object) [
+                    'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
+                    'device_key_fingerprint' => str_repeat('a', 64), 'device_binding_generation' => 3,
+                ],
+                'request-1',
+                2,
+            );
+            $this->fail('A bridge endpoint outside the administrator-controlled node host must be rejected.');
+        } catch (RuntimeException) {
+            $this->assertTrue(true);
+        }
+
+        $artifact['bridge_endpoint'] = 'https://node-agent.example.invalid/v1/tunnel/connect';
+        try {
+            NodeAccessAgentAcknowledgement::provision(
+                [
+                    'node_id' => 'node-1', 'peer_id' => 'peer-1', 'request_id' => 'request-1',
+                    'generation' => 2, 'acknowledgement_id' => 'ack-1', 'confirmation_status' => 'confirmed',
+                    'profile_artifact' => $artifact,
+                ],
+                (object) ['id' => 'node-1', 'agent_endpoint' => 'https://node-agent.example.invalid:443'],
+                (object) [
+                    'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
+                    'device_key_fingerprint' => str_repeat('a', 64), 'device_binding_generation' => 3,
+                ],
+                'request-1',
+                2,
+            );
+            $this->fail('A path-bearing bridge endpoint must be rejected.');
+        } catch (RuntimeException) {
+            $this->assertTrue(true);
+        }
+
+        $unapprovedTrust = $this->trustedBridgeTrustBundle();
+        $artifact['bridge_endpoint'] = 'https://node-agent.example.invalid:9444';
+        $artifact['bridge_server_ca_pem'] = $unapprovedTrust['pem'];
+        try {
+            NodeAccessAgentAcknowledgement::provision(
+                [
+                    'node_id' => 'node-1', 'peer_id' => 'peer-1', 'request_id' => 'request-1',
+                    'generation' => 2, 'acknowledgement_id' => 'ack-1', 'confirmation_status' => 'confirmed',
+                    'profile_artifact' => $artifact,
+                ],
+                (object) ['id' => 'node-1', 'agent_endpoint' => 'https://node-agent.example.invalid:443'],
+                (object) [
+                    'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
+                    'device_key_fingerprint' => str_repeat('a', 64), 'device_binding_generation' => 3,
+                ],
+                'request-1',
+                2,
+            );
+            $this->fail('A CA outside the backend-approved node trust bundle must be rejected.');
+        } catch (RuntimeException) {
+            $this->assertTrue(true);
+        }
+    }
+
+    /** @return array{pem:string,path:string} */
+    private function trustedBridgeTrustBundle(): array
+    {
+        $directory = sys_get_temp_dir().'/xlb-bridge-ca-'.bin2hex(random_bytes(8));
+        $this->assertTrue(mkdir($directory, 0700));
+        $this->temporaryDirectories[] = $directory;
+        $configurationPath = $directory.'/openssl.cnf';
+        $configuration = <<<'OPENSSL'
+[req]
+distinguished_name = distinguished_name
+prompt = no
+
+[distinguished_name]
+CN = xlb member bridge test CA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+OPENSSL;
+        $this->assertNotFalse(file_put_contents($configurationPath, $configuration));
+        $key = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+        $this->assertNotFalse($key);
+        $request = openssl_csr_new(['commonName' => 'xlb member bridge test CA'], $key, [
+            'config' => $configurationPath, 'digest_alg' => 'sha256',
+        ]);
+        $this->assertNotFalse($request);
+        $certificate = openssl_csr_sign($request, null, $key, 365, [
+            'config' => $configurationPath, 'x509_extensions' => 'v3_ca', 'digest_alg' => 'sha256',
+        ]);
+        $this->assertNotFalse($certificate);
+        $this->assertTrue(openssl_x509_export($certificate, $pem));
+        $path = $directory.'/ca.pem';
+        $this->assertNotFalse(file_put_contents($path, $pem));
+
+        return ['pem' => $pem, 'path' => $path];
     }
 
     public function test_revocation_acknowledgement_requires_matching_identity_and_final_counters(): void

@@ -156,6 +156,7 @@ class NodePeerProvisioningTest extends TestCase
                 'node_access.agent.client_certificate' => $startup['client_certificate'],
                 'node_access.agent.client_key' => $startup['client_private_key'],
                 'node_access.agent.ca_bundle' => $startup['ca_certificate'],
+                'node_access.member_bridge.ca_bundle' => $startup['ca_certificate'],
             ]);
             $this->app->forgetInstance(NodePeerProvisioningDriver::class);
 
@@ -170,6 +171,12 @@ class NodePeerProvisioningTest extends TestCase
             $this->assertSame('confirmed', $peer->provision_confirmation_status);
             $this->assertSame('mihomo-yaml', $peer->profile_format);
             $this->assertSame('xlb-mihomo-bridge-v1', $peer->profile_renderer_id);
+            $this->assertSame($startup['endpoint'], $peer->bridge_endpoint, json_encode([
+                'startup' => $startup['endpoint'] ?? null,
+                'bridge_endpoint' => $peer->bridge_endpoint ?? null,
+            ]));
+            $this->assertStringNotContainsString('BEGIN CERTIFICATE', $peer->bridge_server_ca_ciphertext);
+            $trustedDataPlaneCa = Crypt::decryptString($peer->bridge_server_ca_ciphertext);
             $profile = Crypt::decryptString($peer->profile_ciphertext);
             $this->assertSame(hash('sha256', $profile), $peer->profile_sha256);
             $this->assertStringContainsString('127.0.0.1', $profile);
@@ -193,7 +200,16 @@ class NodePeerProvisioningTest extends TestCase
             $this->assertSame($peer->id, $ready['peer_id']);
             $this->assertSame($nodeId, $ready['node_id']);
             $this->assertSame($profile, $ready['profile']);
+            $this->assertSame($startup['endpoint'], $ready['bridge_endpoint']);
+            $this->assertSame($trustedDataPlaneCa, $ready['bridge_server_ca_pem']);
             $this->assertSame(Crypt::decryptString($peer->credential_ciphertext), $ready['peer_credential']);
+
+            DB::table('node_access_peers')->where('id', $peer->id)->update([
+                'bridge_endpoint' => 'https://attacker.invalid:9444',
+            ]);
+            $this->assertSame('unavailable', $service->ensureForProvenDevice(
+                'user-member', 'device-provision-1', $fingerprint,
+            )['status']);
         } finally {
             $status = proc_get_status($server);
             $shutdownDeadline = microtime(true) + 2.0;

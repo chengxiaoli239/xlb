@@ -138,6 +138,9 @@ class NodePeerProvisioningProcessor
                 'profile_renderer_id' => $acknowledgement['profile_renderer_id'],
                 'profile_renderer_version' => $acknowledgement['profile_renderer_version'],
                 'profile_sha256' => $acknowledgement['profile_sha256'],
+                'bridge_endpoint' => $acknowledgement['bridge_endpoint'] ?? null,
+                'bridge_server_ca_ciphertext' => isset($acknowledgement['bridge_server_ca_pem'])
+                    ? Crypt::encryptString($acknowledgement['bridge_server_ca_pem']) : null,
                 'provision_acknowledgement_id' => $acknowledgement['acknowledgement_id'],
                 'provision_confirmation_status' => $acknowledgement['confirmation_status'], 'updated_at' => $at,
             ]);

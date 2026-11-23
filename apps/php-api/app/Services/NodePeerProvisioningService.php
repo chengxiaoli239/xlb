@@ -18,7 +18,7 @@ class NodePeerProvisioningService
     /**
      * Call only after the authenticated device has completed its challenge signature.
      *
-     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,peer_credential?:string,profile?:string}
+     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,peer_credential?:string,profile?:string}
      */
     public function ensureForProvenDevice(string $userId, string $deviceId, string $proofFingerprint): array
     {
@@ -143,7 +143,7 @@ class NodePeerProvisioningService
     }
 
     /**
-     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,peer_credential?:string,profile?:string}
+     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,peer_credential?:string,profile?:string}
      */
     private function present(object $peer, string $userId, string $proofFingerprint): array
     {
@@ -159,11 +159,14 @@ class NodePeerProvisioningService
         if ($peer->status === 'provisioning') {
             return ['status' => 'provisioning', 'message' => '正在准备设备线路'];
         }
-        $node = DB::table('nodes')->where('id', $peer->node_id)->first(['is_test', 'status', 'health_status', 'last_health_check_at']);
+        $node = DB::table('nodes')->where('id', $peer->node_id)->first([
+            'is_test', 'status', 'health_status', 'last_health_check_at', 'agent_endpoint',
+        ]);
         if (! $node || (bool) $node->is_test || $node->status !== 'available' || $node->health_status !== 'healthy'
             || ! $this->freshHealthCheck($node->last_health_check_at)
             || $peer->status !== 'active' || $peer->provision_confirmation_status !== 'confirmed'
             || ! $peer->credential_ciphertext || ! $peer->profile_ciphertext
+            || ! $peer->bridge_endpoint || ! $peer->bridge_server_ca_ciphertext
             || ! $this->hasSupportedProfileArtifactMetadata($peer)) {
             return $this->unavailable();
         }
@@ -171,10 +174,14 @@ class NodePeerProvisioningService
         try {
             $credential = Crypt::decryptString($peer->credential_ciphertext);
             $profile = Crypt::decryptString($peer->profile_ciphertext);
+            $bridgeServerCa = Crypt::decryptString($peer->bridge_server_ca_ciphertext);
         } catch (DecryptException) {
             return $this->unavailable();
         }
-        if (! hash_equals((string) $peer->profile_sha256, hash('sha256', $profile))) {
+        if (! hash_equals((string) $peer->profile_sha256, hash('sha256', $profile))
+            || ! NodeAccessAgentAcknowledgement::isApprovedMemberBridgeDescriptor(
+                $peer->bridge_endpoint, $bridgeServerCa, $node,
+            )) {
             return $this->unavailable();
         }
 
@@ -185,6 +192,8 @@ class NodePeerProvisioningService
             'node_id' => (string) $peer->node_id,
             'peer_generation' => (int) $peer->generation,
             'device_binding_generation' => (int) $peer->device_binding_generation,
+            'bridge_endpoint' => (string) $peer->bridge_endpoint,
+            'bridge_server_ca_pem' => $bridgeServerCa,
             'peer_credential' => $credential,
             'profile' => $profile,
         ];
