@@ -6,10 +6,10 @@ final class MemberTunnelStopPolicy {
     private MemberTunnelStopPolicy() {}
 
     static boolean shouldStop(String tunnelState, boolean memberTunnelActive,
-            boolean activeEntitlement, boolean nodeAuthorizationReady) {
+            boolean memberGrantPending, boolean activeEntitlement, boolean nodeAuthorizationReady) {
         boolean tunnelInProgress = XlbVpnService.STATE_CONNECTED.equals(tunnelState)
                 || XlbVpnService.STATE_CONNECTING.equals(tunnelState);
         return tunnelInProgress && (!activeEntitlement
-                || (memberTunnelActive && !nodeAuthorizationReady));
+                || ((memberTunnelActive || memberGrantPending) && !nodeAuthorizationReady));
     }
 }

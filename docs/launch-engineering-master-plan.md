@@ -16,7 +16,7 @@
 
 > 结论先行：目前已从单纯本地业务原型推进到隔离节点协议证据、支付沙箱账本、Android Debug 客户端和 M9 多端账号状态；**离上线仍有技术放行、合规与运营门槛**。CI、Docker 构建文件、k6 场景和 smoke 脚本已入库，但没有实测压测报告、staging、生产部署/回滚演练、生产监控告警或批量节点编排。下方 §0.1 是当前执行快照；旧章节中的全仓"无脚本/无工作流/客户端未实现"等基线文字应以该快照和源码复核为准。
 
-### 0.1 当前完成度与工作队列（2026-11-23）
+### 0.1 当前完成度与工作队列（2026-11-24）
 
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
@@ -39,7 +39,9 @@
 
 **2026-11-24 Android worker 状态广播代次保护增量**：worker 的 CONNECTED/ERROR 与 stop completion 状态只有在 `TunnelAttemptGate` 原子确认当前代次时才能发布，当前 start 的 CONNECTING 广播和路由名同样成组更新；旧终态不能覆盖新 start 的 UI/service 状态。新增 finish callback 被替换代次拒绝的 JVM 测试；Android JVM、lint、AndroidTest 编译、Debug/AndroidTest APK build 与专用 AVD rapid stop/start 1/1 均通过；提交 `c7ab282` 的主线 CI `45214979632` 全绿。未运行实体设备、会员 TUN 或真实节点。
 
-**2026-11-24 Android grant handoff 与 service intent 绑定增量**：每个 process-local grant 获得单调单次 ID，service intent 必须带匹配 ID 才能消费；旧 intent 和旧调用方的失败清理不能触碰替代授权。过期 foreground start 会安全完成 Android 前台服务生命周期，替代 grant 待处理时保留匹配 intent 的服务实例，STOP/revoke 继续显式清空待处理 grant。JVM store tests 验证旧 ID 不能取走或清空新 grant；专用 AVD service stale-intent→replacement-grant case 与 PlatformApi→service→logout case 各 1/1 通过，Android JVM/lint/AndroidTest compile/Debug APK build 均通过；提交 `d718d90` 的主线 CI `45218168507` 全绿，前台生命周期修复提交 `b283316` 主线 CI 运行中。member gate 保持关闭，测试不建立系统 TUN 或真实节点连接。
+**2026-11-24 Android grant handoff 与 service intent 绑定增量**：每个 process-local grant 获得单调单次 ID，service intent 必须带匹配 ID 才能消费；旧 intent 和旧调用方的失败清理不能触碰替代授权。过期 foreground start 会安全完成 Android 前台服务生命周期，替代 grant 待处理时保留匹配 intent 的服务实例，STOP/revoke 继续显式清空待处理 grant。JVM store tests 验证旧 ID 不能取走或清空新 grant；专用 AVD service stale-intent→replacement-grant case 与 PlatformApi→service→logout case 各 1/1 通过，Android JVM/lint/AndroidTest compile/Debug APK build 均通过；提交 `d718d90` 的主线 CI `45218168507` 全绿，前台生命周期修复提交 `b283316` 对应主线 CI `45227271566` 全绿。member gate 保持关闭，测试不建立系统 TUN 或真实节点连接。
+
+**2026-11-24 Android 授权刷新期间的待处理 grant 撤权增量**：`MemberTunnelStopPolicy` 将 service 已标记会员线路与 grant 已发布但尚未消费都视为会员启动；授权变为 `UNAVAILABLE` 时可及时 STOP 并清除 handoff，延迟到达的旧 member intent 不能重新启动。JVM 覆盖待处理 grant 与已就绪授权的策略组合；专用 AVD Fake API→PlatformApi→grant store→service 撤权/延迟 intent 类 2/2 通过，Android 全套 JVM、lint、AndroidTest 编译及 Debug/AndroidTest APK build 通过。只证明客户端本地授权状态竞态，member gate 仍关闭，未建立系统 TUN 或真实节点连接。
 
 **此前 Android 增量，以主线 `342a7d8` 为准**：Android `PlatformApi` contract-shaped loopback grant→VPN service 关闭 gate、ACTION_STOP、撤权与登出清理测试通过；伪造 profile digest 时 `MemberTunnelGrant` 不产生；权益同步失效时 `CONNECTING` 与 `CONNECTED` 均触发 stop。专用 AVD 19/19 基础 instrumentation，新增 API integration cases 各 1/1，Android JVM/AndroidTest 编译/lint 通过。hosted CI run `45196145412` 全绿。测试使用 loopback 假 API 与 service 测试边界，未建立系统 TUN、未连接 PHP ready authorization 或真实节点，Android member gate 仍关闭。中间 CI run `45195474224` 的 Laravel `NodePeerProvisioningTest` 曾出现 peer 保持 provisioning 的单次失败，下一主线全套 run 通过且 PHP 代码未变，原因未复现，保留为待观察的 CI 波动。
 

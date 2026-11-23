@@ -77,6 +77,10 @@ public final class XlbVpnService extends VpnService {
         return currentTunnelIsMember;
     }
 
+    public static boolean hasPendingMemberTunnelGrant() {
+        return MemberTunnelGrantStore.hasPendingHandoff();
+    }
+
     public static String firstRouteName(String profile) {
         return MihomoCore.firstRouteName(profile);
     }

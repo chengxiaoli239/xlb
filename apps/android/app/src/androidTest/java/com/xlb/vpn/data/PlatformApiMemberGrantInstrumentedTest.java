@@ -44,6 +44,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @RunWith(AndroidJUnit4.class)
@@ -98,14 +99,17 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         CountDownLatch rejected = new CountDownLatch(1);
         AtomicReference<CountDownLatch> expectedDisconnect = new AtomicReference<>(new CountDownLatch(1));
         AtomicReference<String> serviceMessage = new AtomicReference<>();
+        AtomicInteger connectedStates = new AtomicInteger();
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context receiverContext, Intent intent) {
-                if (XlbVpnService.STATE_ERROR.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                String state = intent.getStringExtra(XlbVpnService.EXTRA_STATE);
+                if (XlbVpnService.STATE_CONNECTED.equals(state)) {
+                    connectedStates.incrementAndGet();
+                } else if (XlbVpnService.STATE_ERROR.equals(state)) {
                     serviceMessage.set(intent.getStringExtra(XlbVpnService.EXTRA_MESSAGE));
                     rejected.countDown();
-                } else if (XlbVpnService.STATE_DISCONNECTED.equals(
-                        intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                } else if (XlbVpnService.STATE_DISCONNECTED.equals(state)) {
                     expectedDisconnect.get().countDown();
                 }
             }
@@ -141,12 +145,11 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             assertEquals("", XlbVpnService.currentRouteName());
 
             long pendingHandoffId = MemberTunnelGrantStore.publish(grant);
-            ComponentName stoppedService = context.startService(stop);
-            assertNotNull("VPN service did not accept the stop action", stoppedService);
-            assertTrue("VPN service did not complete the local stop path",
-                    expectedDisconnect.get().await(5, TimeUnit.SECONDS));
-            assertNull("stop left a pending process-local grant",
-                    MemberTunnelGrantStore.consume(pendingHandoffId));
+            Intent delayedStart = new Intent(context, XlbVpnService.class)
+                    .setAction(XlbVpnService.ACTION_START_MEMBER)
+                    .putExtra(XlbVpnService.EXTRA_MEMBER_GRANT_HANDOFF_ID, pendingHandoffId);
+            assertTrue("member grant was not pending before the authorization refresh",
+                    XlbVpnService.hasPendingMemberTunnelGrant());
 
             assertTrue("current-device removal did not report pending revocation",
                     api.removeDevice(MemberTunnelGrantAvdFixture.DEVICE_ID));
@@ -156,6 +159,27 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             assertEquals(PlatformApi.NodeAuthorizationStatus.UNAVAILABLE,
                     api.synchronize(account).nodeAuthorizationStatus);
             assertNull("revoked device retained a cached member grant", api.verifiedMemberTunnelGrant());
+            assertTrue("authorization refresh unexpectedly cleared the already handed-off grant",
+                    XlbVpnService.hasPendingMemberTunnelGrant());
+
+            ComponentName stoppedService = context.startService(stop);
+            assertNotNull("VPN service did not accept the stop after authorization loss", stoppedService);
+            assertTrue("authorization-loss stop did not complete the local stop path",
+                    expectedDisconnect.get().await(5, TimeUnit.SECONDS));
+            assertNull("authorization-loss stop left a pending process-local grant",
+                    MemberTunnelGrantStore.consume(pendingHandoffId));
+            assertFalse("authorization-loss stop left a pending member grant",
+                    XlbVpnService.hasPendingMemberTunnelGrant());
+
+            ComponentName staleStarted = context.startForegroundService(delayedStart);
+            assertNotNull("service did not accept the delayed revoked-grant intent", staleStarted);
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            assertEquals("delayed revoked grant changed the stopped service state",
+                    XlbVpnService.STATE_DISCONNECTED, XlbVpnService.currentState());
+            assertFalse("delayed revoked grant marked the service as a member tunnel",
+                    XlbVpnService.currentTunnelIsMember());
+            assertEquals("delayed revoked grant reported a connected tunnel", 0, connectedStates.get());
+
             long logoutHandoffId = MemberTunnelGrantStore.publish(grant);
             expectedDisconnect.set(new CountDownLatch(1));
             ComponentName logoutStop = context.startService(stop);

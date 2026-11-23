@@ -1033,7 +1033,7 @@ public final class MainActivity extends Activity {
         boolean nodeAuthorizationReady = result != null
                 && result.nodeAuthorizationStatus == PlatformApi.NodeAuthorizationStatus.READY;
         if (MemberTunnelStopPolicy.shouldStop(tunnelState, XlbVpnService.currentTunnelIsMember(),
-                hasActiveEntitlement(result), nodeAuthorizationReady)) {
+                XlbVpnService.hasPendingMemberTunnelGrant(), hasActiveEntitlement(result), nodeAuthorizationReady)) {
             startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
         }
         render();
