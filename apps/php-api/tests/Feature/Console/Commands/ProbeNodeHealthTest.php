@@ -7,6 +7,7 @@ use App\Services\NodeHealthProbeResult;
 use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schedule;
 use Tests\TestCase;
 
 class ProbeNodeHealthTest extends TestCase
@@ -33,6 +34,17 @@ class ProbeNodeHealthTest extends TestCase
             ->assertExitCode(1);
 
         $this->assertDatabaseCount('node_health_probe_states', 0);
+    }
+
+    public function test_disabled_probe_is_not_registered_with_the_scheduler(): void
+    {
+        $this->assertFalse(config('node_health_probe.enabled'));
+        $scheduledProbes = array_filter(
+            Schedule::events(),
+            static fn ($event): bool => str_contains((string) $event->command, 'nodes:probe-health'),
+        );
+
+        $this->assertSame([], array_values($scheduledProbes));
     }
 
     public function test_repeated_local_probe_runs_persist_circuit_state_without_changing_node_acceptance(): void
