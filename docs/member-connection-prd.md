@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **支付沙箱退款补偿失败重试回归（2026-11-24，本地 SQLite）**：用受控无效订单状态触发退款 worker 暂时失败，确认 compensation outbox 保留 pending、记录失败次数、权益仍有效且未提前写退款事件；恢复订单状态后重试，恰好完成一次沙箱撤权和 compensation。支付定向 `ProviderPaymentEventLedgerTest` 11/11、97 assertions；Laravel 全套 250 项中 249 通过、1 项既有跳过、2,171 assertions；Pint 与 `git diff --check` 通过。仅覆盖 local/testing 账本与沙箱 worker，不涉及商户真实退款或真实资金；节点撤权若无匹配回执仍不得宣称断流。下一步继续补齐上线所需外部支付契约和 staging 放行材料之外的离线验证。
+
 - **M10 健康探测 CAS 冲突重算回归（2026-11-24，本机内存状态桩）**：模拟另一个探测在 CAS 写入失败期间先递增失败 streak，验证当前探测会读取最新状态并重算，第三次连续失败正确打开熔断且不丢计数。定向 `NodeHealthProbeCoordinatorTest` 7/7、27 assertions；Laravel 全套 249 项中 248 通过、1 项既有跳过、2,155 assertions；Pint 和 `git diff --check` 通过。仅覆盖状态存储并发契约，不执行真实节点探测、不写真实健康记录、不证明节点稳定。下一步完善离线发布与回滚契约，不因真实节点材料缺失停掉可离线工作。
 
 - **M11 Android 签名候选发布边界回归（2026-11-24，本机离线验收）**：扩展 Actions SHA pin 检查覆盖手动 Android signed release-candidate workflow，并验证任务限 main、使用受保护环境和只读仓库权限、签名密钥从环境 secrets 注入、attestation 不推 registry/不建 storage record、候选仅保留 14 天供审核，且任务步骤不包含商店/Release 发布。ops 全套 53/53、语法检查与 `git diff --check` 通过。该测试不配置 GitHub environment/secrets、不生成签名制品、不代表受控试点可发布；主线 CI 尚待本次提交触发后核验。下一步继续实现 staging/回滚与发布可观测性离线契约。

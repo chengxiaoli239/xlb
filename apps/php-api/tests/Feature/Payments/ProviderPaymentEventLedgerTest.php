@@ -202,6 +202,51 @@ class ProviderPaymentEventLedgerTest extends TestCase
         $this->assertDatabaseCount('entitlements', 2);
     }
 
+    public function test_refund_compensation_failure_is_retained_for_retry_without_revoking_entitlement_early(): void
+    {
+        $orderId = $this->createOrder();
+        $session = $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')->assertOk()->json('data');
+        $this->webhook($this->signedPaidEvent($session))->assertOk();
+        $this->artisan('payments:process-sandbox-fulfillments')->assertSuccessful();
+
+        $refund = $this->signedSandboxEvent($session, 'refunded');
+        $this->webhook($refund)->assertOk()->assertJsonPath('data.decision', 'apply');
+        DB::table('orders')->where('id', $orderId)->update(['status' => 'cancelled_test']);
+
+        $this->artisan('payments:process-sandbox-refunds')->assertSuccessful();
+
+        $this->assertDatabaseHas('provider_payment_compensations', [
+            'merchant_order_id' => $orderId,
+            'status' => 'pending',
+            'attempts' => 1,
+            'last_error_code' => 'sandbox_refund_not_completed',
+        ]);
+        $this->assertDatabaseHas('provider_payment_orders', [
+            'merchant_order_id' => $orderId,
+            'status' => 'refund_pending',
+            'entitlement_granted' => true,
+        ]);
+        $this->assertDatabaseHas('entitlement_grants', ['order_id' => $orderId, 'status' => 'granted_test']);
+        $this->assertDatabaseCount('sandbox_refund_events', 0);
+
+        DB::table('orders')->where('id', $orderId)->update(['status' => 'paid_test']);
+        $this->artisan('payments:process-sandbox-refunds')->assertSuccessful();
+
+        $this->assertDatabaseHas('provider_payment_compensations', [
+            'merchant_order_id' => $orderId,
+            'status' => 'completed',
+            'attempts' => 2,
+        ]);
+        $this->assertDatabaseHas('provider_payment_orders', [
+            'merchant_order_id' => $orderId,
+            'status' => 'refunded',
+            'entitlement_granted' => false,
+            'compensation_count' => 1,
+        ]);
+        $this->assertDatabaseHas('entitlement_grants', ['order_id' => $orderId, 'status' => 'revoked_test']);
+        $this->assertDatabaseCount('sandbox_refund_events', 1);
+    }
+
     public function test_sandbox_webhook_route_is_disabled_outside_local_and_testing(): void
     {
         $this->app->instance('env', 'production');
