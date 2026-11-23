@@ -1,5 +1,6 @@
 import org.cyclonedx.gradle.CyclonedxDirectTask
 import org.cyclonedx.model.Component
+import java.net.URI
 
 plugins {
     id 'org.cyclonedx.bom' version '3.6.1'
@@ -14,6 +15,41 @@ tasks.named('cyclonedxDirectBom', CyclonedxDirectTask) {
     projectType = Component.Type.APPLICATION
     includeConfigs = ['releaseRuntimeClasspath']
     testConfigs = []
+}
+
+def releaseSigningEnvironment = [
+        keystorePath: System.getenv('XLB_ANDROID_RELEASE_KEYSTORE_PATH'),
+        storePassword: System.getenv('XLB_ANDROID_RELEASE_STORE_PASSWORD'),
+        keyAlias: System.getenv('XLB_ANDROID_RELEASE_KEY_ALIAS'),
+        keyPassword: System.getenv('XLB_ANDROID_RELEASE_KEY_PASSWORD')
+]
+def releaseSigningValuesPresent = releaseSigningEnvironment.values().count { value -> value != null && !value.isEmpty() }
+def releaseSigningConfigured = releaseSigningValuesPresent == releaseSigningEnvironment.size()
+def releaseSigningRequired = (findProperty('xlbRequireReleaseSigning')?.toString()?.toBoolean()) ?: false
+def releaseApiBaseUrl = System.getenv('XLB_ANDROID_RELEASE_API_BASE_URL') ?: 'https://api.xlb.invalid'
+if (releaseSigningValuesPresent > 0 && !releaseSigningConfigured) {
+    throw new GradleException('Android release signing configuration is incomplete.')
+}
+if (releaseSigningConfigured && !file(releaseSigningEnvironment.keystorePath).isFile()) {
+    throw new GradleException('Android release keystore file is unavailable.')
+}
+if (releaseSigningRequired && !releaseSigningConfigured) {
+    throw new GradleException('This build requires Android release signing credentials.')
+}
+if (releaseSigningRequired) {
+    def releaseApiUri
+    try {
+        releaseApiUri = new URI(releaseApiBaseUrl)
+    } catch (Exception ignored) {
+        throw new GradleException('A valid production HTTPS API base URL is required for a signed candidate.')
+    }
+    def releaseApiHost = releaseApiUri.host?.toLowerCase()
+    if (releaseApiUri.scheme != 'https' || !releaseApiHost || releaseApiUri.userInfo != null ||
+            releaseApiUri.query != null || releaseApiUri.fragment != null ||
+            ['localhost', '127.0.0.1', '::1', 'example.com'].contains(releaseApiHost) ||
+            ['.localhost', '.invalid', '.example.com', '.test'].any { suffix -> releaseApiHost.endsWith(suffix) }) {
+        throw new GradleException('A valid production HTTPS API base URL is required for a signed candidate.')
+    }
 }
 
 android {
@@ -35,6 +71,17 @@ android {
         buildConfig true
     }
 
+    signingConfigs {
+        release {
+            if (releaseSigningConfigured) {
+                storeFile file(releaseSigningEnvironment.keystorePath)
+                storePassword releaseSigningEnvironment.storePassword
+                keyAlias releaseSigningEnvironment.keyAlias
+                keyPassword releaseSigningEnvironment.keyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix '.debug'
@@ -44,7 +91,11 @@ android {
         }
         release {
             minifyEnabled false
+            buildConfigField 'String', 'API_BASE_URL', groovy.json.JsonOutput.toJson(releaseApiBaseUrl)
             manifestPlaceholders = [usesCleartextTraffic: false]
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 

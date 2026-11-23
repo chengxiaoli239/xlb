@@ -20,6 +20,16 @@ Android 客户端采用 GPL-3.0，来源和发布源码要求见 [NOTICE](NOTICE
 
 ## 本地真机调试
 
+### Android signed release candidate
+
+`.github/workflows/android-release-candidate.yml` provides a manual, main-only signed APK candidate build for review. It requires the protected GitHub environment `android-release-candidate` to provide `XLB_ANDROID_RELEASE_KEYSTORE_BASE64`, `XLB_ANDROID_RELEASE_STORE_PASSWORD`, `XLB_ANDROID_RELEASE_KEY_ALIAS`, `XLB_ANDROID_RELEASE_KEY_PASSWORD`, plus the environment variable `XLB_ANDROID_RELEASE_API_BASE_URL`. The release API URL must be a non-placeholder HTTPS origin. The build fails closed when credentials are incomplete, the keystore file is missing, signing is required but absent, or the API URL is invalid. Signing material is restored only into the runner temporary directory and is never written to the repository or build artifact.
+
+The workflow runs Release unit tests/lint, verifies APK signature and package ID, emits a source-commit/hash manifest, creates GitHub build provenance attestation, and uploads the APK plus manifest as a 14-day review artifact. It does not create a GitHub Release, upload to a store, publish to users, or override the default Android member bridge gate. A candidate artifact is not a release approval or proof of production member VPN behavior.
+
+Before the protected workflow can run, a repository owner must configure the environment protection reviewers and secrets through GitHub settings. A valid signing keystore and production API origin are external release inputs, not repository defaults.
+
+### Debug installation
+
 ```sh
 cd apps/android
 JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \

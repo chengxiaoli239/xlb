@@ -31,7 +31,7 @@
 
 | 发布阶段 | 状态 | 下一退出门 |
 | --- | --- | --- |
-| E0 地基 | 部分完成（Android native APK 检查、metadata-only 清单 `44943107063`、源码与 Android runtime SBOM artifacts `45013262238`、SBOM provenance attestation `45028876877` 均 hosted 全绿；source 与 Android SBOM 下载后各自 verify 通过） | 补生产 APK 签名、可信制品存储、staging/回滚；合规与 D 决策保留为发布门；E0 放行仍要求 SBOM attestation job 成功 |
+| E0 地基 | 部分完成（Android native APK 检查、metadata-only 清单 `44943107063`、源码与 Android runtime SBOM artifacts `45013262238`、SBOM provenance attestation `45028876877` 均 hosted 全绿；source 与 Android SBOM 下载后各自 verify 通过；新增受保护环境/manual-only 的 Android signed release-candidate workflow） | 该 workflow 尚无 protected environment、审核者、release signing secrets 与正式 API base URL 配置；仅在环境授权后构建签名候选 APK，并通过 artifact manifest/provenance 提供审阅，不创建 Release 或商店发布。仍需 staging/回滚、可信制品保留；合规与 D 决策保留为发布门，E0 放行要求 attestations 与制品验签通过 |
 | E1 会员数据面放行 | 未通过 | 真实 member profile、双真机复用拒绝、节点撤权回执/最终流量和连接验收 |
 | E2 工程化 | 部分完成：`node_fleet_plan.py` 有界 manifest / deterministic plan-only waves；`node_fleet_recovery.py` 本机 UTC review-only 失败回收预览绑定 release intent、batch/generation、账号区域、归属标签和 5 分钟 inventory 新鲜度；ops 52 tests，hosted CI `45116749400` 全绿 | 尚无认证 inventory 数据源、批量执行器、真实失败回收、常驻受控 worker、实测容量与热备/回收演练；preview 不代表可执行或真实资源事实 |
 | E3 四端 | 部分完成 | Android 会员真机数据面闭环；Windows 账户壳与 MSVC/Credential Manager smoke 已通过 hosted run，下一步才是 Mihomo/proof bridge/TUN 与 Windows 运行验收；macOS/iOS 条件与后续验收 |
