@@ -1,7 +1,7 @@
 package com.xlb.vpn.data;
 
 /** Instrumentation-only signer callback contract; it is not connected to the VPN or bridge lifecycle. */
-final class DeviceProofJni {
+public final class DeviceProofJni {
     static {
         System.loadLibrary("xlbcore");
     }
@@ -17,19 +17,19 @@ final class DeviceProofJni {
                 && nativeCompleteTls13MtlsHandshake(signer, publicKeySpkiDer);
     }
 
-    static String startNodeAgentFixture(String requestJson) {
+    public static String startNodeAgentFixture(String requestJson) {
         return nativeStartNodeAgentFixture(requestJson);
     }
 
-    static void stopNodeAgentFixture() {
+    public static void stopNodeAgentFixture() {
         nativeStopNodeAgentFixture();
     }
 
-    static String nodeAgentFixtureStatus() {
+    public static String nodeAgentFixtureStatus() {
         return nativeNodeAgentFixtureStatus();
     }
 
-    static String revokeNodeAgentFixturePeer() {
+    public static String revokeNodeAgentFixturePeer() {
         return nativeRevokeNodeAgentFixturePeer();
     }
 

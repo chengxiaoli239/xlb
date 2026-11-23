@@ -139,3 +139,13 @@ printf 'Running Keystore and anonymous recovery instrumentation...\n'
     -e disposable_avd true \
     -e isolated_api true \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
+
+printf 'Running proof-bridge and member-session native integration tests...\n'
+"$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+    -e disposable_avd true \
+    -e class com.xlb.vpn.data.DeviceProofCertificateInstrumentedTest#keystoreSignerConnectsThroughNativeBridgeToAuthorizedIsolatedNodePeer \
+    com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
+"$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+    -e disposable_avd true \
+    -e class com.xlb.vpn.tunnel.MemberTunnelSessionInstrumentedTest#serverAuthorizedGrantLoadsAuthenticatedProfileAndClosesNativeBridgeResources \
+    com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
