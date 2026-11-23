@@ -31,6 +31,33 @@ import java.util.concurrent.atomic.AtomicReference;
 @RunWith(AndroidJUnit4.class)
 public final class XlbVpnServiceAdmissionInstrumentedTest {
     @Test
+    public void serviceDestructionClearsAnUnconsumedMemberGrant() throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        String installationId = MemberTunnelGrantAvdFixture.newInstallationId();
+        MemberTunnelGrant grant = MemberTunnelGrantAvdFixture.createGrant(
+                installationId, MemberTunnelGrantAvdFixture.publicKey(installationId),
+                "https://node.example.invalid:9443", MemberTunnelGrantAvdFixture.trustedSystemCaPem());
+        long handoffId = MemberTunnelGrantStore.publish(grant);
+        Intent unknownAction = new Intent(context, XlbVpnService.class)
+                .setAction("com.xlb.vpn.TEST_UNKNOWN_ACTION");
+
+        try {
+            assertNotNull("VPN service did not start for the lifecycle test", context.startService(unknownAction));
+            long deadline = SystemClock.elapsedRealtime() + TimeUnit.SECONDS.toMillis(5);
+            while (MemberTunnelGrantStore.hasPendingHandoff() && SystemClock.elapsedRealtime() < deadline) {
+                SystemClock.sleep(25);
+            }
+
+            assertNull("service destruction left an unconsumed member grant", MemberTunnelGrantStore.consume(handoffId));
+        } finally {
+            MemberTunnelGrantStore.clear();
+            context.stopService(unknownAction);
+            MemberTunnelGrantAvdFixture.deleteInstallationKey(installationId);
+        }
+    }
+
+    @Test
     public void verifiedMemberGrantIsConsumedButNeverStartsTunnelWhileProductionGateIsClosed() throws Exception {
         requireDisposableEmulator();
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();

@@ -171,6 +171,7 @@ public final class XlbVpnService extends VpnService {
     @Override
     public void onDestroy() {
         int attempt = tunnelAttempts.invalidate();
+        MemberTunnelGrantStore.clear();
         requestMemberSessionStop();
         worker.execute(() -> {
             if (closeMemberSession()) setMemberTunnelForAttempt(attempt, false);
