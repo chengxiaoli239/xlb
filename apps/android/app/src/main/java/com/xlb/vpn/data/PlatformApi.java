@@ -28,6 +28,7 @@ public final class PlatformApi {
     private final SecureSessionStore sessionStore;
     private final DeviceKeyStore deviceKeyStore = new DeviceKeyStore();
     private MemberDeviceProof memberDeviceProof;
+    private MemberTunnelGrant memberTunnelGrant;
 
     public PlatformApi(String baseUrl, SecureSessionStore sessionStore) {
         this.baseUrl = baseUrl;
@@ -35,7 +36,7 @@ public final class PlatformApi {
     }
 
     public MemberAccount currentAccount() throws PlatformApiException {
-        memberDeviceProof = null;
+        clearMemberTunnelAuthorization();
         JSONObject account = request("GET", "/api/v1/auth/session", null).optJSONObject("data");
         if (account != null && !"member".equals(account.optString("role"))) {
             sessionStore.clearSession();
@@ -45,7 +46,7 @@ public final class PlatformApi {
     }
 
     public MemberAccount login(String email, String password) throws PlatformApiException {
-        memberDeviceProof = null;
+        clearMemberTunnelAuthorization();
         JSONObject payload = new JSONObject();
         try {
             payload.put("email", email.trim());
@@ -66,7 +67,7 @@ public final class PlatformApi {
     }
 
     public MemberAccount registerAnonymousAccount(boolean userConsented) throws PlatformApiException {
-        memberDeviceProof = null;
+        clearMemberTunnelAuthorization();
         if (!userConsented) {
             throw new PlatformApiException("需要先确认匿名账号使用说明");
         }
@@ -107,7 +108,7 @@ public final class PlatformApi {
     }
 
     public ClientSnapshot synchronize(MemberAccount account) throws PlatformApiException {
-        memberDeviceProof = null;
+        clearMemberTunnelAuthorization();
         try {
             ClientSnapshot overview = withOverview(new ClientSnapshot(account, null, null));
             if (overview.entitlement == null) {
@@ -116,6 +117,7 @@ public final class PlatformApi {
             String registrationMessage = null;
             NodeAuthorizationStatus nodeAuthorizationStatus = NodeAuthorizationStatus.UNAVAILABLE;
             MemberDeviceProof authorizedProof = null;
+            MemberTunnelGrant authorizedGrant = null;
             try {
                 String installationId = sessionStore.installationId();
                 String publicKey = deviceKeyStore.publicKey(installationId);
@@ -157,6 +159,24 @@ public final class PlatformApi {
                             deviceSigner(installationId));
                     if (authorizedProof == null) {
                         nodeAuthorizationStatus = NodeAuthorizationStatus.UNAVAILABLE;
+                    } else {
+                        authorizedGrant = MemberTunnelGrant.fromAuthorizedResponse(authorizedProof,
+                                nodeAuthorization.optString("status", null),
+                                nodeAuthorization.optString("node_id", null),
+                                nodeAuthorization.optString("peer_id", null),
+                                nodeAuthorization.optLong("peer_generation", 0),
+                                nodeAuthorization.optLong("device_binding_generation", 0),
+                                nodeAuthorization.optString("bridge_endpoint", null),
+                                nodeAuthorization.optString("bridge_server_ca_pem", null),
+                                nodeAuthorization.optString("profile", null),
+                                nodeAuthorization.optString("profile_sha256", null),
+                                nodeAuthorization.optString("profile_renderer_id", null),
+                                nodeAuthorization.optString("profile_renderer_version", null),
+                                nodeAuthorization.optString("bridge_protocol", null),
+                                nodeAuthorization.optBoolean("connectable", false));
+                        if (authorizedGrant == null) {
+                            nodeAuthorizationStatus = NodeAuthorizationStatus.UNAVAILABLE;
+                        }
                     }
                 }
                 try {
@@ -173,16 +193,17 @@ public final class PlatformApi {
             if (authorizedProof != null && authorizedProof.matches(
                     account.id, snapshot.device, snapshot.entitlement != null)) {
                 memberDeviceProof = authorizedProof;
+                memberTunnelGrant = authorizedGrant;
             } else if (nodeAuthorizationStatus == NodeAuthorizationStatus.READY) {
-                memberDeviceProof = null;
+                clearMemberTunnelAuthorization();
                 return snapshot.withNodeAuthorizationStatus(NodeAuthorizationStatus.UNAVAILABLE);
             }
             return snapshot;
         } catch (PlatformApiException exception) {
-            memberDeviceProof = null;
+            clearMemberTunnelAuthorization();
             return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
         } catch (Exception exception) {
-            memberDeviceProof = null;
+            clearMemberTunnelAuthorization();
             return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
         }
     }
@@ -192,8 +213,18 @@ public final class PlatformApi {
         return memberDeviceProof;
     }
 
-    public ClientSnapshot loadDevices(MemberAccount account) throws PlatformApiException {
+    /** Returns only the last synchronized, identity-bound profile and bridge trust material. */
+    public MemberTunnelGrant verifiedMemberTunnelGrant() {
+        return memberTunnelGrant;
+    }
+
+    private void clearMemberTunnelAuthorization() {
         memberDeviceProof = null;
+        memberTunnelGrant = null;
+    }
+
+    public ClientSnapshot loadDevices(MemberAccount account) throws PlatformApiException {
+        clearMemberTunnelAuthorization();
         return withOverview(loadDevices(account, null));
     }
 
@@ -278,7 +309,7 @@ public final class PlatformApi {
     }
 
     public boolean removeDevice(String deviceId) throws PlatformApiException {
-        memberDeviceProof = null;
+        clearMemberTunnelAuthorization();
         if (deviceId == null || !DEVICE_ID.matcher(deviceId).matches()) {
             throw new PlatformApiException("设备编号无效，请刷新设备列表");
         }
@@ -287,12 +318,12 @@ public final class PlatformApi {
     }
 
     public void rotateInstallationId() {
-        memberDeviceProof = null;
+        clearMemberTunnelAuthorization();
         sessionStore.rotateInstallationId();
     }
 
     public void logout() throws PlatformApiException {
-        memberDeviceProof = null;
+        clearMemberTunnelAuthorization();
         try {
             request("POST", "/api/v1/auth/logout", new JSONObject());
         } finally {

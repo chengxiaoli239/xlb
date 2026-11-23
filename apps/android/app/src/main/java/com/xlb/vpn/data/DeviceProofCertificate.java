@@ -7,7 +7,7 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 
 /** Ephemeral certificate view over the installation Keystore signer. */
-final class DeviceProofCertificate implements AutoCloseable {
+public final class DeviceProofCertificate implements AutoCloseable {
     private static final Object LOCK = new Object();
     private static final int MAX_CERTIFICATE_BYTES = 8 * 1024;
 
@@ -23,7 +23,7 @@ final class DeviceProofCertificate implements AutoCloseable {
         this.certificateDer = certificateDer;
     }
 
-    static DeviceProofCertificate create(MemberDeviceProof proof) throws GeneralSecurityException {
+    public static DeviceProofCertificate create(MemberDeviceProof proof) throws GeneralSecurityException {
         if (proof == null || !proof.hasRequiredReferences()) {
             throw new GeneralSecurityException("verified member device proof is unavailable");
         }
@@ -71,7 +71,7 @@ final class DeviceProofCertificate implements AutoCloseable {
         return certificateDer.clone();
     }
 
-    synchronized BridgeCredentials startProofBridge(String nodeEndpoint, String trustedNodeCaPem)
+    public synchronized BridgeCredentials startProofBridge(String nodeEndpoint, String trustedNodeCaPem)
             throws GeneralSecurityException {
         synchronized (LOCK) {
             if (closed) {
@@ -99,13 +99,13 @@ final class DeviceProofCertificate implements AutoCloseable {
         }
     }
 
-    synchronized boolean proofBridgeRunning() {
+    public synchronized boolean proofBridgeRunning() {
         synchronized (LOCK) {
             return !closed && nativeProofBridgeRunning();
         }
     }
 
-    synchronized void stopProofBridge() {
+    public synchronized void stopProofBridge() {
         synchronized (LOCK) {
             nativeStopProofBridge();
             clearBridgeCredentials();
@@ -136,7 +136,7 @@ final class DeviceProofCertificate implements AutoCloseable {
         return "DeviceProofCertificate[ephemeral]";
     }
 
-    static final class BridgeCredentials {
+    public static final class BridgeCredentials {
         private final char[] username;
         private final char[] password;
 
@@ -145,15 +145,15 @@ final class DeviceProofCertificate implements AutoCloseable {
             this.password = password.toCharArray();
         }
 
-        synchronized String usernameForProfile() {
+        public synchronized String usernameForProfile() {
             return new String(username);
         }
 
-        synchronized String passwordForProfile() {
+        public synchronized String passwordForProfile() {
             return new String(password);
         }
 
-        synchronized void clear() {
+        public synchronized void clear() {
             Arrays.fill(username, '\0');
             Arrays.fill(password, '\0');
         }
