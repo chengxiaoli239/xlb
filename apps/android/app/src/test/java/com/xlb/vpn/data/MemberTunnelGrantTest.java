@@ -91,6 +91,15 @@ public final class MemberTunnelGrantTest {
         assertNull(create("ready", NODE_ID, PEER_ID, 1, 2,
                 "https://user@node-1.example.invalid", CA_BUNDLE, PROFILE,
                 digest(PROFILE), "xlb-mihomo-bridge-v1", "1.0.0", "xlb-proof-v1", true));
+        assertNull(create("ready", NODE_ID, PEER_ID, 1, 2,
+                "https://node-1.example.invalid/v1/tunnel", CA_BUNDLE, PROFILE,
+                digest(PROFILE), "xlb-mihomo-bridge-v1", "1.0.0", "xlb-proof-v1", true));
+        assertNull(create("ready", NODE_ID, PEER_ID, 1, 2,
+                "https://node-1.example.invalid:0", CA_BUNDLE, PROFILE,
+                digest(PROFILE), "xlb-mihomo-bridge-v1", "1.0.0", "xlb-proof-v1", true));
+        assertNull(create("ready", NODE_ID, PEER_ID, 1, 2,
+                "https://node-1.example.invalid:65536", CA_BUNDLE, PROFILE,
+                digest(PROFILE), "xlb-mihomo-bridge-v1", "1.0.0", "xlb-proof-v1", true));
     }
 
     @Test

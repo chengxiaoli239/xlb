@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,8 +58,14 @@ func (manager *Manager) Start(listenAddress, remoteURL, caBundle, localUsername,
 	}
 	parsedURL, err := url.Parse(remoteURL)
 	if err != nil || parsedURL.Scheme != "https" || parsedURL.Hostname() == "" || parsedURL.User != nil ||
-		parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+		(parsedURL.Path != "" && parsedURL.Path != "/") || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
 		return errors.New("proof bridge endpoint must be a trusted HTTPS origin")
+	}
+	if port := parsedURL.Port(); port != "" {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return errors.New("proof bridge endpoint must be a trusted HTTPS origin")
+		}
 	}
 	if err := validateLoopbackListenAddress(listenAddress); err != nil {
 		return err

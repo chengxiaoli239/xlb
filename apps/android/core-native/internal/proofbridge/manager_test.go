@@ -123,6 +123,21 @@ func TestManagerRejectsNonHTTPSNodeEndpoint(t *testing.T) {
 	}
 }
 
+func TestManagerRejectsPathAndInvalidPortInNodeEndpoint(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://node.test/v1/member-bridge",
+		"https://node.test:0",
+		"https://node.test:65536",
+	} {
+		t.Run(endpoint, func(t *testing.T) {
+			manager := NewManager()
+			if err := manager.Start("127.0.0.1:0", endpoint, testCARoot(t), "test-user", "test-password", testDeviceCertificate(t)); err == nil {
+				t.Fatal("expected invalid data-plane origin to fail")
+			}
+		})
+	}
+}
+
 func testDeviceCertificate(t *testing.T) tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

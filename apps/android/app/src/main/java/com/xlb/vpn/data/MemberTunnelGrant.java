@@ -86,8 +86,12 @@ public final class MemberTunnelGrant {
         if (endpoint == null || endpoint.isEmpty() || endpoint.length() > 2048) return false;
         try {
             URI uri = URI.create(endpoint);
+            int port = uri.getPort();
+            String path = uri.getPath();
             return "https".equals(uri.getScheme()) && uri.getHost() != null
-                    && uri.getUserInfo() == null && uri.getQuery() == null && uri.getFragment() == null;
+                    && uri.getUserInfo() == null && uri.getQuery() == null && uri.getFragment() == null
+                    && (path == null || path.isEmpty() || "/".equals(path))
+                    && (port == -1 || (port >= 1 && port <= 65535));
         } catch (IllegalArgumentException exception) {
             return false;
         }
