@@ -4,7 +4,9 @@
 
 ## 开发进度（2026-11-24）
 
-- **M11 Docker 构建上下文排除本地凭据与运行数据（2026-11-24，本机隔离构建夹具）**：把忽略规则放到仓库根 `.dockerignore`，覆盖根级和嵌套 `.env`/`.env.*`、Composer/npm/netrc 凭据、AWS/SSH 私有配置、`.key`/`.pem`/`.p8` 和密钥库格式、SQLite、依赖目录、构建输出、Laravel runtime storage/cache 与 `ops/.state`；移除不会用于根目录构建上下文的 `docker/.dockerignore`。10 个本地 Docker 隔离夹具验证环境文件、认证配置、私钥、AWS/SSH 文件、session 和 Laravel cache 均无法被 `COPY` 读取，并把 PHP/Web 容器构建加入 PR CI。实际镜像构建尚未验证：本机 Docker Hub 对 `nginx:1.27-alpine` 与 `php:8.4-cli` 均返回 OCI config descriptor `not found`，重试仍复现；提交后的 hosted CI 将验证镜像构建。没有读取或提交任何真实凭据，不代表镜像已在 staging/production 部署。
+- **M6/AWS 外部会话状态复核（2026-11-24，只读）**：使用项目固化的 `ops/aws-cli` 包装调用 `sts get-caller-identity --profile xlb-ops`，返回 session expired；本轮没有 AWS 读写资源操作。最近一次成功盘点是历史状态，不能当作当前资源证明。继续 M6 云端验收前需用户本人重新 `aws login`，随后先只读盘点并重新审查 TTL/费用 plan；缺失的真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供。AWS 会话过期不阻断沙箱、Android、M10 或 M11 离线工作。
+
+- **M11 Docker 构建上下文排除本地凭据与运行数据（2026-11-24，本机隔离构建夹具）**：把忽略规则放到仓库根 `.dockerignore`，覆盖根级和嵌套 `.env`/`.env.*`、Composer/npm/netrc 凭据、AWS/SSH 私有配置、`.key`/`.pem`/`.p8` 和密钥库格式、SQLite、依赖目录、构建输出、Laravel runtime storage/cache 与 `ops/.state`；移除不会用于根目录构建上下文的 `docker/.dockerignore`。10 个本地 Docker 隔离构建夹具验证环境文件、认证配置、私钥、AWS/SSH 文件、session 和 Laravel cache 均无法被 `COPY` 读取，并把 PHP/Web 容器构建加入 PR CI。首次 hosted image build 成功拉取官方基础镜像，发现 PHP Composer 阶段缺少 `unzip`，已限定补入 vendor build stage；修复后的 hosted 构建仍待验证。本机 Docker Hub 拉取基础镜像返回 OCI config descriptor `not found`，未实际构建本地镜像。没有读取或提交任何真实凭据，不代表镜像已在 staging/production 部署。
 
 - **支付沙箱退款补偿失败重试回归（2026-11-24，本地 SQLite）**：用受控无效订单状态触发退款 worker 暂时失败，确认 compensation outbox 保留 pending、记录失败次数、权益仍有效且未提前写退款事件；恢复订单状态后重试，恰好完成一次沙箱撤权和 compensation。支付定向 `ProviderPaymentEventLedgerTest` 11/11、97 assertions；Laravel 全套 250 项中 249 通过、1 项既有跳过、2,171 assertions；Pint 与 `git diff --check` 通过。仅覆盖 local/testing 账本与沙箱 worker，不涉及商户真实退款或真实资金；节点撤权若无匹配回执仍不得宣称断流。下一步继续补齐上线所需外部支付契约和 staging 放行材料之外的离线验证。
 
