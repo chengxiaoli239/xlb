@@ -706,7 +706,7 @@ function PlansPage({ role, refresh, notify, onDataChange }: { role: User['role']
     <section className="panel"><SectionTitle title="权益一致性" detail="唯一事实源设计" /><div className="service-strip"><ServiceItem label="官网展示" status="共用套餐 API" icon={Globe2} /><ServiceItem label="自有 App" status="共用账户权益" icon={Smartphone} /><ServiceItem label="Clash 订阅" status="服务端校验" icon={Link2} /><ServiceItem label="运营后台" status="审计可查" icon={ShieldCheck} /></div></section>
     {selection && <Modal title="确认套餐" detail="确认所选套餐并继续付款" onClose={() => { if (!busy) setSelection(null); }}>
       <dl className="detail-grid"><div><dt>套餐</dt><dd>{selection.plan.name}</dd></div><div><dt>金额</dt><dd>{money(selection.plan.price_cents)}</dd></div><div><dt>有效期</dt><dd>{selection.plan.duration_days} 天</dd></div><div><dt>套餐流量</dt><dd>{selection.plan.traffic_gb} GB</dd></div></dl>
-      <div className="notice notice-neutral"><CreditCard size={16} /><span>本地沙箱会创建测试订单；下一步可模拟支付并检查会员到期时间与固定订阅链接。</span></div>
+      <div className="notice notice-neutral"><CreditCard size={16} /><span>创建测试订单后可在订单详情模拟沙箱付款，检查会员权益与固定订阅链接；不会产生真实扣款。</span></div>
       {error && <p className="order-error" role="alert">{error}</p>}
       <div className="modal-actions"><button className="secondary-button" disabled={busy} onClick={() => setSelection(null)}>返回</button><button className="primary-button" disabled={busy} onClick={() => void create()}>{busy ? '提交中…' : '创建测试订单'}</button></div>
     </Modal>}
