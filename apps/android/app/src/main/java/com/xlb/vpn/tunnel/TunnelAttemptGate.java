@@ -1,24 +1,30 @@
 package com.xlb.vpn.tunnel;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
 /** Tracks which asynchronous tunnel start is still allowed to publish or continue. */
 final class TunnelAttemptGate {
-    private final AtomicInteger generation = new AtomicInteger();
+    private int generation;
 
-    int begin() {
-        return generation.incrementAndGet();
+    synchronized int begin() {
+        return ++generation;
     }
 
-    int invalidate() {
-        return generation.incrementAndGet();
+    synchronized int invalidate() {
+        return ++generation;
     }
 
-    boolean isCurrent(int attempt) {
-        return generation.get() == attempt;
+    synchronized boolean isCurrent(int attempt) {
+        return generation == attempt;
     }
 
-    boolean finishIfCurrent(int attempt) {
-        return generation.compareAndSet(attempt, attempt + 1);
+    synchronized boolean finishIfCurrent(int attempt) {
+        if (generation != attempt) return false;
+        generation++;
+        return true;
+    }
+
+    synchronized boolean runIfCurrent(int attempt, Runnable action) {
+        if (generation != attempt) return false;
+        action.run();
+        return true;
     }
 }

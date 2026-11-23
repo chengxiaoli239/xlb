@@ -5,6 +5,8 @@ import org.junit.Test;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 public final class TunnelAttemptGateTest {
     @Test
     public void stopInvalidatesQueuedStartAndNewStartGetsNewGeneration() {
@@ -29,5 +31,20 @@ public final class TunnelAttemptGateTest {
         assertTrue(gate.isCurrent(currentAttempt));
         assertTrue(gate.finishIfCurrent(currentAttempt));
         assertFalse(gate.isCurrent(currentAttempt));
+    }
+
+    @Test
+    public void staleAttemptCannotPublishMemberOwnershipAfterReplacement() {
+        TunnelAttemptGate gate = new TunnelAttemptGate();
+        AtomicBoolean memberTunnel = new AtomicBoolean();
+        int oldMemberAttempt = gate.begin();
+        gate.runIfCurrent(oldMemberAttempt, () -> memberTunnel.set(true));
+
+        int replacementAttempt = gate.begin();
+        gate.runIfCurrent(replacementAttempt, () -> memberTunnel.set(true));
+        boolean staleUpdateApplied = gate.runIfCurrent(oldMemberAttempt, () -> memberTunnel.set(false));
+
+        assertFalse(staleUpdateApplied);
+        assertTrue(memberTunnel.get());
     }
 }

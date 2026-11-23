@@ -82,10 +82,10 @@ public final class XlbVpnService extends VpnService {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
-            tunnelAttempts.invalidate();
+            int attempt = tunnelAttempts.invalidate();
             MemberTunnelGrantStore.clear();
             requestMemberSessionStop();
-            worker.execute(this::stopTunnel);
+            worker.execute(() -> stopTunnel(attempt));
             return START_NOT_STICKY;
         }
         if (ACTION_START_MEMBER.equals(intent.getAction())) {
@@ -96,11 +96,11 @@ public final class XlbVpnService extends VpnService {
                 rejectStart("会员安全线路尚未接入");
                 return START_NOT_STICKY;
             }
-            currentTunnelIsMember = true;
+            int attempt = tunnelAttempts.begin();
+            setMemberTunnelForAttempt(attempt, true);
             createChannel();
             startForeground(NOTIFICATION_ID, notification("正在连接"));
             publish(STATE_CONNECTING, null);
-            int attempt = tunnelAttempts.begin();
             worker.execute(() -> startMemberTunnel(grant, attempt));
             return START_NOT_STICKY;
         }
@@ -123,10 +123,10 @@ public final class XlbVpnService extends VpnService {
             rejectStart("没有可用的线路配置");
             return START_NOT_STICKY;
         }
+        int attempt = tunnelAttempts.begin();
         createChannel();
         startForeground(NOTIFICATION_ID, notification("正在连接"));
         publish(STATE_CONNECTING, null);
-        int attempt = tunnelAttempts.begin();
         worker.execute(() -> startTunnel(profile, requestedRouteName, attempt));
         return START_NOT_STICKY;
     }
@@ -138,19 +138,19 @@ public final class XlbVpnService extends VpnService {
 
     @Override
     public void onRevoke() {
-        tunnelAttempts.invalidate();
+        int attempt = tunnelAttempts.invalidate();
         requestMemberSessionStop();
-        worker.execute(this::stopTunnel);
+        worker.execute(() -> stopTunnel(attempt));
         super.onRevoke();
     }
 
     @Override
     public void onDestroy() {
-        tunnelAttempts.invalidate();
+        int attempt = tunnelAttempts.invalidate();
         MemberTunnelGrantStore.clear();
         requestMemberSessionStop();
         worker.execute(() -> {
-            if (closeMemberSession()) currentTunnelIsMember = false;
+            if (closeMemberSession()) setMemberTunnelForAttempt(attempt, false);
             closeCore();
         });
         worker.shutdown();
@@ -166,7 +166,7 @@ public final class XlbVpnService extends VpnService {
             return;
         }
         if (!tunnelAttempts.isCurrent(attempt)) return;
-        currentTunnelIsMember = false;
+        setMemberTunnelForAttempt(attempt, false);
         Future<?> operation = tunnelWorker.submit(() -> startTunnelInternal(profile, requestedRouteName, attempt));
         try {
             operation.get(20, TimeUnit.SECONDS);
@@ -252,7 +252,7 @@ public final class XlbVpnService extends VpnService {
             }
         } catch (ExecutionException | InterruptedException exception) {
             if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
-            if (closeMemberSession()) currentTunnelIsMember = false;
+            if (closeMemberSession()) setMemberTunnelForAttempt(attempt, false);
             if (tunnelAttempts.finishIfCurrent(attempt)) {
                 Throwable cause = exception.getCause() == null ? exception : exception.getCause();
                 publish(STATE_ERROR, safeMessage(cause));
@@ -429,19 +429,23 @@ public final class XlbVpnService extends VpnService {
         }
     }
 
-    private void stopTunnel() {
+    private void stopTunnel(int attempt) {
         if (!closeMemberSession()) {
             closeCore();
             currentRouteName = "";
-            publish(STATE_ERROR, "VPN 资源清理尚未完成，请重试");
-            stopSelf();
+            tunnelAttempts.runIfCurrent(attempt, () -> {
+                publish(STATE_ERROR, "VPN 资源清理尚未完成，请重试");
+                stopSelf();
+            });
             return;
         }
         closeCore();
         currentRouteName = "";
-        currentTunnelIsMember = false;
-        publish(STATE_DISCONNECTED, null);
-        stopSelf();
+        tunnelAttempts.runIfCurrent(attempt, () -> {
+            currentTunnelIsMember = false;
+            publish(STATE_DISCONNECTED, null);
+            stopSelf();
+        });
     }
 
     private boolean closeMemberSession() {
@@ -492,7 +496,7 @@ public final class XlbVpnService extends VpnService {
     }
 
     private void rejectStart(String message) {
-        tunnelAttempts.invalidate();
+        int attempt = tunnelAttempts.invalidate();
         MemberTunnelGrantStore.clear();
         requestMemberSessionStop();
         createChannel();
@@ -501,18 +505,26 @@ public final class XlbVpnService extends VpnService {
             if (!closeMemberSession()) {
                 closeCore();
                 currentRouteName = "";
-                publish(STATE_ERROR, "VPN 资源清理尚未完成，请重试");
-                stopForeground(STOP_FOREGROUND_REMOVE);
-                stopSelf();
+                tunnelAttempts.runIfCurrent(attempt, () -> {
+                    publish(STATE_ERROR, "VPN 资源清理尚未完成，请重试");
+                    stopForeground(STOP_FOREGROUND_REMOVE);
+                    stopSelf();
+                });
                 return;
             }
             closeCore();
             currentRouteName = "";
-            currentTunnelIsMember = false;
-            publish(STATE_ERROR, message);
-            stopForeground(STOP_FOREGROUND_REMOVE);
-            stopSelf();
+            tunnelAttempts.runIfCurrent(attempt, () -> {
+                currentTunnelIsMember = false;
+                publish(STATE_ERROR, message);
+                stopForeground(STOP_FOREGROUND_REMOVE);
+                stopSelf();
+            });
         });
+    }
+
+    private void setMemberTunnelForAttempt(int attempt, boolean isMember) {
+        tunnelAttempts.runIfCurrent(attempt, () -> currentTunnelIsMember = isMember);
     }
 
     private void createChannel() {

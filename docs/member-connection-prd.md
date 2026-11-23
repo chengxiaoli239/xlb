@@ -2,7 +2,9 @@
 
 确认：2026-11-18 09:44。范围：自有 Android / Windows / macOS 客户端、会员网站、浏览器扩展，以及 Clash Verge 等兼容客户端。本文区分产品目标、开发期验证和正式上线门槛；不表示当前代码或正式节点已实现。阶段进度见下文。
 
-## 开发进度（2026-11-23）
+## 开发进度（2026-11-24）
+
+- **M8 Android 会员隧道状态按启动代次归属（2026-11-24，本机与专用 AVD 离线验收）**：将 VPN service 的会员隧道标记更新放入 `TunnelAttemptGate` 的代次保护区间。旧会员启动失败或 stop/revoke 清理完成后，只有仍是当前代次的操作才能修改标记或发布 stop 完成状态；清理失败时保留原会员会话标记，新授权已排队时旧代次不能清除新标记。新增确定性 JVM 回归测试覆盖新 attempt 开始后旧 attempt 的清除操作被拒绝。Android 全套 `testDebugUnitTest`、`lintDebug`、`compileDebugAndroidTestJavaWithJavac`、Debug/AndroidTest APK build 与 `git diff --check` 通过；专用 `xlb-m9-recovery` AVD 上 rapid stop/start service instrumentation 1/1 通过。未运行实体手机或系统 TUN；会员 bridge admission gate 仍关闭，不代表真实 grant 替换、会员线路或节点撤权回执已验收。下一步继续为 service 的状态广播与 grant 生命周期补充代次关联测试，并等待真实节点 endpoint/CA/mTLS runtime 与匹配回执后再做双机数据面复测。
 
 - **M8 Android 异步 stop/new-start 代次门控（2026-11-23，本机离线验收）**：新增 `TunnelAttemptGate` 为 start、stop/revoke/destroy 分配单调代次，过期 start 在排队 worker 开始和清理旧 session 后被丢弃；core 初始化、profile 加载后、发布启动状态及建立 TUN 前均复查代次。过期 attempt 的 timeout/failure 不能推进或结束较新的 attempt。新增单测验证 stop 会使排队 start 失效、较旧失败不能结束新 attempt；Android JVM tests、AndroidTest 编译、lint、diff check 通过。未运行实体设备/TUN，native 调用本身的并发终止仍按 session stop-request 边界处理；不代表会员线路或节点回执验收。下一步继续检查更新授权替换场景的 grant 代次关联，并保持 member gate 关闭。
 
