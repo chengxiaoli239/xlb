@@ -12,7 +12,23 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY apps/php-api/composer.json apps/php-api/composer.lock ./
-RUN composer install --no-dev --no-interaction --no-scripts --prefer-dist --optimize-autoloader
+RUN set -eu; \
+    attempt=1; \
+    while [ "$attempt" -le 3 ]; do \
+        status=0; \
+        composer install --no-dev --no-interaction --no-scripts --prefer-dist --optimize-autoloader \
+            > /tmp/composer-install.log 2>&1 || status=$?; \
+        cat /tmp/composer-install.log; \
+        if [ "$status" -eq 0 ]; then \
+            rm -f /tmp/composer-install.log; \
+            exit 0; \
+        fi; \
+        if [ "$attempt" -eq 3 ] || ! grep -Eq 'HTTP/(1\.[01]|2) (502|503|504)' /tmp/composer-install.log; then \
+            exit "$status"; \
+        fi; \
+        sleep "$((attempt * 3))"; \
+        attempt=$((attempt + 1)); \
+    done
 
 FROM php-base AS runtime
 WORKDIR /app

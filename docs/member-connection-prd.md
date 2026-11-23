@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M11 Composer vendor 下载短暂 5xx 有界重试（2026-11-24，本机 shell 验证）**：针对两次 hosted PHP 镜像构建都在 GitHub zipball 下载遇到 HTTP/2 504，在 `docker/Dockerfile.php` 的 vendor stage 增加最多三次尝试，仅对 HTTP 502/503/504 延迟重试；依赖解析、认证及其他错误仍立即失败，非零最终状态原样返回。用 mock Composer 验证两次 504 后第三次成功，以及非 HTTP 错误只尝试一次；shell syntax 与 diff check 通过。hosted 镜像 build 仍需由后续 CI 确认。
+
 - **M11 hosted Docker 忽略规则回归（2026-11-24，主线 CI）**：`ops/test_docker_context.py` 在 CI `45261821374` 通过，10 个临时凭据/运行数据路径均被 Docker `.dockerignore` 拒绝，PHP/Web 镜像 job实际执行到 Composer 依赖下载阶段。此次镜像 build 随后因 GitHub API 对 `symfony/polyfill-mbstring` zipball 返回 HTTP/2 504 而失败；这不是上下文回归失败，也不是 PHP 代码测试失败。Laravel/API/Web/扩展、Go、ops、Android build/signing config/SBOM jobs 均通过。原 run 无法由 GitHub rerun 接口重跑，已更新记录并由后续主线 CI 再次验证。
 
 - **M10 PHP→Go TLS 1.3/mTLS provisioning 互通波动复核（2026-11-24，本机重复验收）**：针对 CI `45254810782` 曾出现的一次 peer 留在 `provisioning` 失败，单独重复同一 `NodePeerProvisioningTest` 10 次，每次 1/1、51 assertions 通过；主线 CI `45259345222` 和 `45261821374` 的 Laravel 集成 job 也通过。暂未复现，原失败原因仍未知，不据此宣称问题已根治。后续继续观察 hosted 重复运行与明确失败日志，不更改生产/节点行为。
