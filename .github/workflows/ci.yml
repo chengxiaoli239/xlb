@@ -120,7 +120,13 @@ jobs:
         uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: apps/node-agent/go.mod
-          cache-dependency-path: apps/node-agent/go.sum
+          cache-dependency-path: |
+            apps/node-agent/go.sum
+            apps/android/core-native/go.sum
+
+      - name: Test Android proof bridge against isolated Node Agent
+        working-directory: apps/android/core-native
+        run: go test -race ./internal/proofbridge ./internal/debugprofile
 
       - name: Test concurrent peer state and bridge
         working-directory: apps/node-agent
