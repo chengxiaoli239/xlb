@@ -99,31 +99,43 @@ public final class MemberTunnelSessionTest {
     }
 
     @Test
-    public void stopRequestDoesNotWaitForAnUnresponsiveStartupStage() throws Exception {
-        BlockingRuntime runtime = new BlockingRuntime();
-        MemberTunnelSession session = new MemberTunnelSession(runtime);
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        try {
-            Future<?> startup = executor.submit(() -> {
-                try {
-                    session.start(grant());
-                    fail("startup should observe the stop request");
-                } catch (Exception expected) {
-                    // The pending stop aborts startup after the blocked operation returns.
-                }
-            });
-            assertTrue(runtime.verificationStarted.await(2, TimeUnit.SECONDS));
+    public void stopRequestDoesNotWaitAtAnyUnresponsiveStartupStage() throws Exception {
+        List<String> startupStages = List.of("certificate", "bridge", "profile", "tun", "verify");
+        for (String blockedStage : startupStages) {
+            BlockingRuntime runtime = new BlockingRuntime(blockedStage);
+            MemberTunnelSession session = new MemberTunnelSession(runtime);
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            try {
+                Future<?> startup = executor.submit(() -> {
+                    try {
+                        session.start(grant());
+                        fail("startup should observe stop at " + blockedStage);
+                    } catch (Exception expected) {
+                        assertEquals("member tunnel session stop was requested", expected.getMessage());
+                    }
+                });
+                assertTrue("startup did not reach " + blockedStage,
+                        runtime.blockedStageStarted.await(2, TimeUnit.SECONDS));
 
-            Future<?> stopRequest = executor.submit(session::requestStop);
-            stopRequest.get(250, TimeUnit.MILLISECONDS);
-            runtime.releaseVerification.countDown();
-            startup.get(2, TimeUnit.SECONDS);
-            assertFalse(session.isStarted());
-            assertTrue(runtime.events.contains("stop-tun"));
-            assertTrue(runtime.events.contains("stop-bridge"));
-        } finally {
-            runtime.releaseVerification.countDown();
-            executor.shutdownNow();
+                Future<?> stopRequest = executor.submit(session::requestStop);
+                stopRequest.get(250, TimeUnit.MILLISECONDS);
+                runtime.releaseBlockedStage.countDown();
+                startup.get(2, TimeUnit.SECONDS);
+
+                assertFalse(session.isStarted());
+                assertTrue("TUN/core not stopped after " + blockedStage, runtime.events.contains("stop-tun"));
+                assertTrue("bridge not stopped after " + blockedStage, runtime.events.contains("stop-bridge"));
+                int blockedIndex = runtime.events.indexOf(blockedStage);
+                for (String laterStage : startupStages.subList(startupStages.indexOf(blockedStage) + 1,
+                        startupStages.size())) {
+                    assertFalse("startup continued to " + laterStage + " after stop at " + blockedStage,
+                            runtime.events.subList(blockedIndex + 1,
+                                    runtime.events.indexOf("stop-tun")).contains(laterStage));
+                }
+            } finally {
+                runtime.releaseBlockedStage.countDown();
+                executor.shutdownNow();
+            }
         }
     }
 
@@ -206,36 +218,53 @@ public final class MemberTunnelSessionTest {
     }
 
     private static final class BlockingRuntime implements MemberTunnelSession.Runtime {
-        private final CountDownLatch verificationStarted = new CountDownLatch(1);
-        private final CountDownLatch releaseVerification = new CountDownLatch(1);
+        private final String blockedStage;
+        private final CountDownLatch blockedStageStarted = new CountDownLatch(1);
+        private final CountDownLatch releaseBlockedStage = new CountDownLatch(1);
         private final List<String> events = new ArrayList<>();
+
+        private BlockingRuntime(String blockedStage) {
+            this.blockedStage = blockedStage;
+        }
 
         @Override
         public MemberTunnelSession.ProofHandle createDeviceCertificate(MemberTunnelGrant grant) {
+            step("certificate");
             return () -> events.add("close-certificate");
         }
 
         @Override
         public AutoCloseable startBridge(MemberTunnelSession.ProofHandle certificate, MemberTunnelGrant grant) {
+            step("bridge");
             return () -> events.add("clear-credentials");
         }
 
         @Override
-        public void loadMemberProfile(MemberTunnelGrant grant, AutoCloseable credentials) {}
+        public void loadMemberProfile(MemberTunnelGrant grant, AutoCloseable credentials) {
+            step("profile");
+        }
 
         @Override
-        public void establishTun() {}
+        public void establishTun() {
+            step("tun");
+        }
 
         @Override
         public void verifyTunnel() {
-            verificationStarted.countDown();
+            step("verify");
+        }
+
+        private void step(String name) {
+            events.add(name);
+            if (!name.equals(blockedStage)) return;
+            blockedStageStarted.countDown();
             boolean released = false;
             while (!released) {
                 try {
-                    releaseVerification.await();
+                    releaseBlockedStage.await();
                     released = true;
                 } catch (InterruptedException ignored) {
-                    // Simulate a native/network operation that does not promptly honor cancellation.
+                    // Simulate a native operation that does not promptly honor cancellation.
                 }
             }
         }
