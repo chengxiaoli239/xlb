@@ -57,7 +57,7 @@ CDN **不是 VPN 数据通道**，不承载任意 VPN TCP/UDP 隧道，也不替
 
 ## 6. 发布流水线与回滚
 
-已加入的 [CI workflow](../.github/workflows/ci.yml) 在 push/PR 上执行 Web build、Node API TypeScript build、Node API tests 和 Laravel tests，并已配置从仓库根目录构建 PHP 与 Web 容器镜像。根目录 `.dockerignore` 排除所有层级的 `.env`/`.env.*`、Composer/npm/netrc 凭据文件、AWS/SSH 私有配置、密钥库和私钥格式、依赖、构建产物、SQLite 数据库、Laravel runtime storage/cache 与 `ops/.state`；10 个 Docker 隔离夹具确认环境文件、认证配置、私钥、AWS/SSH 文件、session 与 Laravel cache 不可被 `COPY` 读取。首次 hosted image build 成功拉取镜像并发现 PHP Composer 阶段缺少 `unzip`，已将该工具限定安装在 vendor build stage，下一次 CI 复验中。本机 Docker Hub 拉取官方基础镜像仍返回 OCI config descriptor 错误。CI 仍没有部署步骤、制品发布、环境审批、镜像推送或生产密钥注入。它是 CI，不是 CD。
+已加入的 [CI workflow](../.github/workflows/ci.yml) 在 push/PR 上执行 Web build、Node API TypeScript build、Node API tests 和 Laravel tests，并从仓库根目录构建 PHP 与 Web 容器镜像。根目录 `.dockerignore` 排除所有层级的 `.env`/`.env.*`、Composer/npm/netrc 凭据文件、AWS/SSH 私有配置、密钥库和私钥格式、依赖、构建产物、SQLite 数据库、Laravel runtime storage/cache 与 `ops/.state`；10 个 Docker 隔离夹具确认相关本地输入不可被 `COPY` 读取。PHP Composer vendor stage 安装 `unzip` 后，hosted CI `45259345222` 的 PHP/Web 镜像构建成功。本机 Docker Hub 拉取官方基础镜像仍返回 OCI config descriptor 错误。CI 没有部署步骤、制品发布、环境审批、镜像推送或生产密钥注入。它是 CI，不是 CD。
 
 现有容器定义：
 
