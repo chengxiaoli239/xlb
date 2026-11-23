@@ -159,6 +159,7 @@ class NodePeerProvisioningTest extends TestCase
             config([
                 'node_access.driver' => 'agent',
                 'node_access.provisioning_enabled' => true,
+                'node_access.agent.timeout_seconds' => 15,
                 'node_access.agent.client_certificate' => $startup['client_certificate'],
                 'node_access.agent.client_key' => $startup['client_private_key'],
                 'node_access.agent.ca_bundle' => $startup['ca_certificate'],
@@ -171,8 +172,14 @@ class NodePeerProvisioningTest extends TestCase
             $this->assertSame(1, app(NodePeerProvisioningProcessor::class)->processDue());
 
             $peer = DB::table('node_access_peers')->where('device_id', 'device-provision-1')->first();
+            $outboxAfterProcessing = DB::table('node_access_provisioning_outbox')
+                ->where('peer_id', 'peer-provision-1')->first();
             $this->assertNotNull($peer);
-            $this->assertSame('active', $peer->status);
+            $this->assertSame('active', $peer->status, json_encode([
+                'outbox_status' => $outboxAfterProcessing->status ?? null,
+                'last_error_code' => $outboxAfterProcessing->last_error_code ?? null,
+                'attempts' => $outboxAfterProcessing->attempts ?? null,
+            ]));
             $this->assertSame('confirmed', $peer->provision_confirmation_status);
             $this->assertSame('mihomo-yaml', $peer->profile_format);
             $this->assertSame('xlb-mihomo-bridge-v1', $peer->profile_renderer_id);
