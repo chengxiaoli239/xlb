@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M8 VPN 权限回调后 fresh member grant 联合验收（2026-11-24，专用 AVD）**：补足 ActivityScenario 重建之后权限结果到达的整条离线链路。测试启动真实 `MainActivity`，local fake API 返回 member session/READY authorization，重建后确认旧 pending grant 没有恢复；模拟 VPN 权限批准回调后，App 再次读取 session、签署新的设备 challenge、校验当前 READY grant 并发起 member handoff，最后由关闭的 service gate 明确拒绝。专用 `xlb-m9-recovery` AVD 1/1 通过；Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 及 `git diff --check` 通过。该测试没有弹系统 VPN 权限对话框、没有模拟 OS 进程终止、没有创建 TUN/真实节点；只证明应用回调恢复时 fresh authorization 流程与生产关闭 gate 的本地契约。
+
 - **M8 VPN 权限回调后的会员 grant 恢复（2026-11-24，本机与专用 AVD 离线验收）**：会员连接触发系统 VPN 授权时，只把“待完成会员授权请求”布尔状态保存在 Activity instance state，不持久化 grant/profile/凭据；若系统 Activity 回调返回时进程内 grant 已因 Activity 重建丢失，则用当前会话重新调用 `PlatformApi.synchronize`，要求权益有效、节点授权 `READY` 且生成完整 grant 后才启动 member handoff。撤权/会话失效/无 grant 时显示不可用并保持关闭准入。策略用例验证仅“会员请求 + 用户已批准 + grant 已丢失”才触发重新同步；专用 AVD 实际 `ActivityScenario.recreate()` 测试确认待完成标记恢复且 grant 对象未恢复。Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 通过。未触发真实系统 VPN 权限弹窗、未模拟进程被系统杀死、未运行系统 TUN 或真实节点，不证明生产授权/线路。下一步用隔离 fake API 覆盖授权回调后重新同步及撤权失败关闭，再继续服务生命周期恢复边界。
 
 - **M8 Android 启动自动连接使用已验证会员 grant（2026-11-24，本机离线验收）**：修正启动自动连接策略此前仅检查权益和账户配置文本、随后调用 generic tunnel 的不匹配。现在只有用户显式开启自动连接、系统 VPN 权限已授予、会员权益有效、`PlatformApi` 已产出完整身份绑定 `MemberTunnelGrant` 且当前无活动隧道时才经会员 grant handoff 启动；不再把账号配置文本当授权或绕过 member admission gate。单测覆盖缺 grant、缺 VPN 权限、无权益、开关关闭和隧道已活动均不启动；Android 全套 JVM tests、lint、AndroidTest 编译、Debug/AndroidTest APK build 通过。member gate 仍关闭，测试未运行系统 TUN 或真实节点；没有可验证服务端 grant 时启动自动连接继续失败关闭。下一步继续检查 process/service 重建后是否可能把过期 grant 重新连接，并维持真实节点验收门。
@@ -50,7 +52,7 @@
 
 | 模块 | 当前状态 | 证据与未完成项 | 可并行推进 / 下一关 |
 | --- | --- | --- | --- |
-| Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、VPN 权限 Activity 重建后仅恢复请求标记并重新同步授权、关闭 gate 拒绝及 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；此前阶段 CI 全绿，当前 Activity 重建测试提交 `b19b7e1` 的主线 CI 运行中 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；ActivityScenario 覆盖配置重建，不覆盖真实系统 VPN 权限弹窗或 OS 进程终止；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 用隔离 fake API 覆盖批准回调后重新同步、授权撤回失败关闭，再检查 service process-death 生命周期；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
+| Android 会员连接 | `PlatformApi` challenge/ready-grant 解析、带 handoff ID 的单次 service intent、旧 handoff 拒绝、attempt 代次保护、状态广播保护、pending-grant 授权失效停止、按已验证 grant 启动自动连接、VPN 权限 Activity 重建后重新签 challenge/取得 fresh grant/发起 handoff、关闭 gate 拒绝及 stop/撤权/logout 清理均有 JVM/专用 AVD 验收；主线 CI `45237384820` 全绿 | AVD API 仍是 contract-shaped loopback fixture，不是 PHP 实际 ready 响应；测试模拟权限批准回调，没有弹系统授权框或模拟 OS 进程终止；未建立系统 TUN 或真实会员节点线路；member gate 仍关闭 | 接着验证授权撤回的 callback 失败关闭和 service process-death 生命周期；真实 PHP ready grant、节点 mTLS runtime 与匹配回执到位后再做双真机数据面复测 |
 | PHP 会员 API 与设备限制 | 本机 challenge 签名、peer provisioning、逐设备 grant、撤权状态与 descriptor 校验有测试 | Laravel 全套 245 项中 244 项通过、1 项既有跳过；配置与 profile 用本地 fixture，未证明生产节点回执、实际断流或正式数据库并发 | 继续不依赖云的状态机/回归；真实会员授权和撤权验收须等节点 mTLS runtime 与回执 |
 | Web 管理端 | 订单/会员/节点管理已有本地页面；节点详情可配置 per-node bridge origin 与加密 CA | Web 5 项测试和 TypeScript/Vite 构建通过；未向真实节点下发或核验配置，CA 接口不回显 | 可继续管理端输入校验与试点运营流程；任何真实 node config 需先完成资源盘点及授权操作计划 |
 | Node Agent / proof bridge | Go 隔离协议、设备证书、容量、peer 拒绝与撤权计量、renderer artifact 有离线/合成测试 | 可执行 Agent 只允许 `isolated-test`，runtime renderer 仍 unavailable；本地测试不等于真实节点长期运行或断流 | 可继续 runtime/协议离线测试；生产启用需要管理员提供真实 listener、反向代理、CA/证书和部署验收 |

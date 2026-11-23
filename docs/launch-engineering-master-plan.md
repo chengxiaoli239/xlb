@@ -47,6 +47,8 @@
 
 **2026-11-24 Android VPN 权限回调恢复会员授权**：Activity recreation/process restoration 不保存授权 grant 或 profile，只保存一次性“会员权限请求待完成”标记；权限批准返回而进程内 grant 不在时，重新验证当前会话/权益/节点授权并取得新 grant 后才发起 member service handoff。策略单测与专用 AVD `ActivityScenario.recreate()` 测试通过，Android 全套 JVM/lint/AndroidTest compile/Debug APK build 通过。AVD 测试没有触发真实系统权限弹窗或模拟进程终止，也未建立 TUN/真实节点连接。
 
+**2026-11-24 Android 权限批准回调→fresh grant→service gate 联合验收**：专用 AVD 测试将 local FakeMemberApi、真实 `MainActivity` 生命周期重建、恢复后的批准回调、Keystore challenge 签名、新授权解析和单次 service grant handoff 连在一起；member gate 仍关闭，预期由 service 明确拒绝授权，测试核对无假连接状态。该用例 1/1、Android JVM tests/lint/AndroidTest compile/Debug 与 AndroidTest APK build 通过；主线前置提交 CI `45237384820` 全绿。测试没有弹系统 VPN 权限窗口、杀死 app process、建立 TUN 或连接真实节点。
+
 **此前 Android 增量，以主线 `342a7d8` 为准**：Android `PlatformApi` contract-shaped loopback grant→VPN service 关闭 gate、ACTION_STOP、撤权与登出清理测试通过；伪造 profile digest 时 `MemberTunnelGrant` 不产生；权益同步失效时 `CONNECTING` 与 `CONNECTED` 均触发 stop。专用 AVD 19/19 基础 instrumentation，新增 API integration cases 各 1/1，Android JVM/AndroidTest 编译/lint 通过。hosted CI run `45196145412` 全绿。测试使用 loopback 假 API 与 service 测试边界，未建立系统 TUN、未连接 PHP ready authorization 或真实节点，Android member gate 仍关闭。中间 CI run `45195474224` 的 Laravel `NodePeerProvisioningTest` 曾出现 peer 保持 provisioning 的单次失败，下一主线全套 run 通过且 PHP 代码未变，原因未复现，保留为待观察的 CI 波动。
 
 | 发布阶段 | 状态 | 下一退出门 |

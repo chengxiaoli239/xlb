@@ -13,14 +13,17 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.app.Activity;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.core.app.ActivityScenario;
 import androidx.test.platform.app.InstrumentationRegistry;
 
 import com.xlb.vpn.data.MemberTunnelGrant;
 import com.xlb.vpn.data.MemberTunnelGrantAvdFixture;
 import com.xlb.vpn.data.PlatformApi;
 import com.xlb.vpn.data.SecureSessionStore;
+import com.xlb.vpn.presentation.MainActivity;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -49,6 +52,81 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @RunWith(AndroidJUnit4.class)
 public final class PlatformApiMemberGrantInstrumentedTest {
+    @Test
+    public void approvedPermissionCallbackRevalidatesGrantAfterActivityRecreation() throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SharedPreferences preferences = context.getSharedPreferences("secure_client_state", Context.MODE_PRIVATE);
+        assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+        String installationId = null;
+        FakeMemberApi server = new FakeMemberApi(MemberTunnelGrantAvdFixture.trustedSystemCaPem(), 4175);
+        SecureSessionStore sessionStore = new SecureSessionStore(context);
+        sessionStore.updateCookie("xlb_session", "isolated-member-session", false);
+        PlatformApi api = new PlatformApi("http://127.0.0.1:4175", sessionStore);
+        PlatformApi.MemberAccount account = new PlatformApi.MemberAccount(
+                "member-avd", "Disposable member", "member@example.invalid", "member");
+        CountDownLatch rejected = new CountDownLatch(1);
+        AtomicReference<String> serviceMessage = new AtomicReference<>();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context receiverContext, Intent intent) {
+                if (XlbVpnService.STATE_ERROR.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                    serviceMessage.set(intent.getStringExtra(XlbVpnService.EXTRA_MESSAGE));
+                    rejected.countDown();
+                }
+            }
+        };
+        registerReceiver(context, receiver);
+
+        try {
+            PlatformApi.ClientSnapshot initialSnapshot = api.synchronize(account);
+            MemberTunnelGrant originalGrant = api.verifiedMemberTunnelGrant();
+            installationId = sessionStore.installationId();
+            assertEquals(PlatformApi.NodeAuthorizationStatus.READY, initialSnapshot.nodeAuthorizationStatus);
+            assertNotNull("test setup did not produce a verified member grant", originalGrant);
+
+            try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+                assertTrue("MainActivity did not synchronize the fake member API",
+                        awaitApiAuthorizationCount(server, 2));
+                scenario.onActivity(activity -> {
+                    setActivityField(activity, "pendingMemberVpnPermission", true);
+                    setActivityField(activity, "pendingMemberGrant", originalGrant);
+                });
+
+                scenario.recreate();
+
+                assertTrue("recreated MainActivity did not finish its initial authorization sync",
+                        awaitActivitySnapshot(scenario));
+                int authorizationsBeforeCallback = server.authorizationRequestCount();
+                scenario.onActivity(activity -> {
+                    assertTrue("permission request marker was not restored",
+                            readBooleanField(activity, "pendingMemberVpnPermission"));
+                    assertNull("process-local grant was incorrectly restored", readField(activity, "pendingMemberGrant"));
+                    invokePermissionResult(activity, Activity.RESULT_OK);
+                });
+
+                assertTrue("permission callback did not obtain a fresh server authorization",
+                        awaitApiAuthorizationCount(server, authorizationsBeforeCallback + 1));
+                assertTrue("fresh grant did not reach the VPN service's fail-closed gate",
+                        rejected.await(5, TimeUnit.SECONDS));
+                assertEquals("会员安全线路尚未接入", serviceMessage.get());
+                assertTrue("fake API did not validate a device proof after re-authorization",
+                        server.challengeSignatureVerified());
+                assertFalse("closed member gate left the service marked as a member tunnel",
+                        XlbVpnService.currentTunnelIsMember());
+                assertFalse("fake API observed an invalid request: " + server.failureMessage(), server.hasFailure());
+            }
+        } finally {
+            MemberTunnelGrantStore.clear();
+            sessionStore.clearSession();
+            context.unregisterReceiver(receiver);
+            context.stopService(new Intent(context, XlbVpnService.class));
+            if (installationId != null) MemberTunnelGrantAvdFixture.deleteInstallationKey(installationId);
+            assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+            server.close();
+        }
+    }
+
     @Test
     public void profileDigestMismatchNeverPublishesReadyGrant() throws Exception {
         requireDisposableEmulator();
@@ -217,6 +295,69 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         context.registerReceiver(receiver, filter, XlbVpnService.INTERNAL_PERMISSION, null);
     }
 
+    private static boolean awaitApiAuthorizationCount(FakeMemberApi server, int expectedCount)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (server.authorizationRequestCount() >= expectedCount) return true;
+            Thread.sleep(50);
+        }
+        return false;
+    }
+
+    private static boolean awaitActivitySnapshot(ActivityScenario<MainActivity> scenario)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            AtomicReference<Boolean> ready = new AtomicReference<>(false);
+            scenario.onActivity(activity -> ready.set(readField(activity, "snapshot") != null));
+            if (ready.get()) return true;
+            Thread.sleep(50);
+        }
+        return false;
+    }
+
+    private static void setActivityField(MainActivity activity, String name, Object value) {
+        try {
+            java.lang.reflect.Field field = MainActivity.class.getDeclaredField(name);
+            field.setAccessible(true);
+            field.set(activity, value);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Could not set the test-only Activity state", exception);
+        }
+    }
+
+    private static boolean readBooleanField(MainActivity activity, String name) {
+        try {
+            java.lang.reflect.Field field = MainActivity.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return field.getBoolean(activity);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Could not inspect the Activity state", exception);
+        }
+    }
+
+    private static Object readField(MainActivity activity, String name) {
+        try {
+            java.lang.reflect.Field field = MainActivity.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return field.get(activity);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Could not inspect the Activity state", exception);
+        }
+    }
+
+    private static void invokePermissionResult(MainActivity activity, int resultCode) {
+        try {
+            java.lang.reflect.Method method = MainActivity.class.getDeclaredMethod(
+                    "onActivityResult", int.class, int.class, Intent.class);
+            method.setAccessible(true);
+            method.invoke(activity, 91, resultCode, null);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Could not deliver the test VPN permission result", exception);
+        }
+    }
+
     private static void requireDisposableEmulator() {
         String hardware = Build.HARDWARE == null ? "" : Build.HARDWARE.toLowerCase(Locale.ROOT);
         String fingerprint = Build.FINGERPRINT == null ? "" : Build.FINGERPRINT.toLowerCase(Locale.ROOT);
@@ -241,10 +382,15 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         private volatile boolean challengeSignatureVerified;
         private volatile boolean deviceRemovalPending;
         private volatile String profileDigestOverride;
+        private final AtomicInteger authorizationRequests = new AtomicInteger();
 
         private FakeMemberApi(String trustedCa) throws IOException {
+            this(trustedCa, 0);
+        }
+
+        private FakeMemberApi(String trustedCa, int port) throws IOException {
             this.trustedCa = trustedCa;
-            serverSocket = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"));
+            serverSocket = new ServerSocket(port, 8, InetAddress.getByName("127.0.0.1"));
             serverSocket.setSoTimeout(1000);
             serverThread = new Thread(this::serve, "isolated-member-api");
             serverThread.start();
@@ -260,6 +406,15 @@ public final class PlatformApiMemberGrantInstrumentedTest {
 
         private boolean hasFailure() {
             return failure.get() != null;
+        }
+
+        private String failureMessage() {
+            Throwable currentFailure = failure.get();
+            return currentFailure == null ? "none" : currentFailure.toString();
+        }
+
+        private int authorizationRequestCount() {
+            return authorizationRequests.get();
         }
 
         private void setProfileDigestOverride(String profileDigest) {
@@ -303,6 +458,13 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         }
 
         private JSONObject respond(String method, String path, byte[] body) throws Exception {
+            if ("GET".equals(method) && "/api/v1/auth/session".equals(path)) {
+                return data(new JSONObject().put("id", "member-avd")
+                        .put("name", "Disposable member")
+                        .put("email", "member@example.invalid")
+                        .put("role", "member")
+                        .put("account_type", "full"));
+            }
             if ("GET".equals(method) && "/api/v1/auth/csrf".equals(path)) {
                 return data(new JSONObject().put("token", "isolated-csrf-token"));
             }
@@ -326,6 +488,7 @@ public final class PlatformApiMemberGrantInstrumentedTest {
                         .put("challenge", Base64.getUrlEncoder().withoutPadding().encodeToString(challenge)));
             }
             if ("POST".equals(method) && "/api/v1/me/device-bindings/authorize".equals(path)) {
+                authorizationRequests.incrementAndGet();
                 JSONObject proof = new JSONObject(new String(body, StandardCharsets.UTF_8));
                 challengeSignatureVerified = verifyChallengeSignature(proof.optString("signature"));
                 if (!challengeSignatureVerified) {
