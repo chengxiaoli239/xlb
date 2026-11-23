@@ -6,6 +6,7 @@ use App\Services\NodeAccessAgentAcknowledgement;
 use App\Services\SubscriptionCredentialService;
 use App\Services\SubscriptionProfileService;
 use App\Services\TestOrderLifecycle;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -348,6 +349,22 @@ class PlatformController extends Controller
             if ($endpoint !== null && ! $this->memberBridgeEndpointMatchesAgent($endpoint, $node->agent_endpoint)) {
                 return ['error' => ['code' => 'endpoint_host_mismatch', 'message' => '数据面 endpoint 必须使用该节点的 Agent 主机', 'status' => 400]];
             }
+            if ($this->memberBridgeConfigurationMatches($node, $endpoint, $serverCaPem)) {
+                return ['data' => [
+                    'id' => $id,
+                    'endpoint' => $node->member_bridge_endpoint,
+                    'trust_configured' => (bool) $node->member_bridge_ca_ciphertext,
+                    'config_version' => (int) $node->config_version,
+                ]];
+            }
+            if (DB::table('node_access_peers')->where('node_id', $id)
+                ->whereIn('status', ['active', 'revocation_pending'])->exists()) {
+                return ['error' => [
+                    'code' => 'active_member_peers',
+                    'message' => '请先完成该节点所有会员设备的撤权回执，再修改数据面信任配置',
+                    'status' => 409,
+                ]];
+            }
 
             DB::table('nodes')->where('id', $id)->update([
                 'member_bridge_endpoint' => $endpoint,
@@ -476,6 +493,25 @@ class PlatformController extends Controller
             && strtolower((string) ($agentParts['scheme'] ?? '')) === 'https'
             && strtolower((string) ($endpointParts['host'] ?? '')) !== ''
             && strtolower((string) ($endpointParts['host'] ?? '')) === strtolower((string) ($agentParts['host'] ?? ''));
+    }
+
+    private function memberBridgeConfigurationMatches(object $node, ?string $endpoint, ?string $serverCaPem): bool
+    {
+        if (($node->member_bridge_endpoint ?? null) !== $endpoint) {
+            return false;
+        }
+        $encryptedCaBundle = $node->member_bridge_ca_ciphertext ?? null;
+        if ($serverCaPem === null || $encryptedCaBundle === null) {
+            return $serverCaPem === null && $encryptedCaBundle === null;
+        }
+
+        try {
+            $storedCaBundle = Crypt::decryptString($encryptedCaBundle);
+        } catch (DecryptException) {
+            return false;
+        }
+
+        return hash_equals(trim($storedCaBundle), trim($serverCaPem));
     }
 
     /** @return array<string, int|float|string>|null */

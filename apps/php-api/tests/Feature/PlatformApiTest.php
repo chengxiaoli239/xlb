@@ -291,10 +291,48 @@ class PlatformApiTest extends TestCase
         $this->assertDatabaseHas('audit_logs', [
             'action' => 'node.member_bridge_configured', 'target_type' => 'node', 'target_id' => 'node-test-1',
         ]);
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => 'https://NODE.example.invalid:9444/', 'server_ca_pem' => $certificate,
+        ])->assertOk()->assertJsonPath('data.config_version', 2);
+        $this->assertSame(2, (int) DB::table('nodes')->where('id', 'node-test-1')->value('config_version'));
+
+        $now = now()->utc()->toIso8601String();
+        DB::table('member_devices')->insert([
+            'id' => 'device-bridge-config-test', 'user_id' => 'user-member',
+            'installation_id' => 'dfc9f20e-9fd6-40f0-9e24-4ca552b86702', 'name' => '配置保护测试设备',
+            'platform' => 'android', 'status' => 'registered', 'revoked_at' => null,
+            'created_at' => $now, 'updated_at' => $now, 'remove_requested_at' => null,
+            'public_key' => 'bridge-config-test-public-key', 'public_key_fingerprint' => str_repeat('b', 64),
+            'bound_at' => $now, 'binding_generation' => 1,
+        ]);
+        DB::table('node_access_peers')->insert([
+            'id' => 'peer-bridge-config-test', 'user_id' => 'user-member', 'node_id' => 'node-test-1',
+            'device_id' => 'device-bridge-config-test', 'entitlement_id' => 'entitlement-member-annual',
+            'device_name' => '配置保护测试设备', 'public_key' => 'bridge-config-test-peer-public-key',
+            'device_key_fingerprint' => str_repeat('b', 64), 'status' => 'active',
+            'bridge_endpoint' => 'https://NODE.example.invalid:9444/',
+            'bridge_server_ca_ciphertext' => Crypt::encryptString($certificate),
+            'created_at' => $now, 'updated_at' => $now,
+        ]);
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => 'https://NODE.example.invalid:9445/', 'server_ca_pem' => $certificate,
+        ])->assertStatus(409)->assertJsonPath('error.code', 'active_member_peers');
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => null, 'server_ca_pem' => null,
+        ])->assertStatus(409)->assertJsonPath('error.code', 'active_member_peers');
+        $this->assertDatabaseHas('nodes', [
+            'id' => 'node-test-1', 'member_bridge_endpoint' => 'https://NODE.example.invalid:9444/',
+        ]);
+
+        DB::table('node_access_peers')->where('id', 'peer-bridge-config-test')->update(['status' => 'revocation_pending']);
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => 'https://NODE.example.invalid:9445/', 'server_ca_pem' => $certificate,
+        ])->assertStatus(409)->assertJsonPath('error.code', 'active_member_peers');
+        DB::table('node_access_peers')->where('id', 'peer-bridge-config-test')->update(['status' => 'revoked']);
 
         $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
             'endpoint' => null, 'server_ca_pem' => null,
-        ])->assertOk()->assertJsonPath('data.trust_configured', false);
+        ])->assertOk()->assertJsonPath('data.trust_configured', false)->assertJsonPath('data.config_version', 3);
         $this->assertDatabaseHas('nodes', [
             'id' => 'node-test-1', 'member_bridge_endpoint' => null, 'member_bridge_ca_ciphertext' => null,
         ]);
