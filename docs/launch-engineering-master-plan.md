@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | E0 地基 | 部分完成（Android native APK 检查、metadata-only 清单 `44943107063`、源码与 Android runtime SBOM artifacts `45013262238`、SBOM provenance attestation `45028876877` 均 hosted 全绿；source 与 Android SBOM 下载后各自 verify 通过） | 补生产 APK 签名、可信制品存储、staging/回滚；合规与 D 决策保留为发布门；E0 放行仍要求 SBOM attestation job 成功 |
 | E1 会员数据面放行 | 未通过 | 真实 member profile、双真机复用拒绝、节点撤权回执/最终流量和连接验收 |
-| E2 工程化 | 部分完成：`node_fleet_plan.py` bounded manifest / deterministic plan-only waves，加 CLI subprocess tests 覆盖有效请求只产出 plan、坏 JSON/超限输入失败且无 stdout；ops 44 tests 通过 | 批量资源执行/失败回收、常驻受控 worker、实测容量与热备/回收演练仍缺；plan-only 不代表批量部署已经可用 |
+| E2 工程化 | 部分完成：`node_fleet_plan.py` bounded manifest / deterministic plan-only waves；`node_fleet_recovery.py` 本地 review-only 失败回收预览绑定 release intent、batch/generation、账号区域、归属标签和 5 分钟 inventory 新鲜度，评估时间使用 CLI 本机 UTC 时钟；ops 52 tests 通过 | 尚无认证 inventory 数据源、批量执行器、真实失败回收、常驻受控 worker、实测容量与热备/回收演练；preview 不代表可执行或真实资源事实 |
 | E3 四端 | 部分完成 | Android 会员真机数据面闭环；Windows 账户壳与 MSVC/Credential Manager smoke 已通过 hosted run，下一步才是 Mihomo/proof bridge/TUN 与 Windows 运行验收；macOS/iOS 条件与后续验收 |
 | E4 分发监控 | 未开始 | 用户批准资源/预算后接静态资源 CDN 与可触发告警；CDN 不承载 VPN 数据面 |
 | E5 试运行 | 未开始 | 合规书面门槛、E1–E4、对账/SLO/支持流程均通过后再试点 |
@@ -189,7 +189,7 @@ python3 ops/build_artifact_manifest.py \
 | 批量下线 | 先确认替代容量 → 停调度 → 发配置 → 等排空窗口 → 批量撤销 peer + 释放 → 逐项核对账单/EIP/盘/ENI/SG，残留告警 |
 | 快速恢复 | 维持**最小热备池**（每主力区域 1–2 台预热节点），故障切流到热备（1–3 分钟），冷启动仅作补充——"不要指望故障后才买机器" |
 
-离线前置已落地为 `ops/node_fleet_plan.py`：它只校验固定 `us-west-2` 的隔离测试请求并输出最多 5 个节点、并发最多 3 的 plan-only 波次；拒绝未知字段，不导入 `node_manager`，不调用 AWS，也没有 `--apply`。CLI 子进程测试验证 plan-only 输出契约、JSON 损坏和 16 KiB 上限失败时不打印计划。该模块只形成可审查输入计划，未实现批次创建、幂等执行、失败回收、灰度或热备；执行阶段仍需逐项复核资源与费用并取得相应批准。
+离线前置已落地为 `ops/node_fleet_plan.py`：它只校验固定 `us-west-2` 的隔离测试请求并输出最多 5 个节点、并发最多 3 的 plan-only 波次；拒绝未知字段，不导入 `node_manager`，不调用 AWS，也没有 `--apply`。CLI 子进程测试验证 plan-only 输出契约、JSON 损坏和 16 KiB 上限失败时不打印计划。另有 `ops/node_fleet_recovery.py` 为调用方传入的失败节点、release intent 与资源快照生成纯本地 review-only 预览；评估时间取 CLI 本机 UTC，不接受调用方回拨；它拒绝共享/控制面、身份不符、撤回/过期、generation/batch 不匹配及超过 5 分钟的 inventory。该输入不带认证/签名，预览不能证明 AWS 当前事实或授权删除，且没有 apply 能力。批次创建、认证 inventory、幂等执行、真实失败回收、灰度或热备仍未实现；任何云执行需逐项复核资源与费用并取得批准。
 
 ### 4.3 快速上下线的量化目标（写入验收门）
 - 热备节点切流：≤3 分钟加入调度并通过握手；
