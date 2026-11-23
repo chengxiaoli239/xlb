@@ -129,8 +129,10 @@ jobs:
         working-directory: apps/android/core-native
         run: |
           mihomo_version=$(go list -m -f '{{.Version}}' github.com/metacubex/mihomo)
+          go mod download "github.com/metacubex/mihomo@${mihomo_version}"
+          mihomo_dir="$(go env GOMODCACHE)/github.com/metacubex/mihomo@${mihomo_version}"
           mkdir -p "$RUNNER_TEMP/mihomo-bin"
-          GOBIN="$RUNNER_TEMP/mihomo-bin" go install "github.com/metacubex/mihomo@${mihomo_version}"
+          (cd "$mihomo_dir" && go build -o "$RUNNER_TEMP/mihomo-bin/mihomo" .)
           echo "XLB_MIHOMO_BINARY=$RUNNER_TEMP/mihomo-bin/mihomo" >> "$GITHUB_ENV"
 
       - name: Set up PHP
