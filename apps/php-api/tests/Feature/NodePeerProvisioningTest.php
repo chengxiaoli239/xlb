@@ -207,6 +207,11 @@ class NodePeerProvisioningTest extends TestCase
             $this->assertSame($profile, $ready['profile']);
             $this->assertSame($startup['endpoint'], $ready['bridge_endpoint']);
             $this->assertSame($trustedDataPlaneCa, $ready['bridge_server_ca_pem']);
+            $this->assertSame(hash('sha256', $profile), $ready['profile_sha256']);
+            $this->assertSame('xlb-mihomo-bridge-v1', $ready['profile_renderer_id']);
+            $this->assertSame('1.0.0', $ready['profile_renderer_version']);
+            $this->assertSame('xlb-proof-v1', $ready['bridge_protocol']);
+            $this->assertTrue($ready['connectable']);
             $this->assertSame(Crypt::decryptString($peer->credential_ciphertext), $ready['peer_credential']);
 
             DB::table('node_access_peers')->where('id', $peer->id)->update([

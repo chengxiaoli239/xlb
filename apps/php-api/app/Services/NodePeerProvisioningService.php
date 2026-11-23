@@ -18,7 +18,7 @@ class NodePeerProvisioningService
     /**
      * Call only after the authenticated device has completed its challenge signature.
      *
-     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,peer_credential?:string,profile?:string}
+     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,profile_sha256?:string,profile_renderer_id?:string,profile_renderer_version?:string,bridge_protocol?:string,connectable?:bool,peer_credential?:string,profile?:string}
      */
     public function ensureForProvenDevice(string $userId, string $deviceId, string $proofFingerprint): array
     {
@@ -143,7 +143,7 @@ class NodePeerProvisioningService
     }
 
     /**
-     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,peer_credential?:string,profile?:string}
+     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,profile_sha256?:string,profile_renderer_id?:string,profile_renderer_version?:string,bridge_protocol?:string,connectable?:bool,peer_credential?:string,profile?:string}
      */
     private function present(object $peer, string $userId, string $proofFingerprint): array
     {
@@ -195,6 +195,11 @@ class NodePeerProvisioningService
             'device_binding_generation' => (int) $peer->device_binding_generation,
             'bridge_endpoint' => (string) $peer->bridge_endpoint,
             'bridge_server_ca_pem' => $bridgeServerCa,
+            'profile_sha256' => (string) $peer->profile_sha256,
+            'profile_renderer_id' => (string) $peer->profile_renderer_id,
+            'profile_renderer_version' => (string) $peer->profile_renderer_version,
+            'bridge_protocol' => 'xlb-proof-v1',
+            'connectable' => true,
             'peer_credential' => $credential,
             'profile' => $profile,
         ];

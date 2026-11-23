@@ -105,6 +105,44 @@ class MemberDeviceApiTest extends TestCase
         ]);
     }
 
+    public function test_device_binding_authorization_delivers_the_complete_android_member_grant_contract(): void
+    {
+        $this->actingAs(User::findOrFail('user-member'));
+        $keyPair = $this->deviceKeyPair();
+        $profile = "mode: global\nproxies:\n  - name: XLB\n    type: socks5\n";
+        $this->mock(NodePeerProvisioningService::class)
+            ->shouldReceive('ensureForProvenDevice')
+            ->once()
+            ->withArgs(function (string $userId, string $deviceId, string $fingerprint) use ($keyPair): bool {
+                return $userId === 'user-member'
+                    && DB::table('member_devices')->where('id', $deviceId)->exists()
+                    && hash_equals(hash('sha256', $keyPair['public_key_der']), $fingerprint);
+            })
+            ->andReturn([
+                'status' => 'ready', 'message' => 'ready', 'peer_id' => 'peer-android-grant',
+                'node_id' => 'node-android-grant', 'peer_generation' => 2,
+                'device_binding_generation' => 3,
+                'bridge_endpoint' => 'https://node.example.invalid:9444',
+                'bridge_server_ca_pem' => 'test-only CA fixture',
+                'profile_sha256' => hash('sha256', $profile),
+                'profile_renderer_id' => 'xlb-mihomo-bridge-v1',
+                'profile_renderer_version' => '1.0.0', 'bridge_protocol' => 'xlb-proof-v1',
+                'connectable' => true, 'peer_credential' => 'opaque-test-credential', 'profile' => $profile,
+            ]);
+
+        $response = $this->authorizeDevice($keyPair);
+        $response->assertCreated()
+            ->assertJsonPath('data.node_authorization.status', 'ready')
+            ->assertJsonPath('data.node_authorization.bridge_endpoint', 'https://node.example.invalid:9444')
+            ->assertJsonPath('data.node_authorization.profile_sha256', hash('sha256', $profile))
+            ->assertJsonPath('data.node_authorization.profile_renderer_id', 'xlb-mihomo-bridge-v1')
+            ->assertJsonPath('data.node_authorization.profile_renderer_version', '1.0.0')
+            ->assertJsonPath('data.node_authorization.bridge_protocol', 'xlb-proof-v1')
+            ->assertJsonPath('data.node_authorization.connectable', true)
+            ->assertHeader('Cache-Control', 'no-store, private');
+        $this->assertSame('test-only CA fixture', $response->json('data.node_authorization.bridge_server_ca_pem'));
+    }
+
     public function test_device_binding_proof_cannot_be_replayed_or_signed_by_another_key(): void
     {
         $this->actingAs(User::findOrFail('user-member'));
