@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Services\NodeAccessAgentAcknowledgement;
+use Illuminate\Support\Facades\Crypt;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -153,11 +154,17 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
                 'bridge_server_ca_pem' => $trust['pem'],
             ],
         ];
-        config(['node_access.member_bridge.ca_bundle' => $trust['path']]);
-
+        $node = (object) [
+            'id' => 'node-1', 'member_bridge_endpoint' => 'https://node-agent.example.invalid:9444',
+            'member_bridge_ca_ciphertext' => Crypt::encryptString($trust['pem']),
+        ];
+        $this->assertTrue(NodeAccessAgentAcknowledgement::isValidMemberBridgeTrustBundle($trust['pem']));
+        $this->assertTrue(NodeAccessAgentAcknowledgement::isApprovedMemberBridgeDescriptor(
+            'https://node-agent.example.invalid:9444', $trust['pem'], $node,
+        ));
         $validated = NodeAccessAgentAcknowledgement::provision(
             $result,
-            (object) ['id' => 'node-1', 'agent_endpoint' => 'https://node-agent.example.invalid:443'],
+            $node,
             (object) [
                 'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
                 'device_key_fingerprint' => $fingerprint, 'device_binding_generation' => 3,
@@ -174,10 +181,9 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
         $this->assertSame($trust['pem'], $validated['bridge_server_ca_pem']);
     }
 
-    public function test_production_profile_artifact_rejects_unbound_endpoint_and_unapproved_ca(): void
+    public function test_production_profile_artifact_rejects_unconfigured_endpoint_and_ca(): void
     {
         $trust = $this->trustedBridgeTrustBundle();
-        config(['node_access.member_bridge.ca_bundle' => $trust['path']]);
         $content = 'profile-renderer-contract-test-payload';
         $artifact = [
             'node_id' => 'node-1', 'peer_id' => 'peer-1', 'request_id' => 'request-1',
@@ -197,7 +203,10 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
                     'generation' => 2, 'acknowledgement_id' => 'ack-1', 'confirmation_status' => 'confirmed',
                     'profile_artifact' => $artifact,
                 ],
-                (object) ['id' => 'node-1', 'agent_endpoint' => 'https://node-agent.example.invalid:443'],
+                (object) [
+                    'id' => 'node-1', 'member_bridge_endpoint' => 'https://node-agent.example.invalid:9444',
+                    'member_bridge_ca_ciphertext' => Crypt::encryptString($trust['pem']),
+                ],
                 (object) [
                     'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
                     'device_key_fingerprint' => str_repeat('a', 64), 'device_binding_generation' => 3,
@@ -210,6 +219,30 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
             $this->assertTrue(true);
         }
 
+        $artifact['bridge_endpoint'] = 'https://node-agent.example.invalid:9445';
+        try {
+            NodeAccessAgentAcknowledgement::provision(
+                [
+                    'node_id' => 'node-1', 'peer_id' => 'peer-1', 'request_id' => 'request-1',
+                    'generation' => 2, 'acknowledgement_id' => 'ack-1', 'confirmation_status' => 'confirmed',
+                    'profile_artifact' => $artifact,
+                ],
+                (object) [
+                    'id' => 'node-1', 'member_bridge_endpoint' => 'https://node-agent.example.invalid:9444',
+                    'member_bridge_ca_ciphertext' => Crypt::encryptString($trust['pem']),
+                ],
+                (object) [
+                    'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
+                    'device_key_fingerprint' => str_repeat('a', 64), 'device_binding_generation' => 3,
+                ],
+                'request-1',
+                2,
+            );
+            $this->fail('A bridge endpoint with an unconfigured port must be rejected.');
+        } catch (RuntimeException) {
+            $this->assertTrue(true);
+        }
+
         $artifact['bridge_endpoint'] = 'https://node-agent.example.invalid/v1/tunnel/connect';
         try {
             NodeAccessAgentAcknowledgement::provision(
@@ -218,7 +251,10 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
                     'generation' => 2, 'acknowledgement_id' => 'ack-1', 'confirmation_status' => 'confirmed',
                     'profile_artifact' => $artifact,
                 ],
-                (object) ['id' => 'node-1', 'agent_endpoint' => 'https://node-agent.example.invalid:443'],
+                (object) [
+                    'id' => 'node-1', 'member_bridge_endpoint' => 'https://node-agent.example.invalid:9444',
+                    'member_bridge_ca_ciphertext' => Crypt::encryptString($trust['pem']),
+                ],
                 (object) [
                     'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
                     'device_key_fingerprint' => str_repeat('a', 64), 'device_binding_generation' => 3,
@@ -241,7 +277,10 @@ class NodeAccessAgentAcknowledgementTest extends TestCase
                     'generation' => 2, 'acknowledgement_id' => 'ack-1', 'confirmation_status' => 'confirmed',
                     'profile_artifact' => $artifact,
                 ],
-                (object) ['id' => 'node-1', 'agent_endpoint' => 'https://node-agent.example.invalid:443'],
+                (object) [
+                    'id' => 'node-1', 'member_bridge_endpoint' => 'https://node-agent.example.invalid:9444',
+                    'member_bridge_ca_ciphertext' => encrypt($trust['pem']),
+                ],
                 (object) [
                     'id' => 'peer-1', 'device_id' => 'device-1', 'entitlement_id' => 'entitlement-1',
                     'device_key_fingerprint' => str_repeat('a', 64), 'device_binding_generation' => 3,

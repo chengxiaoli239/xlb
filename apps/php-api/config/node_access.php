@@ -12,9 +12,6 @@ return [
         'ca_bundle' => env('NODE_ACCESS_AGENT_CA_BUNDLE'),
         'timeout_seconds' => (int) env('NODE_ACCESS_AGENT_TIMEOUT_SECONDS', 5),
     ],
-    'member_bridge' => [
-        'ca_bundle' => env('NODE_ACCESS_MEMBER_BRIDGE_CA_BUNDLE'),
-    ],
     'lease_seconds' => 60,
     'batch_size' => 25,
 ];

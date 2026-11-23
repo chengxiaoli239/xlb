@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\NodeAccessAgentAcknowledgement;
 use App\Services\SubscriptionCredentialService;
 use App\Services\SubscriptionProfileService;
 use App\Services\TestOrderLifecycle;
@@ -10,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -320,6 +322,54 @@ class PlatformController extends Controller
             : response()->json(['data' => $result['data']]);
     }
 
+    public function updateNodeMemberBridge(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'endpoint' => ['nullable', 'string', 'max:2048'],
+            'server_ca_pem' => ['nullable', 'string', 'max:65536'],
+        ]);
+        if ($validator->fails()) {
+            return $this->error('validation_error', '数据面 endpoint 或 CA 格式无效', 400);
+        }
+        $validated = $validator->validated();
+        $endpoint = $validated['endpoint'] ?? null;
+        $serverCaPem = $validated['server_ca_pem'] ?? null;
+        if (($endpoint === null) !== ($serverCaPem === null)
+            || ($endpoint !== null && ! NodeAccessAgentAcknowledgement::isValidMemberBridgeEndpoint($endpoint))
+            || ($serverCaPem !== null && ! NodeAccessAgentAcknowledgement::isValidMemberBridgeTrustBundle($serverCaPem))) {
+            return $this->error('validation_error', '请同时提供无路径 HTTPS endpoint 和有效 CA bundle，或同时清空两项', 400);
+        }
+
+        $result = DB::transaction(function () use ($request, $id, $endpoint, $serverCaPem): array {
+            $node = DB::table('nodes')->where('id', $id)->lockForUpdate()->first();
+            if (! $node) {
+                return ['error' => ['code' => 'not_found', 'message' => '节点不存在', 'status' => 404]];
+            }
+            if ($endpoint !== null && ! $this->memberBridgeEndpointMatchesAgent($endpoint, $node->agent_endpoint)) {
+                return ['error' => ['code' => 'endpoint_host_mismatch', 'message' => '数据面 endpoint 必须使用该节点的 Agent 主机', 'status' => 400]];
+            }
+
+            DB::table('nodes')->where('id', $id)->update([
+                'member_bridge_endpoint' => $endpoint,
+                'member_bridge_ca_ciphertext' => $serverCaPem === null ? null : Crypt::encryptString($serverCaPem),
+                'config_version' => (int) $node->config_version + 1,
+                'updated_at' => now()->utc()->toIso8601String(),
+            ]);
+            $this->audit($request, $endpoint === null ? 'node.member_bridge_cleared' : 'node.member_bridge_configured', 'node', $id);
+
+            return ['data' => [
+                'id' => $id,
+                'endpoint' => $endpoint,
+                'trust_configured' => $serverCaPem !== null,
+                'config_version' => (int) $node->config_version + 1,
+            ]];
+        });
+
+        return isset($result['error'])
+            ? $this->error($result['error']['code'], $result['error']['message'], $result['error']['status'])
+            : response()->json(['data' => $result['data']]);
+    }
+
     public function commissions(): JsonResponse
     {
         $rows = DB::table('commission_entries as c')->join('orders as o', 'o.id', '=', 'c.order_id')->orderByDesc('c.created_at')->get(['c.id', 'c.partner_name', 'c.amount_cents', 'c.status', 'c.created_at', 'o.id as order_id']);
@@ -411,8 +461,21 @@ class PlatformController extends Controller
             'last_health_check_at' => $node->last_health_check_at,
             'config_version' => (int) $node->config_version,
             'updated_at' => $node->updated_at,
+            'member_bridge_endpoint' => $node->member_bridge_endpoint ?? null,
+            'member_bridge_trust_configured' => (bool) ($node->member_bridge_ca_ciphertext ?? null),
             'allowed_transitions' => $node->is_test && ! DB::table('node_deployments')->where('node_id', $node->id)->exists() ? (self::NODE_TRANSITIONS[$node->status] ?? []) : [],
         ];
+    }
+
+    private function memberBridgeEndpointMatchesAgent(string $endpoint, ?string $agentEndpoint): bool
+    {
+        $endpointParts = parse_url($endpoint);
+        $agentParts = parse_url((string) $agentEndpoint);
+
+        return is_array($endpointParts) && is_array($agentParts)
+            && strtolower((string) ($agentParts['scheme'] ?? '')) === 'https'
+            && strtolower((string) ($endpointParts['host'] ?? '')) !== ''
+            && strtolower((string) ($endpointParts['host'] ?? '')) === strtolower((string) ($agentParts['host'] ?? ''));
     }
 
     /** @return array<string, int|float|string>|null */

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Support\Facades\Crypt;
 use RuntimeException;
 
 final class NodeAccessAgentAcknowledgement
@@ -126,36 +128,23 @@ final class NodeAccessAgentAcknowledgement
 
     public static function isApprovedMemberBridgeDescriptor(mixed $endpoint, mixed $caBundle, object $node): bool
     {
-        if (! is_string($endpoint) || strlen($endpoint) > 2048 || ! is_string($caBundle)
+        $endpointOrigin = self::normalizedHttpsOrigin($endpoint);
+        $configuredOrigin = self::normalizedHttpsOrigin($node->member_bridge_endpoint ?? null);
+        $encryptedCaBundle = $node->member_bridge_ca_ciphertext ?? null;
+        if ($endpointOrigin === null || $configuredOrigin === null || ! hash_equals($configuredOrigin, $endpointOrigin)
+            || ! is_string($encryptedCaBundle) || $encryptedCaBundle === '' || ! is_string($caBundle)
             || $caBundle === '' || strlen($caBundle) > 65536) {
             return false;
         }
-        $endpointParts = parse_url($endpoint);
-        $nodeAgentParts = parse_url((string) ($node->agent_endpoint ?? ''));
-        if (! is_array($endpointParts) || strtolower((string) ($endpointParts['scheme'] ?? '')) !== 'https'
-            || empty($endpointParts['host']) || isset($endpointParts['user']) || isset($endpointParts['pass'])
-            || ! in_array((string) ($endpointParts['path'] ?? ''), ['', '/'], true)
-            || isset($endpointParts['query']) || isset($endpointParts['fragment'])
-            || ! is_array($nodeAgentParts) || strtolower((string) ($nodeAgentParts['scheme'] ?? '')) !== 'https'
-            || empty($nodeAgentParts['host']) || ! hash_equals(
-                strtolower((string) $nodeAgentParts['host']), strtolower((string) $endpointParts['host']),
-            )) {
+        try {
+            $approvedBundle = Crypt::decryptString($encryptedCaBundle);
+        } catch (DecryptException) {
             return false;
         }
-        $port = $endpointParts['port'] ?? null;
-        if ($port !== null && (! is_int($port) || $port < 1 || $port > 65535)) {
+        if (! self::isValidMemberBridgeTrustBundle($approvedBundle)) {
             return false;
         }
 
-        $approvedBundlePath = config('node_access.member_bridge.ca_bundle');
-        if (! is_string($approvedBundlePath) || $approvedBundlePath === '' || ! is_file($approvedBundlePath)
-            || ! is_readable($approvedBundlePath)) {
-            return false;
-        }
-        $approvedBundle = file_get_contents($approvedBundlePath);
-        if (! is_string($approvedBundle)) {
-            return false;
-        }
         $approvedFingerprints = self::caFingerprints($approvedBundle);
         $descriptorFingerprints = self::caFingerprints($caBundle);
         if ($approvedFingerprints === [] || $descriptorFingerprints === []) {
@@ -168,6 +157,38 @@ final class NodeAccessAgentAcknowledgement
         }
 
         return true;
+    }
+
+    public static function isValidMemberBridgeEndpoint(mixed $endpoint): bool
+    {
+        return self::normalizedHttpsOrigin($endpoint) !== null;
+    }
+
+    public static function isValidMemberBridgeTrustBundle(mixed $bundle): bool
+    {
+        return is_string($bundle) && $bundle !== '' && strlen($bundle) <= 65536
+            && self::caFingerprints($bundle) !== [];
+    }
+
+    private static function normalizedHttpsOrigin(mixed $endpoint): ?string
+    {
+        if (! is_string($endpoint) || $endpoint === '' || strlen($endpoint) > 2048 || trim($endpoint) !== $endpoint) {
+            return null;
+        }
+        $parts = parse_url($endpoint);
+        if (! is_array($parts) || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+            || empty($parts['host']) || isset($parts['user']) || isset($parts['pass'])
+            || ! in_array((string) ($parts['path'] ?? ''), ['', '/'], true)
+            || isset($parts['query']) || isset($parts['fragment'])) {
+            return null;
+        }
+        $port = $parts['port'] ?? 443;
+        if (! is_int($port) || $port < 1 || $port > 65535) {
+            return null;
+        }
+        $host = strtolower((string) $parts['host']);
+
+        return 'https://'.$host.($port === 443 ? '' : ':'.$port);
     }
 
     /** @return list<string> */

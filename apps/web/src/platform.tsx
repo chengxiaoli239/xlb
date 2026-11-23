@@ -18,7 +18,7 @@ type Overview = {
   recentOrders: Array<{ id: string; plan_name: string; total_cents: number; status: string; created_at: string }>;
 };
 type NodeStatus = 'candidate' | 'available' | 'draining' | 'maintenance' | 'isolated' | 'retired' | 'disabled';
-type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: NodeStatus; is_test: boolean; automation_managed: boolean; max_sessions: number; active_sessions: number; latency_ms: number | null; health_status: string; last_health_check_at: string | null; config_version: number; allowed_transitions: NodeStatus[]; updated_at: string };
+type Node = { id: string; name: string; region: string; protocol: string; endpoint_host: string; endpoint_port: number; status: NodeStatus; is_test: boolean; automation_managed: boolean; max_sessions: number; active_sessions: number; latency_ms: number | null; health_status: string; last_health_check_at: string | null; config_version: number; member_bridge_endpoint: string | null; member_bridge_trust_configured: boolean; allowed_transitions: NodeStatus[]; updated_at: string };
 type NodeDetail = Node & { changes: Array<{ id: string; from_status: NodeStatus; to_status: NodeStatus; created_at: string; actor_name: string }> };
 type RouteVersion = { id: string; scope: 'test' | 'production'; version: number; status: string; canary_percent: number; previous_version_id: string | null; note: string | null; drain_until: string | null; published_at: string | null; nodes: Array<{ id: string; name: string; region: string; status: string; is_test: boolean; health_status: string; weight: number }> };
 type AdminSummary = { memberCount: number; activeEntitlements: number; activeSubscriptions: number; availableNodes: number; nodeCount: number; pendingNodeRevocations: number; pendingCommissionCents: number; recentAudit: Array<{ id: string; action: string; target_type: string; target_id: string; created_at: string; actor: string }> };
@@ -1308,6 +1308,8 @@ function NodesPage({ refresh, notify }: { refresh: number; notify: (value: strin
   const [nextStatus, setNextStatus] = useState<NodeStatus | ''>('');
   const [name, setName] = useState('');
   const [region, setRegion] = useState('');
+  const [bridgeEndpoint, setBridgeEndpoint] = useState('');
+  const [bridgeCaPem, setBridgeCaPem] = useState('');
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => api<Node[]>('/api/v1/admin/nodes').then(nodes => setRows(nodes.filter(node => !node.automation_managed))).catch(error => notify((error as Error).message)), [notify]);
   useEffect(() => { void load(); }, [load, refresh]);
@@ -1317,6 +1319,8 @@ function NodesPage({ refresh, notify }: { refresh: number; notify: (value: strin
     try {
       const node = await api<NodeDetail>('/api/v1/admin/nodes/' + id);
       setDetail(node);
+      setBridgeEndpoint(node.member_bridge_endpoint ?? '');
+      setBridgeCaPem('');
       setNextStatus('');
     } catch (error) { setSelectedId(null); notify((error as Error).message); }
   };
@@ -1338,6 +1342,25 @@ function NodesPage({ refresh, notify }: { refresh: number; notify: (value: strin
     try {
       await api('/api/v1/admin/nodes/' + detail.id, { method: 'PATCH', body: JSON.stringify({ status: nextStatus }) });
       notify('演示目录状态已更新');
+      await load();
+      await openDetail(detail.id);
+    } catch (error) { notify((error as Error).message); }
+    finally { setBusy(false); }
+  };
+  const saveBridgeTrust = async () => {
+    if (!detail || busy) return;
+    const endpoint = bridgeEndpoint.trim();
+    const serverCaPem = bridgeCaPem.trim();
+    if (Boolean(endpoint) !== Boolean(serverCaPem)) {
+      notify('请同时填写 HTTPS endpoint 与 CA bundle，清除配置时同时留空');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api('/api/v1/admin/nodes/' + detail.id + '/member-bridge', {
+        method: 'PUT', body: JSON.stringify({ endpoint: endpoint || null, server_ca_pem: serverCaPem || null }),
+      });
+      notify(endpoint ? '节点会员数据面信任配置已保存' : '节点会员数据面信任配置已清除');
       await load();
       await openDetail(detail.id);
     } catch (error) { notify((error as Error).message); }
@@ -1368,6 +1391,7 @@ function NodesPage({ refresh, notify }: { refresh: number; notify: (value: strin
         <div><dt>健康探测</dt><dd>{detail.health_status === 'not_connected' ? '未接入' : detail.health_status}</dd></div><div><dt>最近探测</dt><dd>{detail.last_health_check_at ? new Date(detail.last_health_check_at).toLocaleString('zh-CN') : '尚无探测数据'}</dd></div>
         <div><dt>配置版本</dt><dd>v{detail.config_version}</dd></div><div><dt>样例会话 / 容量</dt><dd>{detail.active_sessions} / {detail.max_sessions}</dd></div>
       </dl><div className="node-transition"><label>切换目录状态<select value={nextStatus} onChange={event => setNextStatus(event.target.value as NodeStatus)} disabled={!detail.allowed_transitions.length || busy}><option value="">选择目标状态</option>{detail.allowed_transitions.map(status => <option value={status} key={status}>{nodeStatus(status)}</option>)}</select></label><button className="primary-button" disabled={!nextStatus || busy} onClick={() => void change()}>确认变更</button></div>
+      <section className="node-bridge-config"><div><h3>会员数据面信任</h3><p>当前 {detail.member_bridge_trust_configured ? '已配置 CA 信任' : '未配置 CA 信任'}。CA 只加密存库，不会在页面接口中回显。每次修改 endpoint 都需重新粘贴 CA bundle。</p></div><label>HTTPS origin<input type="url" value={bridgeEndpoint} onChange={event => setBridgeEndpoint(event.target.value)} placeholder="https://node.example.com:9444" disabled={busy} /></label><label>数据面 CA bundle（PEM）<textarea value={bridgeCaPem} onChange={event => setBridgeCaPem(event.target.value)} rows={5} placeholder="-----BEGIN CERTIFICATE-----" disabled={busy} /></label><p className="modal-copy">仅接受与该节点 Agent 主机一致的无路径 HTTPS origin 和有效 CA。配置本身不代表节点已在线、线路可用或已通过真机验收。</p><div className="modal-actions"><button className="primary-button" disabled={busy} onClick={() => void saveBridgeTrust()}>保存信任配置</button></div></section>
       <div className="node-history"><h3>状态变更记录</h3>{detail.changes.length ? detail.changes.map(item => <div key={item.id}><b>{nodeStatus(item.from_status)} → {nodeStatus(item.to_status)}</b><span>{item.actor_name} · {new Date(item.created_at).toLocaleString('zh-CN')}</span></div>) : <p>暂无状态变更。</p>}</div></>}
     </Modal>}
   </div>;

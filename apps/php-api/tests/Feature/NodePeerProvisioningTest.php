@@ -149,14 +149,19 @@ class NodePeerProvisioningTest extends TestCase
                 'public_key' => rtrim(strtr(base64_encode($publicKeyDer), '+/', '-_'), '='),
                 'public_key_fingerprint' => $fingerprint,
             ]);
-            DB::table('nodes')->where('id', $nodeId)->update(['agent_endpoint' => $startup['endpoint']]);
+            $bridgeTrustBundle = file_get_contents($startup['ca_certificate']);
+            $this->assertIsString($bridgeTrustBundle);
+            DB::table('nodes')->where('id', $nodeId)->update([
+                'agent_endpoint' => $startup['endpoint'],
+                'member_bridge_endpoint' => $startup['endpoint'],
+                'member_bridge_ca_ciphertext' => Crypt::encryptString($bridgeTrustBundle),
+            ]);
             config([
                 'node_access.driver' => 'agent',
                 'node_access.provisioning_enabled' => true,
                 'node_access.agent.client_certificate' => $startup['client_certificate'],
                 'node_access.agent.client_key' => $startup['client_private_key'],
                 'node_access.agent.ca_bundle' => $startup['ca_certificate'],
-                'node_access.member_bridge.ca_bundle' => $startup['ca_certificate'],
             ]);
             $this->app->forgetInstance(NodePeerProvisioningDriver::class);
 
@@ -205,7 +210,7 @@ class NodePeerProvisioningTest extends TestCase
             $this->assertSame(Crypt::decryptString($peer->credential_ciphertext), $ready['peer_credential']);
 
             DB::table('node_access_peers')->where('id', $peer->id)->update([
-                'bridge_endpoint' => 'https://attacker.invalid:9444',
+                'bridge_endpoint' => 'https://127.0.0.1:1',
             ]);
             $this->assertSame('unavailable', $service->ensureForProvenDevice(
                 'user-member', 'device-provision-1', $fingerprint,

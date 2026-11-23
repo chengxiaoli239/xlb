@@ -84,6 +84,7 @@ Route::prefix('api/v1/admin')->middleware(['auth', 'admin'])->group(function ():
     Route::post('/nodes', [PlatformController::class, 'createNode']);
     Route::get('/nodes/{id}', [PlatformController::class, 'nodeDetail']);
     Route::patch('/nodes/{id}', [PlatformController::class, 'updateNode']);
+    Route::put('/nodes/{id}/member-bridge', [PlatformController::class, 'updateNodeMemberBridge']);
     Route::get('/commissions', [PlatformController::class, 'commissions']);
     Route::get('/plans', [PlatformController::class, 'adminPlans']);
     Route::post('/plans', [PlatformController::class, 'createPlan']);

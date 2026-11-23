@@ -161,6 +161,7 @@ class NodePeerProvisioningService
         }
         $node = DB::table('nodes')->where('id', $peer->node_id)->first([
             'is_test', 'status', 'health_status', 'last_health_check_at', 'agent_endpoint',
+            'member_bridge_endpoint', 'member_bridge_ca_ciphertext',
         ]);
         if (! $node || (bool) $node->is_test || $node->status !== 'available' || $node->health_status !== 'healthy'
             || ! $this->freshHealthCheck($node->last_health_check_at)

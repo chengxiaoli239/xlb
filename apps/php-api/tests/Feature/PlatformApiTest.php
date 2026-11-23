@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -253,6 +254,52 @@ class PlatformApiTest extends TestCase
         $this->patchJson('/api/v1/admin/nodes/'.$created['id'], ['status' => 'available'])->assertStatus(409);
     }
 
+    public function test_admin_can_configure_a_per_node_member_bridge_origin_and_encrypted_ca(): void
+    {
+        $certificate = $this->memberBridgeTestCa();
+        DB::table('nodes')->where('id', 'node-test-1')->update([
+            'agent_endpoint' => 'https://node.example.invalid:443',
+        ]);
+        $this->actingAs(User::findOrFail('user-member'));
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => 'https://node.example.invalid:9444', 'server_ca_pem' => $certificate,
+        ])->assertForbidden();
+
+        $this->actingAs(User::findOrFail('user-admin'));
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => 'https://attacker.example.invalid:9444', 'server_ca_pem' => $certificate,
+        ])->assertStatus(400)->assertJsonPath('error.code', 'endpoint_host_mismatch');
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => 'https://node.example.invalid/v1/tunnel', 'server_ca_pem' => $certificate,
+        ])->assertStatus(400)->assertJsonPath('error.code', 'validation_error');
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => 'https://node.example.invalid:9444', 'server_ca_pem' => 'not a CA certificate',
+        ])->assertStatus(400)->assertJsonPath('error.code', 'validation_error');
+
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => 'https://NODE.example.invalid:9444/', 'server_ca_pem' => $certificate,
+        ])->assertOk()->assertJsonPath('data.endpoint', 'https://NODE.example.invalid:9444/')
+            ->assertJsonPath('data.trust_configured', true)->assertJsonMissingPath('data.server_ca_pem');
+        $stored = DB::table('nodes')->where('id', 'node-test-1')->first();
+        $this->assertSame('https://NODE.example.invalid:9444/', $stored->member_bridge_endpoint);
+        $this->assertStringNotContainsString('BEGIN CERTIFICATE', $stored->member_bridge_ca_ciphertext);
+        $this->assertSame(trim($certificate), trim(Crypt::decryptString($stored->member_bridge_ca_ciphertext)));
+        $this->getJson('/api/v1/admin/nodes/node-test-1')->assertOk()
+            ->assertJsonPath('data.member_bridge_endpoint', 'https://NODE.example.invalid:9444/')
+            ->assertJsonPath('data.member_bridge_trust_configured', true)
+            ->assertJsonMissingPath('data.member_bridge_ca_pem');
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'node.member_bridge_configured', 'target_type' => 'node', 'target_id' => 'node-test-1',
+        ]);
+
+        $this->putJson('/api/v1/admin/nodes/node-test-1/member-bridge', [
+            'endpoint' => null, 'server_ca_pem' => null,
+        ])->assertOk()->assertJsonPath('data.trust_configured', false);
+        $this->assertDatabaseHas('nodes', [
+            'id' => 'node-test-1', 'member_bridge_endpoint' => null, 'member_bridge_ca_ciphertext' => null,
+        ]);
+    }
+
     public function test_node_lifecycle_rejects_invalid_transitions_and_real_nodes(): void
     {
         $this->actingAs(User::findOrFail('user-admin'));
@@ -309,5 +356,40 @@ class PlatformApiTest extends TestCase
     private function recoverySecret(string $byte): string
     {
         return rtrim(strtr(base64_encode(str_repeat($byte, 32)), '+/', '-_'), '=');
+    }
+
+    private function memberBridgeTestCa(): string
+    {
+        $directory = sys_get_temp_dir().'/xlb-admin-bridge-ca-'.bin2hex(random_bytes(8));
+        $this->assertTrue(mkdir($directory, 0700));
+        $configurationPath = $directory.'/openssl.cnf';
+        $configuration = <<<'OPENSSL'
+[req]
+distinguished_name = distinguished_name
+prompt = no
+
+[distinguished_name]
+CN = xlb admin member bridge test CA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+OPENSSL;
+        $this->assertNotFalse(file_put_contents($configurationPath, $configuration));
+        $key = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+        $this->assertNotFalse($key);
+        $request = openssl_csr_new(['commonName' => 'xlb admin member bridge test CA'], $key, [
+            'config' => $configurationPath, 'digest_alg' => 'sha256',
+        ]);
+        $this->assertNotFalse($request);
+        $certificate = openssl_csr_sign($request, null, $key, 365, [
+            'config' => $configurationPath, 'x509_extensions' => 'v3_ca', 'digest_alg' => 'sha256',
+        ]);
+        $this->assertNotFalse($certificate);
+        $this->assertTrue(openssl_x509_export($certificate, $pem));
+        unlink($configurationPath);
+        rmdir($directory);
+
+        return $pem;
     }
 }
