@@ -49,6 +49,7 @@ public final class XlbVpnService extends VpnService {
     public static final String STATE_ERROR = "error";
     private static volatile String currentState = STATE_DISCONNECTED;
     private static volatile String currentRouteName = "";
+    private static volatile boolean currentTunnelIsMember;
 
     private static final String CHANNEL_ID = "xlb_vpn";
     private static final int NOTIFICATION_ID = 31;
@@ -69,6 +70,10 @@ public final class XlbVpnService extends VpnService {
 
     public static String currentRouteName() {
         return currentRouteName;
+    }
+
+    public static boolean currentTunnelIsMember() {
+        return currentTunnelIsMember;
     }
 
     public static String firstRouteName(String profile) {
@@ -92,6 +97,7 @@ public final class XlbVpnService extends VpnService {
                 rejectStart("会员安全线路尚未接入");
                 return START_NOT_STICKY;
             }
+            currentTunnelIsMember = true;
             createChannel();
             startForeground(NOTIFICATION_ID, notification("正在连接"));
             publish(STATE_CONNECTING, null);
@@ -145,7 +151,7 @@ public final class XlbVpnService extends VpnService {
         MemberTunnelGrantStore.clear();
         requestMemberSessionStop();
         worker.execute(() -> {
-            closeMemberSession();
+            if (closeMemberSession()) currentTunnelIsMember = false;
             closeCore();
         });
         worker.shutdown();
@@ -159,6 +165,7 @@ public final class XlbVpnService extends VpnService {
             stopSelf();
             return;
         }
+        currentTunnelIsMember = false;
         Future<?> operation = tunnelWorker.submit(() -> startTunnelInternal(profile, requestedRouteName));
         try {
             operation.get(20, TimeUnit.SECONDS);
@@ -239,7 +246,7 @@ public final class XlbVpnService extends VpnService {
             }
         } catch (ExecutionException | InterruptedException exception) {
             if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
-            closeMemberSession();
+            if (closeMemberSession()) currentTunnelIsMember = false;
             if (connectionAttempt.compareAndSet(attempt, attempt + 1)) {
                 Throwable cause = exception.getCause() == null ? exception : exception.getCause();
                 publish(STATE_ERROR, safeMessage(cause));
@@ -415,6 +422,7 @@ public final class XlbVpnService extends VpnService {
         }
         closeCore();
         currentRouteName = "";
+        currentTunnelIsMember = false;
         publish(STATE_DISCONNECTED, null);
         stopSelf();
     }
@@ -483,6 +491,7 @@ public final class XlbVpnService extends VpnService {
             }
             closeCore();
             currentRouteName = "";
+            currentTunnelIsMember = false;
             publish(STATE_ERROR, message);
             stopForeground(STOP_FOREGROUND_REMOVE);
             stopSelf();

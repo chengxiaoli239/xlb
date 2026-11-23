@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-23）
 
+- **M8 Android 节点授权失效时停止会员隧道（2026-11-23，本机 JVM 与专用 AVD 验收）**：service 现在只在 server-ready grant 通过准入后标记当前会话为会员隧道，并在成功清理后解除标记；若同步发现权益失效，或当前会员隧道的 node authorization 不再为 `READY`，连接中/已连接状态都会发送 ACTION_STOP。通用 Debug 测试线路不因缺少会员 node authorization 而被停止；资源清理未完成时保留会员会话标记，不发布虚假的断开状态。状态策略 JVM 覆盖权益、授权和隧道类型组合；Android JVM tests、AndroidTest 编译、lint 和专用 AVD 隔离 harness 通过。AVD production gate 仍关闭，新增真机测试只确认 grant 被 gate 拒绝时不会留下会员会话标记；没有实测活动的会员 TUN、真实撤权 API 响应或节点断流。下一步要在获批真实节点材料具备后验证授权状态变化与匹配撤权回执，随后做双真机复测。
+
 - **M8 PHP↔Go mTLS provisioning 集成测试 CI 容错与诊断（2026-11-23，本机验收）**：针对 hosted run `45195474224` 曾出现一次 peer 留在 `provisioning`、随后 `45196145412` 全套通过且 PHP 逻辑未改的未复现波动，将 `NodePeerProvisioningTest` 单个 HTTP/mTLS 集成测试的 client timeout 显式设为受支持上限 15 秒，并在 peer 未激活时输出 outbox 状态、错误码和尝试次数。PHP 定向 8/8、103 assertions，Laravel 全套 245 项中 244 通过、1 条既有跳过、2,134 assertions，Pint 通过。只改变测试配置和失败诊断，不改生产 timeout/业务状态机；不证明未复现波动的根因，也不构成真实节点稳定性验收。下一步观察新提交 hosted CI；M6 真实节点验收仍需受控 listener/endpoint/CA/mTLS 材料与匹配回执。
 
 - **M8 Android 权益失效时取消进行中的隧道启动（2026-11-23，本机离线验收）**：修复账户同步结果无有效权益时只停止 `CONNECTED`、遗漏 `CONNECTING` 的边界；将纯状态判断提取为 `MemberTunnelStopPolicy`，权益失效且状态为已连接/连接中都会发送 service stop，权益仍有效或状态已断开/错误时不触发停止。覆盖四种状态组合的 JVM 用例；`testDebugUnitTest`、AndroidTest 编译、lint 均通过。此为本地撤权/到期后的取消信号测试，不证明生产 API 主动推送撤权、真实 TUN 关闭或节点断流回执。下一步继续验证 UI/service 状态同步和服务启动竞态，真实节点回执仍待 listener/CA/runtime 配置与获批隔离节点验收。

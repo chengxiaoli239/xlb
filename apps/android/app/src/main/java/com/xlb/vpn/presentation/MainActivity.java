@@ -1029,7 +1029,10 @@ public final class MainActivity extends Activity {
         loadedProfile = selectedRoute == null || result == null ? null : result.accountProfile;
         routeName = selectedRoute;
         testRoute = false;
-        if (MemberTunnelStopPolicy.shouldStop(tunnelState, hasActiveEntitlement(result))) {
+        boolean nodeAuthorizationReady = result != null
+                && result.nodeAuthorizationStatus == PlatformApi.NodeAuthorizationStatus.READY;
+        if (MemberTunnelStopPolicy.shouldStop(tunnelState, XlbVpnService.currentTunnelIsMember(),
+                hasActiveEntitlement(result), nodeAuthorizationReady)) {
             startService(new Intent(this, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
         }
         render();

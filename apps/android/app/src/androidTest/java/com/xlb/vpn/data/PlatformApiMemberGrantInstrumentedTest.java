@@ -134,6 +134,8 @@ public final class PlatformApiMemberGrantInstrumentedTest {
                     rejected.await(5, TimeUnit.SECONDS));
             assertEquals("会员安全线路尚未接入", serviceMessage.get());
             assertNull("service did not consume the one-shot grant", MemberTunnelGrantStore.consume());
+            assertFalse("closed-gate rejection left the tunnel marked as a member session",
+                    XlbVpnService.currentTunnelIsMember());
             assertEquals("", XlbVpnService.currentRouteName());
 
             MemberTunnelGrantStore.publish(grant);

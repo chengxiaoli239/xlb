@@ -1,6 +1,7 @@
 package com.xlb.vpn.tunnel;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -91,6 +92,7 @@ public final class XlbVpnServiceAdmissionInstrumentedTest {
             assertTrue("member service action was not rejected", rejected.await(5, TimeUnit.SECONDS));
             assertEquals("会员安全线路尚未接入", message.get());
             assertNull(MemberTunnelGrantStore.consume());
+            assertFalse(XlbVpnService.currentTunnelIsMember());
             assertEquals("", XlbVpnService.currentRouteName());
         } finally {
             MemberTunnelGrantStore.clear();

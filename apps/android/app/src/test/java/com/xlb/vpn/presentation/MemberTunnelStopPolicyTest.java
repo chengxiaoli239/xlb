@@ -10,15 +10,22 @@ import static org.junit.Assert.assertTrue;
 public final class MemberTunnelStopPolicyTest {
     @Test
     public void expiredEntitlementStopsConnectedOrConnectingTunnel() {
-        assertTrue(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTED, false));
-        assertTrue(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTING, false));
+        assertTrue(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTED, true, false, true));
+        assertTrue(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTING, true, false, true));
     }
 
     @Test
-    public void activeEntitlementAndInactiveTunnelStatesDoNotTriggerStop() {
-        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTED, true));
-        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTING, true));
-        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_DISCONNECTED, false));
-        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_ERROR, false));
+    public void lostNodeAuthorizationStopsOnlyAMemberTunnel() {
+        assertTrue(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTED, true, true, false));
+        assertTrue(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTING, true, true, false));
+        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTED, false, true, false));
+    }
+
+    @Test
+    public void readyMemberAuthorizationAndInactiveTunnelStatesDoNotTriggerStop() {
+        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTED, true, true, true));
+        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_CONNECTING, true, true, true));
+        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_DISCONNECTED, true, false, false));
+        assertFalse(MemberTunnelStopPolicy.shouldStop(XlbVpnService.STATE_ERROR, true, false, false));
     }
 }
