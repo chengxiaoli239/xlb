@@ -2,11 +2,19 @@ package agent
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -25,7 +33,7 @@ func TestProfileArtifactRejectsUnboundOrSecretBearingMetadata(t *testing.T) {
 		DeviceID: "device-1", DeviceKeyFingerprint: strings.Repeat("a", 64), DeviceBindingGeneration: 3,
 		BridgeProtocol: "xlb-proof-v1",
 	}
-	artifact := testMihomoArtifact(t, request)
+	artifact := testMihomoArtifact(t, &request)
 	invalid := []ProfileArtifact{
 		{NodeID: "node-other", PeerID: artifact.PeerID, RequestID: artifact.RequestID, Generation: artifact.Generation,
 			DeviceKeyFingerprint: artifact.DeviceKeyFingerprint, DeviceBindingGeneration: artifact.DeviceBindingGeneration,
@@ -58,20 +66,66 @@ func TestProfileArtifactAcceptsTheBoundRendererContract(t *testing.T) {
 		DeviceID: "device-1", DeviceKeyFingerprint: strings.Repeat("a", 64), DeviceBindingGeneration: 3,
 		BridgeProtocol: "xlb-proof-v1",
 	}
-	artifact := testMihomoArtifact(t, request)
+	artifact := testMihomoArtifact(t, &request)
 	artifact.RendererVersion = "1.2.3"
 	if err := ValidateProfileArtifact(request, artifact); err != nil {
 		t.Fatalf("ValidateProfileArtifact rejected a valid renderer contract: %v", err)
 	}
 }
 
-func testMihomoArtifact(t *testing.T, request ProfileRenderRequest) ProfileArtifact {
+func TestMihomoRendererRequiresAnExplicitHTTPSOriginAndTrustedCACertificate(t *testing.T) {
+	ca := testBridgeCA(t)
+	invalidEndpoints := []string{
+		"http://node.example.invalid:9444",
+		"https://user@node.example.invalid:9444",
+		"https://node.example.invalid:0",
+		"https://node.example.invalid:9444?redirect=1",
+		"https://node.example.invalid:9444#fragment",
+	}
+	for _, endpoint := range invalidEndpoints {
+		if _, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890", endpoint, ca); !errors.Is(err, ErrInvalid) {
+			t.Errorf("renderer accepted endpoint %q, error = %v", endpoint, err)
+		}
+	}
+	if _, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890", "https://node.example.invalid:9444", ""); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("renderer accepted an empty CA bundle, error = %v", err)
+	}
+	if _, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890", "https://node.example.invalid:9444",
+		"-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("renderer accepted malformed CA PEM, error = %v", err)
+	}
+}
+
+func TestProfileArtifactRejectsChangedNodeBridgeTrustDescriptor(t *testing.T) {
+	request := ProfileRenderRequest{
+		NodeID: "node-1", PeerID: "peer-1", EntitlementID: "entitlement-1",
+		RequestID: "request-1", Generation: 1, DeviceID: "device-1",
+		DeviceKeyFingerprint: strings.Repeat("a", 64), DeviceBindingGeneration: 1,
+		BridgeProtocol: "xlb-proof-v1",
+	}
+	artifact := testMihomoArtifact(t, &request)
+	artifact.BridgeEndpoint = "http://attacker.invalid:9444"
+	if err := ValidateProfileArtifact(request, artifact); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("artifact endpoint tampering error = %v; want ErrInvalid", err)
+	}
+	artifact = testMihomoArtifact(t, &request)
+	artifact.BridgeServerCAPEM = "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n"
+	if err := ValidateProfileArtifact(request, artifact); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("artifact CA tampering error = %v; want ErrInvalid", err)
+	}
+}
+
+func testMihomoArtifact(t *testing.T, request *ProfileRenderRequest) ProfileArtifact {
 	t.Helper()
-	renderer, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890")
+	if request.BridgeEndpoint == "" {
+		request.BridgeEndpoint = "https://node.example.invalid:9444"
+		request.BridgeServerCAPEM = testBridgeCA(t)
+	}
+	renderer, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890", request.BridgeEndpoint, request.BridgeServerCAPEM)
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifact, err := renderer.Render(context.Background(), request)
+	artifact, err := renderer.Render(context.Background(), *request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,13 +139,17 @@ func TestMihomoBridgeProfileRendererProducesFailClosedLocalProxyConfig(t *testin
 		DeviceID: "device-1", DeviceKeyFingerprint: strings.Repeat("a", 64),
 		DeviceBindingGeneration: 3, BridgeProtocol: "xlb-proof-v1",
 	}
-	renderer, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890")
+	renderer, err := testMihomoRenderer(t)
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.BridgeEndpoint, request.BridgeServerCAPEM = renderer.MemberBridgeDescriptor()
 	artifact, err := renderer.Render(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if artifact.BridgeEndpoint != "https://node.example.invalid:9444" || artifact.BridgeServerCAPEM == "" {
+		t.Fatalf("artifact omitted node bridge trust descriptor: %+v", artifact)
 	}
 	if err := ValidateProfileArtifact(request, artifact); err != nil {
 		t.Fatalf("ValidateProfileArtifact rejected renderer output: %v", err)
@@ -133,10 +191,10 @@ func TestMihomoBridgeProfileRendererProducesFailClosedLocalProxyConfig(t *testin
 }
 
 func TestMihomoBridgeProfileRendererRejectsInvalidRequestAndListener(t *testing.T) {
-	if _, err := NewMihomoBridgeProfileRenderer("0.0.0.0:17890"); !errors.Is(err, ErrInvalid) {
+	if _, err := NewMihomoBridgeProfileRenderer("0.0.0.0:17890", "https://node.example.invalid:9444", testBridgeCA(t)); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("public bridge listener error = %v; want ErrInvalid", err)
 	}
-	renderer, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890")
+	renderer, err := testMihomoRenderer(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,9 +208,34 @@ func TestMihomoBridgeProfileRendererRejectsInvalidRequestAndListener(t *testing.
 		NodeID: "node-1", PeerID: "peer-1", EntitlementID: "entitlement-1",
 		RequestID: "request-1", Generation: 1, DeviceID: "device-1",
 		DeviceKeyFingerprint: strings.Repeat("a", 64), DeviceBindingGeneration: 1,
-		BridgeProtocol: "xlb-proof-v1",
+		BridgeProtocol: "xlb-proof-v1", BridgeEndpoint: renderer.bridgeEndpoint,
+		BridgeServerCAPEM: renderer.bridgeServerCAPEM,
 	}
 	if artifact, err := renderer.Render(canceled, request); !errors.Is(err, context.Canceled) || artifact.Content != "" {
 		t.Fatalf("canceled request result = (%+v, %v); want empty artifact and canceled", artifact, err)
 	}
+}
+
+func testMihomoRenderer(t *testing.T) (*MihomoBridgeProfileRenderer, error) {
+	t.Helper()
+	return NewMihomoBridgeProfileRenderer("127.0.0.1:17890", "https://node.example.invalid:9444", testBridgeCA(t))
+}
+
+func testBridgeCA(t *testing.T) string {
+	t.Helper()
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test node data plane CA"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true,
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }

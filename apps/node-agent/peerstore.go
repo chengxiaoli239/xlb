@@ -140,6 +140,8 @@ type PeerStore struct {
 	nodeID          string
 	capacity        int
 	profileRenderer ProfileRenderer
+	bridgeEndpoint  string
+	bridgeServerCA  string
 }
 
 type RuntimeSnapshot struct {
@@ -208,18 +210,27 @@ type agentState struct {
 }
 
 func OpenPeerStore(path, nodeID string, capacity int) (*PeerStore, error) {
-	return openPeerStore(path, nodeID, capacity, nil)
+	return openPeerStore(path, nodeID, capacity, nil, "", "")
 }
 
 func OpenPeerStoreWithProfileRenderer(path, nodeID string, capacity int, renderer ProfileRenderer) (*PeerStore, error) {
 	if renderer == nil {
 		return nil, ErrInvalid
 	}
+	descriptor, ok := renderer.(MemberBridgeDescriptorProvider)
+	if !ok {
+		return nil, ErrInvalid
+	}
+	bridgeEndpoint, bridgeServerCA := descriptor.MemberBridgeDescriptor()
+	if err := validateMemberBridgeDescriptor(bridgeEndpoint, bridgeServerCA); err != nil {
+		return nil, err
+	}
 
-	return openPeerStore(path, nodeID, capacity, renderer)
+	return openPeerStore(path, nodeID, capacity, renderer, bridgeEndpoint, bridgeServerCA)
 }
 
-func openPeerStore(path, nodeID string, capacity int, renderer ProfileRenderer) (*PeerStore, error) {
+func openPeerStore(path, nodeID string, capacity int, renderer ProfileRenderer,
+	bridgeEndpoint, bridgeServerCA string) (*PeerStore, error) {
 	if path == "" || nodeID == "" || capacity < 1 {
 		return nil, ErrInvalid
 	}
@@ -236,7 +247,10 @@ func openPeerStore(path, nodeID string, capacity int, renderer ProfileRenderer) 
 	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("protect existing node state: %w", err)
 	}
-	store := &PeerStore{path: path, nodeID: nodeID, capacity: capacity, profileRenderer: renderer}
+	store := &PeerStore{
+		path: path, nodeID: nodeID, capacity: capacity, profileRenderer: renderer,
+		bridgeEndpoint: bridgeEndpoint, bridgeServerCA: bridgeServerCA,
+	}
 	if err := store.update(func(state *agentState) error {
 		if state.NodeID != "" && (state.NodeID != nodeID || state.Capacity != capacity) {
 			return fmt.Errorf("persisted node identity or capacity differs from configured values: %w", ErrInvalid)
@@ -345,6 +359,7 @@ func (store *PeerStore) EnsurePeer(request EnsurePeerRequest) (EnsurePeerReceipt
 			RequestID: request.RequestID, Generation: request.Generation, DeviceID: request.DeviceID,
 			DeviceKeyFingerprint:    request.DeviceKeyFingerprint,
 			DeviceBindingGeneration: request.DeviceBindingGeneration, BridgeProtocol: "xlb-proof-v1",
+			BridgeEndpoint: store.bridgeEndpoint, BridgeServerCAPEM: store.bridgeServerCA,
 		}
 		renderContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		rendered, renderErr := store.profileRenderer.Render(renderContext, profileRequest)

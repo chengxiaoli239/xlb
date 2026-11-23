@@ -39,6 +39,7 @@ func main() {
 	nodeID := flag.String("node-id", "", "isolated node identity")
 	capacity := flag.Int("capacity", 1, "isolated node capacity")
 	bridgeAddress := flag.String("bridge-listen-address", "127.0.0.1:17890", "loopback-only profile bridge address")
+	bridgeEndpoint := flag.String("bridge-endpoint", "https://node.example.invalid:9444", "test-only node data-plane HTTPS origin")
 	flag.Parse()
 	if *directory == "" || *nodeID == "" || *capacity < 1 {
 		fmt.Fprintln(os.Stderr, "directory, node ID, and positive capacity are required")
@@ -49,7 +50,11 @@ func main() {
 	if err != nil {
 		fail("create temporary mTLS credentials")
 	}
-	renderer, err := agent.NewMihomoBridgeProfileRenderer(*bridgeAddress)
+	bridgeServerCA, err := os.ReadFile(files.caCertificate)
+	if err != nil {
+		fail("read temporary node server CA")
+	}
+	renderer, err := agent.NewMihomoBridgeProfileRenderer(*bridgeAddress, *bridgeEndpoint, string(bridgeServerCA))
 	if err != nil {
 		fail("configure loopback-only profile renderer")
 	}

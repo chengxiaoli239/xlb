@@ -71,7 +71,7 @@ func TestIsolatedEnsureReceiptDoesNotIncludeAProductionProfileArtifact(t *testin
 
 func TestEnsureWithProfileRendererPersistsIdentityBoundArtifactAcrossRetries(t *testing.T) {
 	request, _ := testEnsureRequest(t, "peer-rendered", "ensure-rendered")
-	renderer, err := NewMihomoBridgeProfileRenderer("127.0.0.1:17890")
+	renderer, err := testMihomoRenderer(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +94,7 @@ func TestEnsureWithProfileRendererPersistsIdentityBoundArtifactAcrossRetries(t *
 		DeviceKeyFingerprint: request.DeviceKeyFingerprint, DeviceBindingGeneration: request.DeviceBindingGeneration,
 		BridgeProtocol: "xlb-proof-v1",
 	}
+	profileRequest.BridgeEndpoint, profileRequest.BridgeServerCAPEM = renderer.MemberBridgeDescriptor()
 	if err := ValidateProfileArtifact(profileRequest, *first.ProfileArtifact); err != nil {
 		t.Fatalf("renderer artifact did not match the request: %v", err)
 	}

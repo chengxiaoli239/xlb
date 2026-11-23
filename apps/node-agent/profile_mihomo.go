@@ -21,7 +21,9 @@ const (
 )
 
 type MihomoBridgeProfileRenderer struct {
-	listenAddress string
+	listenAddress     string
+	bridgeEndpoint    string
+	bridgeServerCAPEM string
 }
 
 type mihomoBridgeConfig struct {
@@ -49,7 +51,7 @@ type mihomoBridgeProxyGroup struct {
 	Proxies []string `yaml:"proxies"`
 }
 
-func NewMihomoBridgeProfileRenderer(listenAddress string) (*MihomoBridgeProfileRenderer, error) {
+func NewMihomoBridgeProfileRenderer(listenAddress, bridgeEndpoint, bridgeServerCAPEM string) (*MihomoBridgeProfileRenderer, error) {
 	host, portValue, err := net.SplitHostPort(listenAddress)
 	if err != nil {
 		return nil, ErrInvalid
@@ -59,11 +61,27 @@ func NewMihomoBridgeProfileRenderer(listenAddress string) (*MihomoBridgeProfileR
 	if ip == nil || !ip.IsLoopback() || err != nil || port < 1 || port > 65535 {
 		return nil, ErrInvalid
 	}
-	return &MihomoBridgeProfileRenderer{listenAddress: net.JoinHostPort(host, strconv.Itoa(port))}, nil
+	if err := validateMemberBridgeDescriptor(bridgeEndpoint, bridgeServerCAPEM); err != nil {
+		return nil, err
+	}
+	return &MihomoBridgeProfileRenderer{
+		listenAddress:  net.JoinHostPort(host, strconv.Itoa(port)),
+		bridgeEndpoint: bridgeEndpoint, bridgeServerCAPEM: bridgeServerCAPEM,
+	}, nil
+}
+
+func (renderer *MihomoBridgeProfileRenderer) MemberBridgeDescriptor() (string, string) {
+	if renderer == nil {
+		return "", ""
+	}
+	return renderer.bridgeEndpoint, renderer.bridgeServerCAPEM
 }
 
 func (renderer *MihomoBridgeProfileRenderer) Render(ctx context.Context, request ProfileRenderRequest) (ProfileArtifact, error) {
 	if renderer == nil || ctx == nil || renderer.listenAddress == "" {
+		return ProfileArtifact{}, ErrInvalid
+	}
+	if request.BridgeEndpoint != renderer.bridgeEndpoint || request.BridgeServerCAPEM != renderer.bridgeServerCAPEM {
 		return ProfileArtifact{}, ErrInvalid
 	}
 	if err := ctx.Err(); err != nil {
@@ -110,6 +128,7 @@ func (renderer *MihomoBridgeProfileRenderer) Render(ctx context.Context, request
 		DeviceKeyFingerprint: request.DeviceKeyFingerprint, DeviceBindingGeneration: request.DeviceBindingGeneration,
 		Format: "mihomo-yaml", RendererID: "xlb-mihomo-bridge-v1", RendererVersion: mihomoBridgeVersion,
 		SHA256: profileContentSHA256(content), BridgeProtocol: request.BridgeProtocol,
+		BridgeEndpoint: renderer.bridgeEndpoint, BridgeServerCAPEM: renderer.bridgeServerCAPEM,
 		Connectable: true, Content: string(content),
 	}
 	if err := ValidateProfileArtifact(request, artifact); err != nil {
