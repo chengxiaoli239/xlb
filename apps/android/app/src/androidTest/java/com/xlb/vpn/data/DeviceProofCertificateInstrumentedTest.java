@@ -214,6 +214,7 @@ public final class DeviceProofCertificateInstrumentedTest {
                 readFully(connection, response);
                 assertArrayEquals(payload, response);
             }
+
             assertTrue(certificate.proofBridgeRunning());
 
             certificate.close();
@@ -236,6 +237,47 @@ public final class DeviceProofCertificateInstrumentedTest {
                 byte[] copiedReply = new byte[10];
                 readFully(copiedConnection, copiedReply);
                 assertEquals("Node Agent accepted a copied peer identity", 5, copiedReply[1]);
+                JSONObject rejection = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus());
+                assertEquals(403, rejection.getInt("status"));
+                assertTrue(rejection.getString("body").contains("unauthorized"));
+            }
+
+            certificate.close();
+            certificate = DeviceProofCertificate.create(proof);
+            credentials = certificate.startProofBridge(fixture.getString("endpoint"), fixture.getString("ca_pem"));
+            try (Socket revocationConnection = new Socket("127.0.0.1", 17890)) {
+                revocationConnection.setSoTimeout(5000);
+                negotiateSocksUserPassword(revocationConnection, credentials);
+                byte[] host = "bridge.test".getBytes(StandardCharsets.US_ASCII);
+                revocationConnection.getOutputStream().write(new byte[]{5, 1, 0, 3, (byte) host.length});
+                revocationConnection.getOutputStream().write(host);
+                revocationConnection.getOutputStream().write(new byte[]{1, (byte) 187});
+                byte[] connectReply = new byte[10];
+                readFully(revocationConnection, connectReply);
+                assertEquals("Node Agent did not authorize the peer before revocation", 0, connectReply[1]);
+                byte[] payload = "final measured bytes".getBytes(StandardCharsets.UTF_8);
+                revocationConnection.getOutputStream().write(payload);
+                byte[] response = new byte[payload.length];
+                readFully(revocationConnection, response);
+                assertArrayEquals(payload, response);
+
+                JSONObject revocation = new JSONObject(DeviceProofJni.revokeNodeAgentFixturePeer());
+                assertFalse("isolated Node Agent did not confirm revocation", revocation.has("error"));
+                assertEquals("confirmed_test", revocation.getString("confirmation_status"));
+                assertTrue(revocation.getLong("upload_bytes") > 0);
+                assertTrue(revocation.getLong("download_bytes") > 0);
+                assertEquals(-1, revocationConnection.getInputStream().read());
+            }
+            try (Socket revokedConnection = new Socket("127.0.0.1", 17890)) {
+                revokedConnection.setSoTimeout(5000);
+                negotiateSocksUserPassword(revokedConnection, credentials);
+                byte[] host = "bridge.test".getBytes(StandardCharsets.US_ASCII);
+                revokedConnection.getOutputStream().write(new byte[]{5, 1, 0, 3, (byte) host.length});
+                revokedConnection.getOutputStream().write(host);
+                revokedConnection.getOutputStream().write(new byte[]{1, (byte) 187});
+                byte[] revokedReply = new byte[10];
+                readFully(revokedConnection, revokedReply);
+                assertEquals("Node Agent accepted a revoked peer", 5, revokedReply[1]);
                 JSONObject rejection = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus());
                 assertEquals(403, rejection.getInt("status"));
                 assertTrue(rejection.getString("body").contains("unauthorized"));

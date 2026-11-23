@@ -6,6 +6,7 @@ extern int XlbCompleteAndroidSignerHandshake(const char *, int);
 extern char *XlbStartAndroidNodeAgentFixture(char *, int);
 extern void XlbStopAndroidNodeAgentFixture(void);
 extern char *XlbAndroidNodeAgentFixtureStatus(void);
+extern char *XlbRevokeAndroidNodeAgentFixturePeer(void);
 #endif
 extern void XlbInit(char *, int (*)(int));
 extern char *XlbLoad(char *, int);
@@ -195,6 +196,20 @@ JNIEXPORT jstring JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeNodeAgentFi
     return response;
 #else
     return (*env)->NewStringUTF(env, "{\"status\":0,\"body\":\"\"}");
+#endif
+}
+
+JNIEXPORT jstring JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeRevokeNodeAgentFixturePeer(
+    JNIEnv *env, jclass type) {
+    (void)type;
+#ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
+    char *receipt = XlbRevokeAndroidNodeAgentFixturePeer();
+    if (receipt == NULL) return (*env)->NewStringUTF(env, "{\"error\":\"fixture revocation failed\"}");
+    jstring response = (*env)->NewStringUTF(env, receipt);
+    XlbFreeString(receipt);
+    return response;
+#else
+    return (*env)->NewStringUTF(env, "{\"error\":\"fixture is unavailable\"}");
 #endif
 }
 #endif

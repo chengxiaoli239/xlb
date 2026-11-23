@@ -29,6 +29,10 @@ final class DeviceProofJni {
         return nativeNodeAgentFixtureStatus();
     }
 
+    static String revokeNodeAgentFixturePeer() {
+        return nativeRevokeNodeAgentFixturePeer();
+    }
+
     private static native boolean nativeCompleteTls13MtlsHandshake(
             DigestSigner signer, byte[] publicKeySpkiDer);
 
@@ -37,4 +41,6 @@ final class DeviceProofJni {
     private static native void nativeStopNodeAgentFixture();
 
     private static native String nativeNodeAgentFixtureStatus();
+
+    private static native String nativeRevokeNodeAgentFixturePeer();
 }

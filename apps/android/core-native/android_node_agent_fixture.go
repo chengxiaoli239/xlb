@@ -61,6 +61,10 @@ type androidNodeAgentFixtureResponse struct {
 var androidNodeAgentFixture struct {
 	sync.Mutex
 	server     *httptest.Server
+	dataPlane  *agent.DataPlane
+	nodeID     string
+	peerID     string
+	generation int
 	lastStatus int
 	lastBody   string
 }
@@ -93,12 +97,14 @@ func XlbStartAndroidNodeAgentFixture(requestJSON *C.char, requestLength C.int) *
 //export XlbStopAndroidNodeAgentFixture
 func XlbStopAndroidNodeAgentFixture() {
 	androidNodeAgentFixture.Lock()
-	defer androidNodeAgentFixture.Unlock()
-	if androidNodeAgentFixture.server == nil {
+	server := androidNodeAgentFixture.server
+	androidNodeAgentFixture.server = nil
+	androidNodeAgentFixture.dataPlane = nil
+	androidNodeAgentFixture.Unlock()
+	if server == nil {
 		return
 	}
-	androidNodeAgentFixture.server.Close()
-	androidNodeAgentFixture.server = nil
+	server.Close()
 }
 
 //export XlbAndroidNodeAgentFixtureStatus
@@ -111,6 +117,31 @@ func XlbAndroidNodeAgentFixtureStatus() *C.char {
 	})
 	if err != nil {
 		return C.CString(`{"status":0,"body":""}`)
+	}
+	return C.CString(string(encoded))
+}
+
+//export XlbRevokeAndroidNodeAgentFixturePeer
+func XlbRevokeAndroidNodeAgentFixturePeer() *C.char {
+	androidNodeAgentFixture.Lock()
+	dataPlane := androidNodeAgentFixture.dataPlane
+	nodeID := androidNodeAgentFixture.nodeID
+	peerID := androidNodeAgentFixture.peerID
+	generation := androidNodeAgentFixture.generation
+	androidNodeAgentFixture.Unlock()
+	if dataPlane == nil || nodeID == "" || peerID == "" || generation < 1 {
+		return C.CString(`{"error":"fixture peer is unavailable"}`)
+	}
+	receipt, err := dataPlane.RevokePeer(agent.RevokePeerRequest{
+		NodeID: nodeID, PeerID: peerID, RequestID: "avd-revoke-" + time.Now().UTC().Format("20060102150405.000000000"),
+		Generation: generation + 1,
+	})
+	if err != nil {
+		return C.CString(`{"error":"fixture revocation failed"}`)
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil {
+		return C.CString(`{"error":"fixture receipt is invalid"}`)
 	}
 	return C.CString(string(encoded))
 }
@@ -174,6 +205,10 @@ func startAndroidNodeAgentFixture(request androidNodeAgentFixtureRequest) (andro
 		return androidNodeAgentFixtureResponse{}, errors.New("fixture listener is not loopback")
 	}
 	androidNodeAgentFixture.server = server
+	androidNodeAgentFixture.dataPlane = dataPlane
+	androidNodeAgentFixture.nodeID = request.NodeID
+	androidNodeAgentFixture.peerID = request.PeerID
+	androidNodeAgentFixture.generation = request.Generation
 	androidNodeAgentFixture.lastStatus = 0
 	androidNodeAgentFixture.lastBody = ""
 	return androidNodeAgentFixtureResponse{
