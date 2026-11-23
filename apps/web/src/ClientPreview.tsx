@@ -91,7 +91,7 @@ export default function ClientPreview() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [email, setEmail] = useState('member@xlb.local');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [dialog, setDialog] = useState<'connect' | 'subscription' | 'rotate' | null>(null);
   const [showQr, setShowQr] = useState(() => new URLSearchParams(window.location.search).get('qr') === '1');

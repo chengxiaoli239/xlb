@@ -130,8 +130,8 @@ export default function App() {
   const [view, setViewState] = useState(initialView);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [toast, setToast] = useState('');
-  const [loginEmail, setLoginEmail] = useState(portalRole === 'member' ? 'member@xlb.local' : 'admin@xlb.local');
-  const [password, setPassword] = useState(portalRole === 'member' ? 'member-local-2026' : 'admin-local-2026');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   const refresh = useCallback(() => setNonce(value => value + 1), []);
@@ -321,8 +321,7 @@ function Login({ portalRole, email, setEmail, password, setPassword, onSubmit }:
         <label>登录密码<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
         <div className="form-meta"><label className="remember"><input type="checkbox" defaultChecked /> 保持登录</label><span>本机演示账号</span></div>
         <button className="primary-button login-submit">{portalRole === 'member' ? '登录会员中心' : '登录管理后台'} <ArrowUpRight size={16} /></button>
-        {portalRole === 'admin' && <div className="demo-hint"><ShieldCheck size={15} /><span>默认管理员：<b>admin@xlb.local</b> / <b>admin-local-2026</b></span></div>}
-        <div className="demo-hint"><CircleUserRound size={15} /><span>会员演示：<b>member@xlb.local</b> / <b>member-local-2026</b></span></div>
+        <div className="demo-hint"><ShieldCheck size={15} /><span>请使用当前环境配置的账户登录；密码不会预填或显示。</span></div>
       </form>
       <div className="login-panel-foot"><span>© 2026 迅连宝</span><span>仅用于本地开发与验证</span></div>
     </section>

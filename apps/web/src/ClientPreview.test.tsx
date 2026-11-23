@@ -58,8 +58,10 @@ describe('ClientPreview', () => {
     const form = container.querySelector<HTMLFormElement>('form.client-login-form')!;
     expect(email.required).toBe(true);
     expect(email.type).toBe('email');
+    expect(email.value).toBe('');
     expect(email.labels?.[0]?.textContent).toContain('邮箱地址');
     expect(password.required).toBe(true);
+    expect(password.value).toBe('');
     expect(password.labels?.[0]?.textContent).toContain('登录密码');
     expect(form.checkValidity()).toBe(false);
     await fireEvent(email, 'input', { value: 'not-an-email' });

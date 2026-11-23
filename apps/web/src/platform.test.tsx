@@ -6,7 +6,7 @@ import { cleanup, render, settle } from './test/test-utils';
 const member = {
   id: 'member-local-test',
   name: '本地测试会员',
-  email: 'member@xlb.local',
+  email: 'member@example.test',
   role: 'member',
 };
 
@@ -78,6 +78,21 @@ afterEach(() => {
 });
 
 describe('member sandbox purchase flow', () => {
+  it('does not prefill seeded account credentials or expose local passwords in the member login form', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    window.history.replaceState({}, '', '/account');
+    const fetchMock = vi.fn(async () => json(null));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = await render(<App />);
+    await settle();
+
+    expect(container.querySelector<HTMLInputElement>('input[type="email"]')?.value).toBe('');
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
+    expect(container.textContent).not.toContain('默认管理员');
+    expect(container.textContent).not.toContain('会员演示：');
+  });
+
   it('creates a test order and simulates payment without contacting a payment provider', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     window.history.replaceState({}, '', '/account?view=plans');
@@ -133,7 +148,7 @@ describe('member sandbox purchase flow', () => {
     window.history.replaceState({}, '', '/');
     let loggedIn = false;
     let refunded = false;
-    const admin = { id: 'admin-local-test', name: '本地管理员', email: 'admin@xlb.local', role: 'admin' };
+    const admin = { id: 'admin-local-test', name: '本地管理员', email: 'admin@example.test', role: 'admin' };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path.endsWith('/api/v1/auth/session')) return json(loggedIn ? admin : null);
@@ -179,6 +194,8 @@ describe('member sandbox purchase flow', () => {
     const container = await render(<App />);
     await settle();
     const loginForm = container.querySelector<HTMLFormElement>('.login-form')!;
+    await fireEvent(container.querySelector<HTMLInputElement>('input[type="email"]')!, 'input', { value: 'admin@example.test' });
+    await fireEvent(container.querySelector<HTMLInputElement>('input[type="password"]')!, 'input', { value: 'test-only-password' });
     await fireEvent(loginForm, 'submit');
     await settle();
     expect(container.textContent).toContain('运营总览');
