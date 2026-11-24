@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **本轮关键路径复核（2026-11-24）**：Android 本地失败恢复入口检查已完成，原总体计划中“检查用户可操作恢复”行动项可关闭，主线 `f07465d` 的 Android monitor stale-attempt 回归 CI `45406085919` 六个 jobs 全绿；会员网站→Laravel 本地沙箱下单/模拟付款→退款清理已通过真实浏览器，记录见 [上线工程总体规划 §0.2.4](launch-engineering-master-plan.md)。仍未满足试点放行条件的独立门是 Android 真实 member profile/CA/mTLS/撤权回执、GitHub `android-release-candidate` Environment/签名凭据、获批 staging/回滚，以及商户 sandbox/合规书面意见。最新只读 GitHub 元数据仍显示 environments 与 repository variables 均为空；AWS 本轮未做读写。后续不重复已完成的诊断 UI/沙箱付款 mock 测试，继续从首发真实放行依赖或新的离线缺陷推进。
+
 - **会员网站到本地 Laravel 沙箱购买/退款浏览器联验（2026-11-24，本机真实浏览器）**：通过 Playwright CLI 连接本机 Vite `5174` 与 Laravel `4175`，以已存在的本地 seed member 登录，浏览套餐、创建服务端金额订单、在订单弹窗确认沙箱模拟付款；观察到 `POST /api/v1/me/orders` 返回 201、`POST .../sandbox-payment` 返回 201，详情显示 `paid_test`、测试权益从当前到期日后追加 30 天、固定订阅二维码/链接已准备。网络请求只调用本地 sandbox payment API，无真实支付商/checkout/charge 请求。随后通过 local/testing 退款处理器清理本次订单；数据库复核订单 `refunded_test`、grant `revoked_test`。浏览器快照曾含本地 URL 型订阅 token，已删除本轮生成的快照与 console 文件，未将凭证写入报告/仓库。此联验只证明本地网站与 Laravel 沙箱流程，不代表真实付款、真实节点撤权回执、staging 或上线验收。
 
 - **Android native 本地模块依赖回归保护（2026-11-24）**：新增 ops unittest，确认 Debug/Release Mihomo JNI 的 Gradle 注册共同通过 native build helper，且该 helper 将本地替换的 `apps/node-agent` Go 源、`go.mod` 与 `go.sum` 声明为 task inputs。定向 1/1、ops 全套 63/63 通过。此测试防止 Node Agent 修改后 JNI 任务错误显示 `UP-TO-DATE`；不代表 Android 生产 signed candidate 或真实节点验收。

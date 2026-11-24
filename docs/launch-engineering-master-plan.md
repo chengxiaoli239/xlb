@@ -55,8 +55,8 @@
 | **Q1 Android 会员数据面放行** | 两台真机身份、Android Keystore、Go bridge、Mihomo/TUN 的隔离 harness 和客户端安全诊断已有证据；生产 gate 仍关闭。最大不确定性在真实 member profile/节点凭证接线、双机复制拒绝、撤权回执与最终流量匹配 | 有材料后按 1–3 个开发/验收日估算，不能把外部排队算作 AI 工时；具体需根据节点契约复估 | 节点负责人提供 endpoint、CA/mTLS 注入方式、profile、获批窗口和回执字段。资料未到期间不改 gate、不模拟真实结论 | 材料齐备后先做单设备 happy path，再做第二身份复制拒绝和撤权；每项保留请求/节点/peer/generation 对应证据 |
 | **Q1 M11 签名候选与 staging** | APK、runtime SBOM、摘要 manifest、provenance workflow 有离线/CI 验证；protected Environment 未配置，无 staging 部署/回滚验收 | Environment 元数据可见后约 2–4 小时配置核对与候选流程复核；staging 演练约 0.5–1.5 日，环境和负责人等待另计 | 仓库管理员建受保护 Environment 并设审核者；凭据负责人经批准通道提供正式签名配置/API origin；staging 负责人给环境、窗口和回滚人。AI 不读取/提交凭据，不部署 | 获批者产出同一 commit 的签名 APK、SBOM、manifest、provenance；staging smoke 与回滚形成独立记录 |
 | **Q1 商户沙箱与首发合规** | provider-neutral 契约和 local/testing 付款退款账本已经存在；真实商户 sandbox、首发地区合规意见未验收 | 商户契约到位后约 0.5–1.5 日接入/验收，审查时间由外部负责人决定 | 支付负责人提供回调、签名、重试、对账字段；合规负责人确认地区和书面意见。不得以本地假渠道宣称真实支付已验收 | 测试下单→回调→权益→退款→对账可追溯，并取得书面放行意见 |
-| **Q2 Android 离线失败处理** | Android API 与 VPN 错误已安全归类，主线提交 `54c2b12` 的 hosted CI `45389731860` 六个 jobs 全绿；尚需围绕首发连接入口检查用户可操作恢复与诊断编号覆盖，避免重复增加低风险映射枚举 | 每个明确缺口约 1–3 小时；需先找出现有入口的可复现缺口 | 与真实节点材料独立，可继续本机/CI；不把错误编号当根因诊断或运行遥测 | 选定一个真实 UI/API 状态转换，补最小回归和文档证据后合入主线 |
-| **Q2 Web/API 沙箱首发回归** | 2026-11-24 本机复跑订单、沙箱付款/退款、provider event ledger 31/31（325 assertions），Web account tests 8/8；直接付款和 provider fulfillment 两条续费路径均锁会员行后计算新权益。付款/账本定向 18/18（186 assertions），Laravel 全套 262 passed / 1 skipped（2,337 assertions），Pint 通过。`fb30f54` 的直接付款锁修复 CI `45397671907` 全绿，`4ca1c95` 的 provider worker 锁修复 CI `45400453880` 六个 jobs 全绿。未运行浏览器端到端、staging 或 MySQL/PostgreSQL 并发锁竞争 | 代码回归已完成；浏览器 smoke 如纳入当前冲刺约 1–3 小时 | 可与 Android 离线验证并行，文件所有权分离；真实商户接入仍等 Q1 资料 | 复用现有测试证据，本周不重复造沙箱链路；后续如启用真实渠道，需在目标数据库引擎补事务竞争验收，当前仍无真实收款 |
+| **Q2 Android 离线失败处理** | 连接与 API 失败的安全诊断编号已有实现；首页连接失败有“重试连接”、账户节点线路不可用卡有“重试同步”。本轮为 attempt-bound monitor 补上“probe 进行中旧 attempt 被替换”回归；JVM 全量、AndroidTest compile、lint、Debug APK 本机通过，主线 `f07465d` CI `45406085919` 六个 jobs 全绿。未发现还需重复建设诊断 UI 的离线缺口 | 本阶段已完成；后续由新的复现问题驱动 | 真实节点材料缺失期间可继续其它工作，但不把客户端 probe 说成节点撤权事件/线路稳定证明 | 将 Android 诊断入口从本周 AI 待办移出；真实 member profile、节点证书和回执到位后转入 Q1 真机验收 |
+| **Q2 Web/API 沙箱首发回归** | 2026-11-24 本机订单、沙箱付款/退款和 provider ledger 测试通过（既有结果）；直接付款和 provider fulfillment 两条续费路径均锁会员行后计算新权益，定向付款/ledger 18/18、完整 Laravel 262 passed / 1 skipped、两条支付修复 CI `45397671907` / `45400453880` 全绿。本轮真实浏览器联验会员网站→Laravel：建单与 sandbox payment 均 HTTP 201，权益延长、固定订阅 QR/link 展示，退款后测试订单/grant 为 revoked；该测试数据已清理。未完成真实商户/staging 流程或 MySQL/PostgreSQL 并发锁竞争 | 本地沙箱入口已验收；真实商户/staging 依赖外部环境 | 可与 Android 离线验证并行，文件所有权分离；真实商户接入仍等 Q1 资料 | 不重复本地 mock/浏览器沙箱链路；真实渠道到位后验收真实商户回调/对账和目标数据库锁语义，当前仍无真实收款 |
 | **Q2 发布可追溯性** | 候选 artifact 校验与 SBOM/provenance CI 已覆盖；缺 protected Environment 和正式签名运行证据 | 离线 checklist 复核约 1–2 小时，正式候选时间取决于外部配置 | 与 Web/API 回归并行；不得创建环境或注入秘密，除非用户授权且相应负责人执行 | 对照 workflow、权限、制品摘要和审批门形成短 go/no-go 清单 |
 | **Q3 外部协调** | 节点、仓库 Environment、staging、商户、合规负责人及日期尚未确认；用户已表示稍后提供外部放行责任人 | AI 汇总缺项约 30–60 分钟/轮；等待时长未知 | 用户提供负责人后再登记姓名和承诺日期；未经授权不代发消息 | 把负责人和下一动作映射到上方 Q1 表，按真实日期重排 |
 | **Q4 后续范围** | Windows 数据面、macOS/iOS、规模化并发、多云/CDN、非首发细节不影响 Android + Web/API 单服务商受控试点的近期最短路径 | 当前冲刺不分配 | 放入后续路线图；只有 Q1 发布门和首发链路稳定后再重估 | 暂无，本周不启动 |
@@ -75,6 +75,8 @@
 ### 0.2.4 Worktree 未合并成果复核（2026-11-24）
 
 **Web/API 本地浏览器联验（2026-11-24）**：用 Playwright CLI 对本机会员 portal 与 Laravel 完成登录→套餐选择→建单→确认沙箱付款；HTTP 201 创建测试订单和接受模拟付款，UI 展示 `paid_test`、权益延长、固定订阅 QR/link。随后 sandbox refund 清理本次订单，并在 SQLite 核验订单和 entitlement grant 均为 revoked 测试态。浏览器请求没有触达商户 API；不代表真实收款、生产支付、staging 或节点撤权回执。订阅 URL 型凭证只在本机临时浏览器快照显示，本轮快照已删除。
+
+**M11 外部签名配置复查（2026-11-24，只读 GitHub 元数据）**：本轮再次查询 repository environments 与 Actions variables，均为空（Environment `total_count=0`、variables `total_count=0`）；没有读取 secrets、创建 Environment 或发起候选 workflow。`android-release-candidate` 仍需仓库管理员设置 main-only 部署规则与审核者，并由凭据负责人通过受控通道配置正式签名/API origin 后，才可进行审批后的手动候选构建。
 
 本轮只读盘点发现 34 个 worktree，其中 33 个带分支；按 `git cherry -v origin/main HEAD` 区分 patch 等价与真正独有改动后，仅 3 个分支有主线未包含的 patch：
 
