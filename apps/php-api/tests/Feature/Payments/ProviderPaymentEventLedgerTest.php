@@ -10,6 +10,7 @@ use App\Payments\PaymentReconciliationService;
 use App\Payments\PersistentPaymentEventLedger;
 use App\Payments\PersistentSandboxPaymentProvider;
 use App\Payments\ProviderPaymentEvent;
+use App\Payments\SandboxPaymentFulfillmentWorker;
 use App\Payments\SignedSandboxPaymentProvider;
 use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -154,6 +155,33 @@ class ProviderPaymentEventLedgerTest extends TestCase
         $this->assertDatabaseHas('provider_payment_orders', ['merchant_order_id' => $orderId, 'status' => 'refunded', 'entitlement_granted' => false]);
         $this->assertDatabaseHas('provider_payment_compensations', ['merchant_order_id' => $orderId, 'status' => 'completed', 'attempts' => 1]);
         $this->assertDatabaseCount('sandbox_refund_events', 1);
+    }
+
+    public function test_distinct_provider_fulfillments_append_the_same_member_entitlement_chain(): void
+    {
+        $subscription = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data');
+        $currentEnd = DB::table('entitlements')->where('id', 'entitlement-member-annual')->value('ends_at');
+        $firstOrderId = $this->createOrder();
+        $secondOrderId = $this->createOrder();
+        $ledger = new PersistentPaymentEventLedger;
+        $worker = app(SandboxPaymentFulfillmentWorker::class);
+
+        foreach ([$firstOrderId, $secondOrderId] as $orderId) {
+            $ledger->register($this->merchantOrder($orderId));
+            $this->assertSame(PaymentDecision::Apply,
+                $ledger->ingest($this->event($orderId, 'paid-'.$orderId, PaymentEventType::Paid)));
+            $this->assertTrue($worker->process($orderId));
+        }
+
+        $firstGrant = DB::table('entitlement_grants')->where('order_id', $firstOrderId)->first();
+        $secondGrant = DB::table('entitlement_grants')->where('order_id', $secondOrderId)->first();
+
+        $this->assertSame($currentEnd, $firstGrant->starts_at);
+        $this->assertSame($firstGrant->ends_at, $secondGrant->starts_at);
+        $this->assertDatabaseHas('provider_payment_orders', ['merchant_order_id' => $firstOrderId, 'status' => 'paid']);
+        $this->assertDatabaseHas('provider_payment_orders', ['merchant_order_id' => $secondOrderId, 'status' => 'paid']);
+        $this->assertDatabaseCount('subscriptions', 1);
+        $this->assertDatabaseCount('entitlement_grants', 2);
     }
 
     public function test_bad_signature_and_expired_timestamp_do_not_create_payment_events(): void

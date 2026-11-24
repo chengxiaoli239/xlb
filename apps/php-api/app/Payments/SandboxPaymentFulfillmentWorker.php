@@ -37,6 +37,8 @@ final class SandboxPaymentFulfillmentWorker
                     throw new LogicException('Sandbox order is not awaiting payment fulfillment.');
                 }
 
+                DB::table('users')->where('id', $order->user_id)->lockForUpdate()->first();
+
                 $plan = $order->plan_snapshot ? json_decode($order->plan_snapshot, true, flags: JSON_THROW_ON_ERROR) : (array) DB::table('plans')->where('id', $order->plan_id)->first();
                 $at = now()->utc();
                 $startsAt = $this->nextEntitlementStart($order->user_id, $at);
