@@ -258,6 +258,30 @@ class SubscriptionRouteTest extends TestCase
         $this->assertDatabaseHas('subscription_route_versions', ['id' => $id, 'status' => 'rolled_back']);
     }
 
+    public function test_route_rollback_does_not_republish_an_unhealthy_previous_route(): void
+    {
+        $this->actingAs(User::findOrFail('user-admin'));
+        DB::table('nodes')->insert([
+            'id' => 'node-test-2', 'name' => '演示节点 02', 'region' => '测试区域 B', 'protocol' => 'SOCKS5',
+            'endpoint_host' => '198.51.100.11', 'endpoint_port' => 1080, 'status' => 'available', 'is_test' => true,
+            'max_sessions' => 100, 'active_sessions' => 0, 'latency_ms' => 42, 'health_status' => 'verified_test',
+            'last_health_check_at' => now()->toIso8601String(), 'config_version' => 1, 'updated_at' => now()->toIso8601String(),
+        ]);
+        $routeId = $this->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'test', 'node_ids' => ['node-test-2'],
+        ])->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/admin/subscription-routes/'.$routeId.'/canary', ['percent' => 100])->assertOk();
+        $this->postJson('/api/v1/admin/subscription-routes/'.$routeId.'/publish')->assertOk();
+        DB::table('nodes')->where('id', 'node-test-1')->update(['health_status' => 'unhealthy']);
+
+        $this->postJson('/api/v1/admin/subscription-routes/'.$routeId.'/rollback')
+            ->assertStatus(422)->assertJsonPath('error.code', 'route_nodes_not_ready');
+
+        $this->assertDatabaseHas('subscription_route_versions', ['id' => 'route-test-v1', 'status' => 'draining']);
+        $this->assertDatabaseHas('subscription_route_versions', ['id' => $routeId, 'status' => 'published']);
+        $this->assertSame($routeId, app(SubscriptionRouteService::class)->resolve('user-member', 'test')['version']->id);
+    }
+
     public function test_reconcile_retires_a_route_after_its_drain_window(): void
     {
         $this->actingAs(User::findOrFail('user-admin'));
