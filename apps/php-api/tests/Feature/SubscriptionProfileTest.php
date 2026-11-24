@@ -257,6 +257,71 @@ class SubscriptionProfileTest extends TestCase
         $this->get($url)->assertNotFound()->assertDontSee('演示节点 01');
     }
 
+    public function test_probe_recovery_requires_three_successes_before_profile_route_returns(): void
+    {
+        config([
+            'node_health_probe.enabled' => true,
+            'node_health_probe.route_filter_enabled' => true,
+            'node_health_probe.route_state_ttl_seconds' => 30,
+        ]);
+        $driver = new class(now()->subSeconds(25)->toDateTimeImmutable()) implements NodeHealthProbeDriver
+        {
+            public int $calls = 0;
+
+            /** @var list<bool> */
+            public array $outcomes = [true, true, true, false, false, false, true, true, true];
+
+            public function __construct(private readonly DateTimeImmutable $start) {}
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                $succeeded = $this->outcomes[$this->calls];
+                $observedAt = $this->start->modify('+'.($this->calls * 2).' seconds');
+                $this->calls++;
+
+                if ($succeeded) {
+                    return new NodeHealthProbeResult(true, $observedAt, latencyMs: 20);
+                }
+
+                return new NodeHealthProbeResult(false, $observedAt, failureCode: 'synthetic_timeout');
+            }
+        };
+        $this->app->instance(NodeHealthProbeDriver::class, $driver);
+
+        $url = $this->profileUrl();
+        $this->get($url)->assertNotFound();
+        foreach ([1, 2, 3] as $_) {
+            $this->artisan('nodes:probe-health')->assertExitCode(0);
+        }
+        $this->get($url)->assertOk()->assertSee('演示节点 01');
+
+        foreach ([1, 2, 3] as $_) {
+            $this->artisan('nodes:probe-health')->assertExitCode(0);
+        }
+        $this->get($url)->assertNotFound();
+
+        foreach ([1, 2] as $_) {
+            $this->artisan('nodes:probe-health')->assertExitCode(0);
+        }
+        $this->assertDatabaseHas('node_health_probe_states', [
+            'node_id' => 'node-test-1',
+            'status' => 'unhealthy',
+            'failure_streak' => 3,
+            'success_streak' => 2,
+        ]);
+        $this->get($url)->assertNotFound();
+
+        $this->artisan('nodes:probe-health')->assertExitCode(0);
+        $this->assertSame(9, $driver->calls);
+        $this->assertDatabaseHas('node_health_probe_states', [
+            'node_id' => 'node-test-1',
+            'status' => 'healthy',
+            'failure_streak' => 0,
+            'success_streak' => 0,
+        ]);
+        $this->get($url)->assertOk()->assertSee('演示节点 01');
+    }
+
     public function test_user_agent_negotiation_and_explicit_format_precedence(): void
     {
         $url = $this->profileUrl();
