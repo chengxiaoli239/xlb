@@ -42,6 +42,7 @@ final class PaymentEventPolicy
 
         return match ($currentStatus) {
             'pending' => PaymentDecision::Apply,
+            'cancelled' => PaymentDecision::Review,
             'paid', 'refunded' => PaymentDecision::Review,
             default => PaymentDecision::Ignore,
         };

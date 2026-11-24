@@ -230,6 +230,68 @@ class ProviderPaymentEventLedgerTest extends TestCase
         $this->assertDatabaseCount('entitlements', 2);
     }
 
+    public function test_cancelled_provider_session_reviews_late_paid_event_without_granting_entitlement(): void
+    {
+        $orderId = $this->createOrder();
+        $session = $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')
+            ->assertOk()->json('data');
+
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/cancel')
+            ->assertOk()->assertJsonPath('data.status', 'cancelled_test');
+
+        $this->assertDatabaseHas('provider_payment_orders', [
+            'merchant_order_id' => $orderId,
+            'status' => 'cancelled',
+        ]);
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')
+            ->assertStatus(409)->assertJsonPath('error.code', 'invalid_transition');
+
+        $this->webhook($this->signedPaidEvent($session))
+            ->assertOk()->assertJsonPath('data.decision', 'review');
+        $this->artisan('payments:process-sandbox-fulfillments')->assertSuccessful();
+
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'cancelled_test']);
+        $this->assertDatabaseHas('provider_payment_events', [
+            'merchant_order_id' => $orderId,
+            'decision' => 'review',
+        ]);
+        $this->assertDatabaseHas('provider_payment_orders', [
+            'merchant_order_id' => $orderId,
+            'status' => 'cancelled',
+            'entitlement_granted' => false,
+        ]);
+        $this->assertDatabaseCount('provider_payment_fulfillments', 0);
+        $this->assertDatabaseCount('entitlement_grants', 0);
+        $this->assertDatabaseCount('entitlements', 1);
+    }
+
+    public function test_order_cannot_be_cancelled_after_provider_payment_is_accepted(): void
+    {
+        $orderId = $this->createOrder();
+        $session = $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')
+            ->assertOk()->json('data');
+
+        $this->webhook($this->signedPaidEvent($session))
+            ->assertOk()->assertJsonPath('data.decision', 'apply');
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/cancel')
+            ->assertStatus(409)->assertJsonPath('error.code', 'invalid_transition');
+
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'pending_test']);
+        $this->assertDatabaseHas('provider_payment_orders', [
+            'merchant_order_id' => $orderId,
+            'status' => 'paid_pending_grant',
+        ]);
+        $this->artisan('payments:process-sandbox-fulfillments')->assertSuccessful();
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'paid_test']);
+        $this->assertDatabaseHas('provider_payment_fulfillments', [
+            'merchant_order_id' => $orderId,
+            'status' => 'fulfilled',
+            'attempts' => 1,
+        ]);
+        $this->assertDatabaseCount('entitlement_grants', 1);
+        $this->assertDatabaseCount('entitlements', 2);
+    }
+
     public function test_refund_compensation_failure_is_retained_for_retry_without_revoking_entitlement_early(): void
     {
         $orderId = $this->createOrder();

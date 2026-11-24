@@ -7,6 +7,7 @@ use App\Payments\PersistentPaymentEventLedger;
 use App\Payments\PersistentSandboxPaymentProvider;
 use App\Services\SandboxPaymentProcessor;
 use App\Services\SubscriptionCredentialService;
+use App\Services\TestOrderLifecycle;
 use DateTimeImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,21 +20,27 @@ class SandboxPaymentController extends Controller
         if (! app()->environment(['local', 'testing']) || $request->user()->role !== 'member') {
             return response()->json(['error' => ['code' => 'test_only']], 403);
         }
-        $order = DB::table('orders')->where('id', $id)
-            ->where('user_id', $request->user()->id)->where('is_test', true)->first();
-        if (! $order) {
-            return response()->json(['error' => ['code' => 'not_found']], 404);
-        }
 
-        $provider = new PersistentSandboxPaymentProvider((string) config('app.key'), $ledger);
-        $session = $provider->createPayment(new MerchantOrder(
-            $order->id,
-            (int) $order->total_cents,
-            'CNY',
-            new DateTimeImmutable($order->expires_at),
-        ));
+        return DB::transaction(function () use ($request, $id, $ledger): JsonResponse {
+            $order = DB::table('orders')->where('id', $id)
+                ->where('user_id', $request->user()->id)->where('is_test', true)->lockForUpdate()->first();
+            if (! $order) {
+                return response()->json(['error' => ['code' => 'not_found']], 404);
+            }
+            if (TestOrderLifecycle::effectiveStatus($order) !== 'pending_test') {
+                return response()->json(['error' => ['code' => 'invalid_transition']], 409);
+            }
 
-        return response()->json(['data' => $session])->header('Cache-Control', 'no-store, private');
+            $provider = new PersistentSandboxPaymentProvider((string) config('app.key'), $ledger);
+            $session = $provider->createPayment(new MerchantOrder(
+                $order->id,
+                (int) $order->total_cents,
+                'CNY',
+                new DateTimeImmutable($order->expires_at),
+            ));
+
+            return response()->json(['data' => $session])->header('Cache-Control', 'no-store, private');
+        }, 3);
     }
 
     public function simulate(Request $request, string $id, SandboxPaymentProcessor $processor, SubscriptionCredentialService $credentials): JsonResponse

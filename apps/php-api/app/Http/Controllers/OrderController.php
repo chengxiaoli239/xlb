@@ -143,11 +143,22 @@ class OrderController extends Controller
             if (! $order) {
                 return $this->error('not_found', '订单不存在', 404);
             }
+            $at = now()->utc()->toIso8601String();
             if (! $order->is_test || ! in_array(TestOrderLifecycle::effectiveStatus($order), ['pending_test', 'cancelled_test'], true)) {
                 return $this->error('invalid_transition', '当前订单状态不允许取消', 409);
             }
             if ($order->status === 'pending_test') {
-                $at = now()->utc()->toIso8601String();
+                $paymentOrder = DB::table('provider_payment_orders')->where('merchant_order_id', $id)->first();
+                if ($paymentOrder) {
+                    if ($paymentOrder->status !== 'pending') {
+                        return $this->error('invalid_transition', '付款事件已进入处理流程，请等待核验', 409);
+                    }
+                    $paymentChanged = DB::table('provider_payment_orders')->where('merchant_order_id', $id)
+                        ->where('status', 'pending')->update(['status' => 'cancelled', 'updated_at' => $at]);
+                    if (! $paymentChanged) {
+                        return $this->error('invalid_transition', '付款状态已变更，请刷新', 409);
+                    }
+                }
                 $changed = DB::table('orders')->where('id', $id)->where('status', 'pending_test')->where('expires_at', '>', $at)
                     ->update(['status' => 'cancelled_test', 'updated_at' => $at]);
                 if (! $changed) {

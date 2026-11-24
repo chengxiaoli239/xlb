@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **M4/Q2 沙箱 provider 取消与迟到付款事件竞态（2026-11-25，本机 Laravel Feature）**：新增“创建 provider session → 取消订单 → 收到 signed paid webhook”回归。复现后修复了订单取消但 provider payment order 仍为 `pending`、迟到 paid 事件被接受并让 fulfillment outbox 永久重试的状态分裂；取消会把未接受付款的 provider order 原子转为 `cancelled`，迟到 paid 事件记录为 `review` 且不创建 fulfillment/grant；provider session 注册与取消共用订单锁，取消后的订单不能再开 session。若 paid 事件已被 ledger 接受，取消返回 `409 invalid_transition`，worker 仍可完成一次 sandbox 权益发放。三组相关 Feature suites 28/28、306 assertions；Payments 全组 14/14、139 assertions；Laravel 全套 265 passed、1 skipped、2,377 assertions；Pint 通过。仅验证 local/testing SQLite 沙箱状态机，未验证真实服务商或目标生产数据库并发锁语义。
+
 - **M4/Q2 沙箱取消订单禁止后续付款（2026-11-25，本机 Laravel Feature 与 hosted CI）**：新增 `SandboxPaymentTest` 回归，创建 local/testing 订单并取消后再调用沙箱付款，断言返回 `409 invalid_transition`、订单仍为 `cancelled_test`、没有付款事件/权益 grant/新增权益/佣金或额外 paid order event。定向 PHPUnit 1/1、11 assertions 通过；`SandboxPaymentTest` + `OrderLifecycleTest` 14/14、166 assertions 通过；Pint 通过。提交 `893c1ce` 的主线 CI `45474917270` 六个 jobs 全绿。本项验证沙箱订单状态机，不涉及真实商户、收款、退款或节点撤权。
 
 - **M8 Windows logout API failure still clears local proof and cookie（2026-11-25，hosted CI 通过）**：新增 AccountClient loopback integration，预置有效内存 `VerifiedMemberDeviceProof` 与 session cookie，在 CSRF 请求成功后让 `/auth/logout` 返回 HTTP 500；验证 logout 报错时仍先清除 verified proof 和本地持久 cookie。使用仅本机 loopback fixture，不发真实 API、sidecar、VPN/TUN 或节点请求，不打开 proof bridge gate。Windows MSVC `cargo test`/build CI `45472488726` 和一般 CI `45472488853` 全绿。该项只验证本地 logout API 失败时的清理，不证明真实服务端撤权、Windows 数据面或会员线路可用。

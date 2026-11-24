@@ -12,30 +12,33 @@ final class PersistentPaymentEventLedger
 
     public function register(MerchantOrder $order): void
     {
-        $sourceOrder = DB::table('orders')->where('id', $order->merchantOrderId)->where('is_test', true)->first();
-        if (! app()->environment(['local', 'testing']) || ! $sourceOrder
-            || $sourceOrder->status !== 'pending_test'
-            || (int) $sourceOrder->total_cents !== $order->amountMinor
-            || $sourceOrder->expires_at !== $order->expiresAt->format(DATE_ATOM)) {
-            throw new LogicException('Only matching local and testing orders can enter the provider ledger.');
-        }
+        DB::transaction(function () use ($order): void {
+            $sourceOrder = DB::table('orders')->where('id', $order->merchantOrderId)
+                ->where('is_test', true)->lockForUpdate()->first();
+            if (! app()->environment(['local', 'testing']) || ! $sourceOrder
+                || $sourceOrder->status !== 'pending_test'
+                || (int) $sourceOrder->total_cents !== $order->amountMinor
+                || $sourceOrder->expires_at !== $order->expiresAt->format(DATE_ATOM)) {
+                throw new LogicException('Only matching local and testing orders can enter the provider ledger.');
+            }
 
-        DB::table('provider_payment_orders')->insertOrIgnore([
-            'merchant_order_id' => $order->merchantOrderId,
-            'amount_minor' => $order->amountMinor,
-            'currency' => $order->currency,
-            'expires_at' => $order->expiresAt->format(DATE_ATOM),
-            'status' => 'pending',
-            'entitlement_granted' => false,
-            'compensation_count' => 0,
-            'updated_at' => now()->utc()->toIso8601String(),
-        ]);
-        $registered = DB::table('provider_payment_orders')->where('merchant_order_id', $order->merchantOrderId)->first();
-        if (! $registered || (int) $registered->amount_minor !== $order->amountMinor
-            || $registered->currency !== $order->currency
-            || $registered->expires_at !== $order->expiresAt->format(DATE_ATOM)) {
-            throw new LogicException('Merchant order was already registered with different payment terms.');
-        }
+            DB::table('provider_payment_orders')->insertOrIgnore([
+                'merchant_order_id' => $order->merchantOrderId,
+                'amount_minor' => $order->amountMinor,
+                'currency' => $order->currency,
+                'expires_at' => $order->expiresAt->format(DATE_ATOM),
+                'status' => 'pending',
+                'entitlement_granted' => false,
+                'compensation_count' => 0,
+                'updated_at' => now()->utc()->toIso8601String(),
+            ]);
+            $registered = DB::table('provider_payment_orders')->where('merchant_order_id', $order->merchantOrderId)->first();
+            if (! $registered || (int) $registered->amount_minor !== $order->amountMinor
+                || $registered->currency !== $order->currency
+                || $registered->expires_at !== $order->expiresAt->format(DATE_ATOM)) {
+                throw new LogicException('Merchant order was already registered with different payment terms.');
+            }
+        }, 3);
     }
 
     public function ingest(ProviderPaymentEvent $event): PaymentDecision
