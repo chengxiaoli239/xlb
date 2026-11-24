@@ -868,6 +868,16 @@ mod tests {
                 }
             }}),
             serde_json::json!({"data": {"entitlement_active": true, "max_devices": 5, "registered_count": 1, "available_slots": 4, "devices": [{"id": "fd3ae0f1-1234-4234-9234-000000000002", "installation_id": "fd3ae0f1-1234-4234-9234-000000000002", "name": "Windows", "platform": "windows", "status": "registered", "created_at": "2026-11-22T00:00:00Z"}]}}),
+            serde_json::json!({"data": member_user("member")}),
+            serde_json::json!({"data": {"user": member_user("member"), "entitlement": null, "activeSubscriptions": 0}}),
+            serde_json::json!({"data": {"token": "csrf"}}),
+            serde_json::json!({"data": {"challenge_id": challenge_id, "challenge": challenge}}),
+            serde_json::json!({"data": {"token": "csrf"}}),
+            serde_json::json!({"data": {
+                "device": {"id": "fd3ae0f1-1234-4234-9234-000000000002", "status": "registered", "bound": true},
+                "node_authorization": {"status": "provisioning"}
+            }}),
+            serde_json::json!({"data": {"entitlement_active": true, "max_devices": 5, "registered_count": 1, "available_slots": 4, "devices": [{"id": "fd3ae0f1-1234-4234-9234-000000000002", "installation_id": "fd3ae0f1-1234-4234-9234-000000000002", "name": "Windows", "platform": "windows", "status": "registered", "created_at": "2026-11-22T00:00:00Z"}]}}),
         ];
         let server = thread::spawn(move || {
             let mut paths = Vec::new();
@@ -935,6 +945,11 @@ mod tests {
         let snapshot_json = serde_json::to_string(&snapshot).unwrap();
         assert!(!snapshot_json.contains(&peer_credential));
         assert!(!snapshot_json.contains(profile));
+
+        let refreshed = client.restore().await.unwrap().unwrap();
+        assert_eq!(refreshed.node_authorization, NodeAuthorizationStatus::Provisioning);
+        assert!(client.verified_member_device_proof.is_none());
+
         assert!(client.restore().await.unwrap().is_none());
         assert!(client.verified_member_device_proof.is_none());
         assert!(store.load().unwrap().is_none());
@@ -943,6 +958,9 @@ mod tests {
         assert!(paths[5].contains("device-bindings/authorize"));
         assert!(paths[6].contains("me/devices"));
         assert!(paths[7].contains("api/v1/auth/session"));
+        assert!(paths[12].contains("device-bindings/authorize"));
+        assert!(paths[13].contains("me/devices"));
+        assert!(paths[14].contains("api/v1/auth/session"));
     }
 
     #[test]
