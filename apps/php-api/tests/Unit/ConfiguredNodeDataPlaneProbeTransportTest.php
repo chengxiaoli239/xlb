@@ -156,7 +156,7 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
         }
     }
 
-    public function test_probe_transport_interoperates_with_the_node_agent_go_handler_over_tls_13_mtls(): void
+    public function test_probe_transport_interoperates_with_go_agent_and_https_canary_over_tls_13_mtls(): void
     {
         if (! function_exists('proc_open') || ! function_exists('stream_socket_server')) {
             $this->markTestSkipped('Process control and stream sockets are required for the PHP-to-Go mTLS integration test.');

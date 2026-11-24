@@ -17,37 +17,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
-	"io"
 	"math/big"
 	"net"
 	"runtime"
 	"time"
 	"unsafe"
 )
-
-type androidCallbackSigner struct {
-	publicKey *ecdsa.PublicKey
-}
-
-func (signer androidCallbackSigner) Public() crypto.PublicKey {
-	return signer.publicKey
-}
-
-func (signer androidCallbackSigner) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
-	if signer.publicKey == nil || opts == nil || opts.HashFunc() != crypto.SHA256 ||
-		len(digest) != crypto.SHA256.Size() {
-		return nil, errors.New("Android device signer requires a SHA-256 digest")
-	}
-	signature := make([]byte, 80)
-	signedLen := C.xlb_call_java_sign_digest(
-		(*C.uchar)(unsafe.Pointer(&digest[0])), C.int(len(digest)),
-		(*C.uchar)(unsafe.Pointer(&signature[0])), C.int(len(signature)),
-	)
-	if signedLen < 1 || int(signedLen) > len(signature) {
-		return nil, errors.New("Android device signer callback failed")
-	}
-	return signature[:int(signedLen)], nil
-}
 
 //export XlbCompleteAndroidSignerHandshake
 func XlbCompleteAndroidSignerHandshake(publicKeyDER *C.char, publicKeyLen C.int) C.int {
@@ -64,7 +39,7 @@ func XlbCompleteAndroidSignerHandshake(publicKeyDER *C.char, publicKeyLen C.int)
 	if !ok || publicKey.Curve != elliptic.P256() {
 		return 0
 	}
-	if err := completeAndroidSignerTLS13Handshake(androidCallbackSigner{publicKey: publicKey}, publicKey); err != nil {
+	if err := completeAndroidSignerTLS13Handshake(&androidKeyStoreSigner{publicKey: publicKey}, publicKey); err != nil {
 		return 0
 	}
 	return 1
