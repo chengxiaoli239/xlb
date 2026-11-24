@@ -116,6 +116,7 @@ public final class PlatformApi {
             }
             String registrationMessage = null;
             NodeAuthorizationStatus nodeAuthorizationStatus = NodeAuthorizationStatus.UNAVAILABLE;
+            String authorizationDiagnosticCode = null;
             MemberDeviceProof authorizedProof = null;
             MemberTunnelGrant authorizedGrant = null;
             try {
@@ -186,10 +187,20 @@ public final class PlatformApi {
                 } catch (PlatformApiException ignored) {
                     // Version telemetry is best effort and not a customer-facing state.
                 }
-            } catch (PlatformApiException | GeneralSecurityException exception) {
+            } catch (PlatformApiException exception) {
                 registrationMessage = exception.getMessage();
+                authorizationDiagnosticCode = exception.diagnosticCode;
+            } catch (GeneralSecurityException exception) {
+                registrationMessage = "设备密钥签名失败";
+                authorizationDiagnosticCode = "device_proof_local_failure";
+            }
+            if (authorizationDiagnosticCode == null && overview.entitlement != null) {
+                authorizationDiagnosticCode = ApiFailureDiagnostics.codeForAuthorizationStatus(nodeAuthorizationStatus);
             }
             ClientSnapshot snapshot = withOverview(loadDevices(account, registrationMessage, nodeAuthorizationStatus));
+            if (authorizationDiagnosticCode != null) {
+                snapshot = snapshot.withDiagnosticCode(authorizationDiagnosticCode);
+            }
             if (authorizedProof != null && authorizedProof.matches(
                     account.id, snapshot.device, snapshot.entitlement != null)) {
                 memberDeviceProof = authorizedProof;
@@ -201,7 +212,8 @@ public final class PlatformApi {
             return snapshot;
         } catch (PlatformApiException exception) {
             clearMemberTunnelAuthorization();
-            return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
+            return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试")
+                    .withDiagnosticCode(exception.diagnosticCode);
         } catch (Exception exception) {
             clearMemberTunnelAuthorization();
             return new ClientSnapshot(account, null, "设备列表暂不可用，请稍后重试");
@@ -379,15 +391,18 @@ public final class PlatformApi {
             if (statusCode < 200 || statusCode >= 300) {
                 JSONObject error = response.optJSONObject("error");
                 String message = error == null ? "服务暂时不可用（" + statusCode + "）" : error.optString("message");
-                throw new PlatformApiException(message.isEmpty() ? "请求失败" : message);
+                String apiErrorCode = error == null ? null : error.optString("code", null);
+                throw new PlatformApiException(message.isEmpty() ? "请求失败" : message,
+                        ApiFailureDiagnostics.codeFor(apiErrorCode, statusCode));
             }
             return response;
         } catch (PlatformApiException exception) {
             throw exception;
         } catch (IOException exception) {
-            throw new PlatformApiException("无法连接迅连宝服务，请检查网络后重试", exception);
+            throw new PlatformApiException("无法连接迅连宝服务，请检查网络后重试", exception,
+                    ApiFailureDiagnostics.codeFor(null, -1));
         } catch (Exception exception) {
-            throw new PlatformApiException("服务响应格式不正确", exception);
+            throw new PlatformApiException("服务响应格式不正确", exception, "invalid_service_response");
         } finally {
             if (connection != null) {
                 connection.disconnect();
@@ -502,6 +517,7 @@ public final class PlatformApi {
         public final int subscriptionCount;
         public final String accountProfile;
         public final NodeAuthorizationStatus nodeAuthorizationStatus;
+        public final String diagnosticCode;
 
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message) {
             this(account, device, message, null, 0);
@@ -521,6 +537,13 @@ public final class PlatformApi {
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
                               EntitlementSummary entitlement, int subscriptionCount, String accountProfile,
                               NodeAuthorizationStatus nodeAuthorizationStatus) {
+            this(account, device, message, entitlement, subscriptionCount, accountProfile,
+                    nodeAuthorizationStatus, null);
+        }
+
+        public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
+                              EntitlementSummary entitlement, int subscriptionCount, String accountProfile,
+                              NodeAuthorizationStatus nodeAuthorizationStatus, String diagnosticCode) {
             this.account = account;
             this.device = device;
             this.message = message;
@@ -529,16 +552,22 @@ public final class PlatformApi {
             this.accountProfile = accountProfile;
             this.nodeAuthorizationStatus = nodeAuthorizationStatus == null
                     ? NodeAuthorizationStatus.UNAVAILABLE : nodeAuthorizationStatus;
+            this.diagnosticCode = diagnosticCode;
         }
 
         ClientSnapshot withOverview(EntitlementSummary overviewEntitlement, int activeSubscriptions) {
             return new ClientSnapshot(account, device, message, overviewEntitlement, activeSubscriptions,
-                    accountProfile, nodeAuthorizationStatus);
+                    accountProfile, nodeAuthorizationStatus, diagnosticCode);
         }
 
         ClientSnapshot withNodeAuthorizationStatus(NodeAuthorizationStatus status) {
             return new ClientSnapshot(account, device, message, entitlement, subscriptionCount,
-                    accountProfile, status);
+                    accountProfile, status, diagnosticCode);
+        }
+
+        ClientSnapshot withDiagnosticCode(String code) {
+            return new ClientSnapshot(account, device, message, entitlement, subscriptionCount,
+                    accountProfile, nodeAuthorizationStatus, code);
         }
     }
 
@@ -574,12 +603,24 @@ public final class PlatformApi {
     }
 
     public static final class PlatformApiException extends Exception {
+        public final String diagnosticCode;
+
         public PlatformApiException(String message) {
-            super(message);
+            this(message, null, "client_operation_failed");
         }
 
         public PlatformApiException(String message, Throwable cause) {
+            this(message, cause, "client_operation_failed");
+        }
+
+        public PlatformApiException(String message, String diagnosticCode) {
+            this(message, null, diagnosticCode);
+        }
+
+        public PlatformApiException(String message, Throwable cause, String diagnosticCode) {
             super(message, cause);
+            this.diagnosticCode = diagnosticCode == null || diagnosticCode.isBlank()
+                    ? "api_request_failed" : diagnosticCode;
         }
     }
 }

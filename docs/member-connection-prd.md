@@ -4,9 +4,11 @@
 
 ## 开发进度（2026-11-24）
 
+- **Android API 授权失败安全诊断编号（2026-11-24，本机离线验收）**：PHP JSON error code/HTTP status 现在通过 allowlist 映射为稳定编号，覆盖设备满额、会员权益失效、设备已撤销、身份不匹配、challenge/proof 拒绝、会话过期、权限拒绝、限流、服务不可用与网络不可达；未知服务端错误只显示 `api_request_failed`，不回显服务器内部 code。编号经 `ClientSnapshot` 保留并显示在会员线路状态卡，没有新遥测或写日志。新增纯 JVM 映射测试 2 项；Android 全套 JVM、AndroidTest 编译、lint、Debug APK build 通过。仅验证客户端如何分类 server response，不证明生产 API 会产生对应状态、真实授权拒绝或节点端状态。
+
 - **Android 连接失败安全诊断编号（2026-11-24，本机与 hosted CI）**：`XlbVpnService` 现在根据安全用户文案附带稳定失败编号，覆盖系统 VPN 权限、空线路候选、配置不兼容、启动超时、连接验证未通过、资源清理待完成、系统隧道不可用、会员线路门关闭及内核不可用；未知错误统一为 `startup_failed`。编号随内部状态广播到 UI，原错误文案仍由白名单映射生成，异常原文、URL、凭据和 TLS 细节不会展示；错误解除/状态变化后编号清除。新增单元测试验证已知分类与含假凭据的未知错误不回显。Android 全套 JVM tests、AndroidTest 编译、lint、Debug APK build 通过；主线 CI `45316986228` 六个 jobs 全绿。未运行 AVD/实体设备或真实节点。编号描述客户端观察到的失败边界，不诊断封锁原因、不宣称节点故障或断流。
 
-- **AI 开发工期与试点日历估计拆分（2026-11-24）**：此前 2027-02 至 2027-05 的区间是含节点、商户、合规、staging 和试运行等待的低置信整体日历估计，不是 AI 编码工期；其“两周内外部材料到位”假设当前未满足，因此撤销为当前上线预测。按 2026-11-24 代码快照，AI 可控代码与离线验收暂估约 1–3 周、低置信；具体代码队列继续以本 PRD 和总体计划逐阶段列明。真实 member profile/节点 endpoint/CA/mTLS/撤权回执、商户沙箱契约、合规意见、签名 Environment 与 staging 负责人日期未落实前，受控试点没有可靠日历日期；AI 开发完也不自动满足发布放行门。
+- **AI 开发冲刺目标与试点日历估计拆分（2026-11-24）**：用户希望约一周推出初版。设置 2026-12-01 为 AI 可控代码、离线验收和候选路径达到可审核状态的低置信冲刺目标；优先覆盖 Android 失败诊断/失败关闭、会员授权/API 错误状态、跨模块测试和候选发布链路。此前 2027-02 至 2027-05 的区间是含节点、商户、合规、staging 和试运行等待的低置信整体日历估计，其“两周内外部材料到位”假设未满足，已撤销为当前上线预测。真实 member profile/节点 endpoint/CA/mTLS/撤权回执、商户沙箱契约、合规意见、签名 Environment 与 staging 负责人日期未落实前，受控试点没有可靠日历日期；一周代码冲刺目标不代表真实线路、真实支付或上线放行。
 
 - **M11 候选 APK/SBOM 摘要清单离线验签前校验器（2026-11-24，本地与 hosted CI）**：新增只读 `ops/verify_artifact_manifest.py`，校验受限 schema、源 commit 格式、repo 内相对路径、artifact 唯一性、regular file、大小与 SHA-256；对路径先解析并限制在 checkout 内，再验证文件存在，拒绝目录穿越和逃出仓库的符号链接。Android signed-candidate workflow 在生成包含 APK+BOM 的联合清单后、attest 前调用该校验器。新增正向多文件验证及 digest 改动、路径越界/绝对路径/越界符号链接、重复条目和未知 schema 负例。ops 全套 62/62、py_compile、workflow YAML 解析与 diff check 通过；主线 CI `45309969693` 六个 jobs 全绿，含 ops 安全测试、Android 构建/release runtime SBOM 与其它模块 CI。该命令只验证候选文件与摘要清单的一致性，不校验签名信任链、provenance 内容、源码安全或发布权限，也不部署/发布候选。
 

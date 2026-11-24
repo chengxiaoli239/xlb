@@ -668,6 +668,9 @@ public final class MainActivity extends Activity {
         if (current != null && current.message != null && !current.message.isEmpty()) {
             status.addView(text(current.message, 13, COLOR_MUTED, false), spacedParams(7, 0));
         }
+        if (current != null && current.diagnosticCode != null) {
+            status.addView(text("诊断编号 " + current.diagnosticCode, 11, COLOR_MUTED, false), spacedParams(5, 0));
+        }
         if (!routeSyncing && current != null) {
             Button retry = secondaryButton("重试同步");
             retry.setEnabled(!busy);
