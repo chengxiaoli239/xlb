@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M11 signed candidate Environment 保护状态核对（2026-11-24，只读 GitHub 元数据）**：通过 GitHub 环境只读 API 查询 `android-release-candidate` 返回 404，环境列表为空；该受保护环境目前尚未创建或对当前身份不可见，因此正式签名候选 workflow 不能运行，且本轮没有读取 secrets、创建环境、写入凭据或发起候选构建。离线签名脚本验证、SBOM/摘要工作流与 CI 已完成；后续需 repo 管理员建立 Environment，设置 main-only deployment branch policy 与审核者，再由凭据负责人注入 keystore/password/API origin secrets/variables，经审批后手动运行。此为发布候选的外部配置前置，不阻断离线开发。
+
 - **M11 签名 Android 候选附带 release runtime SBOM（2026-11-24，本地与 hosted CI）**：受保护环境的手动候选 workflow 现在在 release APK 签名和包名检查后生成 CycloneDX release runtime BOM；来源清单同时记录 APK 与 BOM 的 SHA-256；分别对 APK 和 BOM 建立 provenance attest，并把三份文件一并上传供审核。扩展 workflow 回归检查每个具体 step 的 manifest 输入、SBOM attest subject 和审核 artifact 内容，保持 main-only、protected environment、无 Release/Play Store 发布。Gradle 在本机 JDK 21 + Android SDK 35 下成功生成 CycloneDX BOM；临时密钥完整 APK 签名配置验证通过并核对 signer 与临时证书匹配，脚本已清理临时 keystore/APK；ops 全套 55/55、Python 编译和 diff check 通过。主线 CI `45307881535` 六个 jobs 全绿，涵盖 workflow 回归、Android build/signing config、release runtime SBOM 与 provenance。此次没有注入受保护签名凭据或运行 manual signed-candidate workflow，不能称为受保护候选构建或可发布。下一步需完成 protected environment、审核者、正式签名凭据与 approved API origin 配置，再由获批者手动运行候选工作流。
 
 - **M10 路线回滚拒绝不健康的上一版本（2026-11-24，本地与 hosted CI）**：新增 API Feature 回归：发布版本 2 后把版本 1 的候选标为 unhealthy，再请求回滚，服务返回 `route_nodes_not_ready`；事务保留版本 2 published、版本 1 draining，实际解析继续选择版本 2。全套 Laravel 258 项中 257 passed、1 个既有 skip、2,299 assertions，定向用例 1/1、8 assertions；Pint 与 PHP syntax 通过。主线 CI `45298502142` 六个 jobs 全绿，含 Laravel、Android、Go/Agent、容器 smoke、ops 与 SBOM provenance。该防护确保控制面不会把不健康节点重新发布，但不代表已建立连接迁移、真实故障恢复或流量切换验收。
