@@ -4,9 +4,12 @@ namespace Tests\Unit;
 
 use App\Providers\AppServiceProvider;
 use App\Services\ConfiguredNodeDataPlaneProbeTransport;
+use App\Services\InMemoryNodeHealthStateStore;
 use App\Services\MtlsNodeHealthProbeDriver;
 use App\Services\NodeDataPlaneProbeFailure;
 use App\Services\NodeDataPlaneProbeTransportException;
+use App\Services\NodeHealthCircuitBreaker;
+use App\Services\NodeHealthProbeCoordinator;
 use App\Services\NodeHealthProbeDriver;
 use GuzzleHttp\Exception\NetworkTimeoutException;
 use GuzzleHttp\Psr7\Request as GuzzleRequest;
@@ -168,7 +171,6 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
 
         $credentials = $this->mutualTlsCredentialFiles();
         $nodeId = 'node-go-loopback';
-        $challenge = bin2hex(random_bytes(32));
         $nodeAgentDirectory = base_path('../node-agent');
         $helperSource = $nodeAgentDirectory.'/testdata/php-probe/main.go';
         $helperBinary = $credentials['directory'].'/node-agent-php-probe';
@@ -212,7 +214,12 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
                 $credentials['client_key'],
             );
 
-            $exchange = $transport->exchange($nodeId, $challenge, 5000);
+            $stateStore = new InMemoryNodeHealthStateStore;
+            $assessment = (new NodeHealthProbeCoordinator(
+                new MtlsNodeHealthProbeDriver($transport, 5000),
+                new NodeHealthCircuitBreaker,
+                $stateStore,
+            ))->probe($nodeId);
             $status = proc_get_status($server);
             $shutdownDeadline = microtime(true) + 1.0;
             while ($status['running'] && microtime(true) < $shutdownDeadline) {
@@ -221,12 +228,13 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
             }
             $this->assertFalse($status['running'], 'The Go fixture did not shut down after serving one probe.');
 
-            $this->assertTrue($exchange->clientIdentityPresented);
-            $this->assertTrue($exchange->mutualTlsEstablished);
-            $this->assertTrue($exchange->serverIdentityVerified);
-            $this->assertSame($nodeId, $exchange->authenticatedNodeId);
-            $this->assertTrue($exchange->dataPlaneProbeAccepted);
-            $this->assertSame($challenge, $exchange->echoedChallenge);
+            $this->assertTrue($assessment->result->succeeded);
+            $this->assertNotNull($assessment->result->latencyMs);
+            $this->assertNull($assessment->result->failureCode);
+            $this->assertFalse($assessment->transition->ignoredAsStale);
+            $this->assertSame('healthy', $stateStore->get($nodeId)?->status);
+            $this->assertSame(0, $stateStore->get($nodeId)?->failureStreak);
+            $this->assertNotNull($stateStore->get($nodeId)?->lastProbeAt);
         } finally {
             $status = proc_get_status($server);
             $shutdownDeadline = microtime(true) + 1.0;
