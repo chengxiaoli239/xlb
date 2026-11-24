@@ -195,7 +195,8 @@ public final class XlbVpnServiceAdmissionInstrumentedTest {
             assertNotNull("VPN service did not accept the stop after queued start", stopped);
 
             assertTrue("VPN service did not finish the stop after queued start",
-                    stoppedAfterRace.await(10, TimeUnit.SECONDS));
+                    stoppedAfterRace.await(XlbVpnService.TUNNEL_START_TIMEOUT_MILLIS + TimeUnit.SECONDS.toMillis(5),
+                            TimeUnit.MILLISECONDS));
             assertEquals(XlbVpnService.STATE_DISCONNECTED, XlbVpnService.currentState());
             assertEquals("stale start reported a connected tunnel", 0, connectedStates.get());
             assertFalse("debug start left service marked as a member tunnel",

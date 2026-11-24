@@ -61,6 +61,7 @@ public final class XlbVpnService extends VpnService {
     private static final long MEMBER_HEALTH_CHECK_INTERVAL_MILLIS = 10_000;
     private static final int MEMBER_HEALTH_FAILURE_THRESHOLD = 2;
     private static final long ISOLATED_MEMBER_HEALTH_CHECK_INTERVAL_MILLIS = 1_000;
+    static final long TUNNEL_START_TIMEOUT_MILLIS = TimeUnit.SECONDS.toMillis(20);
     private static final String[] PROBE_URLS = {
             "https://www.gstatic.com/generate_204",
             "https://cp.cloudflare.com/generate_204"
@@ -221,7 +222,7 @@ public final class XlbVpnService extends VpnService {
         setMemberTunnelForAttempt(attempt, false);
         Future<?> operation = tunnelWorker.submit(() -> startTunnelInternal(profile, requestedRouteName, attempt));
         try {
-            operation.get(20, TimeUnit.SECONDS);
+            operation.get(TUNNEL_START_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
             if (tunnelAttempts.isCurrent(attempt)) {
                 boolean verified = TunnelVerifier.verify(this::probeVpnRoute,
                         () -> !tunnelAttempts.isCurrent(attempt), Thread::sleep, 5);
@@ -302,7 +303,7 @@ public final class XlbVpnService extends VpnService {
             }
         });
         try {
-            operation.get(20, TimeUnit.SECONDS);
+            operation.get(TUNNEL_START_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
             if (isolatedMemberTest) {
                 startMemberTunnelHealthMonitor(attempt, true);
                 return;

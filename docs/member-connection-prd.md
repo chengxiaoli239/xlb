@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **Android service queued start/stop AVD 验收门限与实际启动上限一致（2026-11-24）**：整套 disposable AVD harness 首轮出现 24 项中的 stop-after-queued-start 测试 10 秒超时；单项复跑通过。核对发现 `XlbVpnService` 两条 tunnel startup 使用 20 秒 `Future.get` 上限，而测试只等待 10 秒，stop 任务可能排在该启动任务后。提取共享 `TUNNEL_START_TIMEOUT_MILLIS`，测试等待改为启动上限加 5 秒；未改变生产运行时超时。JBR 21 + Android SDK 35 下 Android JVM、AndroidTest 编译、lint、Debug APK 通过；完整 disposable AVD harness 复跑退出码 0，24 项主 instrumentation 与 6 项隔离 proof bridge/session/TUN/grant 用例通过。该用例验证最终 DISCONNECTED 与未发布 CONNECTED，不构成 stop 延迟 SLO 或真实会员线路验收。
+
 - **M8 Node Agent 隔离 Mihomo profile renderer 接入（2026-11-24，本机 Go 验收）**：runnable Node Agent 现在接受显式 `isolated-test` runtime renderer 状态，要求 loopback proof bridge、HTTPS bridge endpoint 和有效 CA bundle；在配置为 unavailable 时仍使用不可用 renderer，production 环境声明 renderer 会被拒绝。新增 test-only PeerStore 构造路径，生成 profile 时回执仍为 `confirmed_test`，原 renderer constructor 的既有语义未改变。运行配置、命令选择与 PeerStore 回执回归通过；命令层用实际 `EnsurePeer` 断言返回 profile 且状态为 `confirmed_test`；Node Agent `go test -race ./...` 142 项通过，`go vet ./...` 和 `go build ./...` 成功。该阶段只证明隔离 Agent 能按受信配置生成 Mihomo profile，不证明 bridge 进程运行、会员隧道、真实节点确认或生产 profile；下一步补 CI 并继续离线 Android/Agent 生命周期联验，生产门仍关闭。
 
 - **本轮关键路径复核（2026-11-24）**：Android 本地失败恢复入口检查已完成，原总体计划中“检查用户可操作恢复”行动项可关闭，主线 `f07465d` 的 Android monitor stale-attempt 回归 CI `45406085919` 六个 jobs 全绿；会员网站→Laravel 本地沙箱下单/模拟付款→退款清理已通过真实浏览器，记录见 [上线工程总体规划 §0.2.4](launch-engineering-master-plan.md)。仍未满足试点放行条件的独立门是 Android 真实 member profile/CA/mTLS/撤权回执、GitHub `android-release-candidate` Environment/签名凭据、获批 staging/回滚，以及商户 sandbox/合规书面意见。最新只读 GitHub 元数据仍显示 environments 与 repository variables 均为空；AWS 本轮未做读写。后续不重复已完成的诊断 UI/沙箱付款 mock 测试，继续从首发真实放行依赖或新的离线缺陷推进。
