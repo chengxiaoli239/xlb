@@ -52,7 +52,7 @@ class WorkflowActionPinsTest(unittest.TestCase):
                 "actions/upload-artifact": 3,
                 "android-actions/setup-android": 2,
                 "gradle/actions/setup-gradle": 2,
-                "actions/attest": 5,
+                "actions/attest": 6,
                 "actions/download-artifact": 2,
             },
             occurrences,
@@ -96,12 +96,44 @@ class WorkflowActionPinsTest(unittest.TestCase):
                 "Restore release signing keystore",
                 "Build signed release candidate",
                 "Verify package identity and APK signature",
+                "Generate release runtime SBOM",
                 "Create source-bound APK manifest",
                 "Attest signed candidate APK",
+                "Attest release runtime SBOM",
                 "Upload signed candidate for review",
             ],
             re.findall(r"^      - name: (.+)$", candidate_job, re.MULTILINE),
         )
+        self.assertIn(":app:cyclonedxDirectBom", candidate_job)
+        manifest_step = re.search(
+            r"(?ms)^      - name: Create source-bound APK manifest\n(?P<body>.*?)(?=^      - name: |\Z)",
+            candidate_job,
+        )
+        self.assertIsNotNone(manifest_step)
+        self.assertIn("apps/android/app/build/outputs/apk/release/app-release.apk", manifest_step.group("body"))
+        self.assertIn("apps/android/app/build/reports/cyclonedx-direct/bom.json", manifest_step.group("body"))
+
+        sbom_attestation_step = re.search(
+            r"(?ms)^      - name: Attest release runtime SBOM\n(?P<body>.*?)(?=^      - name: |\Z)",
+            candidate_job,
+        )
+        self.assertIsNotNone(sbom_attestation_step)
+        self.assertIn(
+            "subject-path: apps/android/app/build/reports/cyclonedx-direct/bom.json",
+            sbom_attestation_step.group("body"),
+        )
+
+        upload_step = re.search(
+            r"(?ms)^      - name: Upload signed candidate for review\n(?P<body>.*?)(?=^      - name: |\Z)",
+            candidate_job,
+        )
+        self.assertIsNotNone(upload_step)
+        for artifact_path in [
+            "apps/android/app/build/outputs/apk/release/app-release.apk",
+            "apps/android/app/build/outputs/apk/release/build-manifest.json",
+            "apps/android/app/build/reports/cyclonedx-direct/bom.json",
+        ]:
+            self.assertIn(artifact_path, upload_step.group("body"))
         self.assertNotIn("gh release create", workflow)
         self.assertNotIn("softprops/action-gh-release@", workflow)
         self.assertNotIn("r0adkll/upload-google-play@", workflow)

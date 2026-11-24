@@ -37,7 +37,12 @@ class BuildArtifactManifestTest(unittest.TestCase):
         )
         return result.stdout.strip()
 
-    def run_manifest(self, artifact: Path, output: Path) -> subprocess.CompletedProcess[str]:
+    def run_manifest(
+        self,
+        artifact: Path,
+        output: Path,
+        *additional_artifacts: Path,
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             **os.environ,
             "GITHUB_REF": "refs/heads/main",
@@ -53,6 +58,7 @@ class BuildArtifactManifestTest(unittest.TestCase):
                 "--output",
                 str(output),
                 str(artifact),
+                *(str(path) for path in additional_artifacts),
             ],
             cwd=self.repo,
             capture_output=True,
@@ -83,6 +89,34 @@ class BuildArtifactManifestTest(unittest.TestCase):
                     "size_bytes": len(b"debug apk bytes"),
                     "sha256": hashlib.sha256(b"debug apk bytes").hexdigest(),
                 }
+            ],
+        )
+
+    def test_manifest_records_multiple_artifacts_in_argument_order(self) -> None:
+        apk = self.repo / "build" / "app-release.apk"
+        sbom = self.repo / "build" / "bom.json"
+        apk.parent.mkdir()
+        apk.write_bytes(b"signed apk bytes")
+        sbom.write_bytes(b"release runtime sbom bytes")
+        output = self.repo / "build" / "manifest.json"
+
+        result = self.run_manifest(apk, output, sbom)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(
+            manifest["artifacts"],
+            [
+                {
+                    "path": "build/app-release.apk",
+                    "size_bytes": len(b"signed apk bytes"),
+                    "sha256": hashlib.sha256(b"signed apk bytes").hexdigest(),
+                },
+                {
+                    "path": "build/bom.json",
+                    "size_bytes": len(b"release runtime sbom bytes"),
+                    "sha256": hashlib.sha256(b"release runtime sbom bytes").hexdigest(),
+                },
             ],
         )
 

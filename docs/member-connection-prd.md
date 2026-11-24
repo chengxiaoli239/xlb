@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M11 签名 Android 候选附带 release runtime SBOM（2026-11-24，本地离线验收）**：受保护环境的手动候选 workflow 现在在 release APK 签名和包名检查后生成 CycloneDX release runtime BOM；来源清单同时记录 APK 与 BOM 的 SHA-256；分别对 APK 和 BOM 建立 provenance attest，并把三份文件一并上传供审核。扩展 workflow 回归检查每个具体 step 的 manifest 输入、SBOM attest subject 和审核 artifact 内容，保持 main-only、protected environment、无 Release/Play Store 发布。Gradle 在本机 JDK 21 + Android SDK 35 下成功生成 `apps/android/app/build/reports/cyclonedx-direct/bom.json`；ops 全套 54/54、Python 编译、workflow 回归与 diff check 通过。此次没有注入受保护签名凭据或构建签名候选，hosted 主线 CI 只会执行安全回归，不等于该 manual workflow 的签名候选验收。下一步需完成 protected environment、审核者、正式签名凭据与 approved API origin 配置，再由获批者手动运行候选工作流。
+
 - **M10 路线回滚拒绝不健康的上一版本（2026-11-24，本地与 hosted CI）**：新增 API Feature 回归：发布版本 2 后把版本 1 的候选标为 unhealthy，再请求回滚，服务返回 `route_nodes_not_ready`；事务保留版本 2 published、版本 1 draining，实际解析继续选择版本 2。全套 Laravel 258 项中 257 passed、1 个既有 skip、2,299 assertions，定向用例 1/1、8 assertions；Pint 与 PHP syntax 通过。主线 CI `45298502142` 六个 jobs 全绿，含 Laravel、Android、Go/Agent、容器 smoke、ops 与 SBOM provenance。该防护确保控制面不会把不健康节点重新发布，但不代表已建立连接迁移、真实故障恢复或流量切换验收。
 
 - **M10 canary 全部无健康候选时回退稳定线路（2026-11-24，本地与 hosted CI）**：复现 test-scope 100% canary 已选中但其唯一候选变为 unhealthy 时 `resolve()` 返回无线路；修复为 canary 无任何健康候选时回退到仍有健康候选的 published 版本。新增 Feature 同时断言 canary 健康时仍先选 canary，候选失效后才回退到版本 1 和其节点。Laravel 全套 257 项中 256 passed、1 个既有 skip、2,291 assertions；Pint 与 PHP syntax 通过。主线 CI `45296893259` 六个 jobs 全绿，含 PHP/Laravel、Android、Node Agent、容器 smoke、ops 与 SBOM provenance。该回退仅影响后续账号级线路解析/profile，不修改 canary 发布状态、已建立隧道、逐设备 peer、撤权或节点 drain 状态；无真实节点故障注入与流量回执，不能称为真实故障切换或断流验收。
