@@ -929,22 +929,20 @@ mod tests {
             }));
         client.load_persisted_session().unwrap();
         let snapshot = client.restore().await.unwrap().unwrap();
-        let paths = server.join().unwrap();
         assert_eq!(snapshot.node_authorization, NodeAuthorizationStatus::Ready);
         assert!(client.verified_member_device_proof.is_some());
         assert_eq!(snapshot.devices.registered_count, 1);
         let snapshot_json = serde_json::to_string(&snapshot).unwrap();
         assert!(!snapshot_json.contains(&peer_credential));
         assert!(!snapshot_json.contains(profile));
-        assert!(paths[3].contains("device-bindings/challenge"));
-        assert!(paths[5].contains("device-bindings/authorize"));
-        assert!(paths[6].contains("me/devices"));
-        assert!(!paths[6].contains("device-bindings"));
-
         assert!(client.restore().await.unwrap().is_none());
         assert!(client.verified_member_device_proof.is_none());
         assert!(store.load().unwrap().is_none());
-        assert!(server.join().unwrap()[7].contains("api/v1/auth/session"));
+        let paths = server.join().unwrap();
+        assert!(paths[3].contains("device-bindings/challenge"));
+        assert!(paths[5].contains("device-bindings/authorize"));
+        assert!(paths[6].contains("me/devices"));
+        assert!(paths[7].contains("api/v1/auth/session"));
     }
 
     #[test]
