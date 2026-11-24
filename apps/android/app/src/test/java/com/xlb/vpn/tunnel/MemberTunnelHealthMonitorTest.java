@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -122,5 +123,45 @@ public final class MemberTunnelHealthMonitorTest {
         Thread.sleep(25);
 
         assertEquals("closed monitor reported a late probe failure", 0, failures.get());
+    }
+
+    @Test
+    public void attemptReplacedDuringProbeDoesNotReportFailureForTheNewTunnel() throws Exception {
+        AtomicBoolean attemptIsCurrent = new AtomicBoolean(true);
+        AtomicInteger probes = new AtomicInteger();
+        AtomicInteger failures = new AtomicInteger();
+        CountDownLatch probeStarted = new CountDownLatch(1);
+        CountDownLatch releaseProbe = new CountDownLatch(1);
+        MemberTunnelHealthMonitor monitor = new MemberTunnelHealthMonitor(
+                attemptIsCurrent::get,
+                () -> {
+                    probes.incrementAndGet();
+                    probeStarted.countDown();
+                    try {
+                        releaseProbe.await();
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return false;
+                },
+                failures::incrementAndGet,
+                5,
+                1);
+
+        try {
+            monitor.start();
+            assertTrue("health probe did not start for the active attempt",
+                    probeStarted.await(1, TimeUnit.SECONDS));
+
+            attemptIsCurrent.set(false);
+            releaseProbe.countDown();
+            Thread.sleep(30);
+
+            assertEquals("stale probe continued after its attempt was replaced", 1, probes.get());
+            assertEquals("stale probe failure was applied to the replacement tunnel", 0, failures.get());
+        } finally {
+            releaseProbe.countDown();
+            monitor.close();
+        }
     }
 }
