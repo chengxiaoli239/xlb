@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **首发试点与规模化发布门拆分（2026-11-24）**：按已确认的 Android + 网站/API 单服务商受控试点范围，修订总体计划的优先级和放行条件。真实会员隧道、严格设备限制与节点撤权回执、首发合规、受保护签名候选、获批 staging、最小运行监控和回滚仍是试点硬门；批量节点编排、热备池、规模化容量模型与更高并发 SLO 移入后续扩大规模门，避免将规模化工程误列为初版前置。未放宽设备限制、真实支付或生产发布边界。下一步继续推进 Android/Web/API 可离线关键路径，等待责任人和外部运行材料并行到位。
+
 - **本地沙箱支付/退款 outbox 自动调度（2026-11-24）**：`routes/console.php` 现在只在 `local/testing` 每分钟调度 `payments:process-sandbox-fulfillments` 与 `payments:process-sandbox-refunds`，两条命令自身仍有环境保护；production `schedule:list` 不包含沙箱 worker。新增 schedule 子进程回归验证 local、testing 启用且 production 不注册，定向 3/3、9 assertions；Laravel 全套 261 项中 260 passed、1 skipped、2,310 assertions，Pint 通过。本地 webhook/outbox 无需人工逐条执行命令即可由 scheduler 消费，但本机实测只确认调度注册和 worker 已有的沙箱状态机测试，不代表 staging scheduler 常驻、真实商户支付/退款或真实节点撤权回执。
 
 - **Android 用户拒绝系统 VPN 授权时停止会员启动（2026-11-24，专用 AVD）**：新增 `PlatformApiMemberGrantInstrumentedTest#deniedPermissionCallbackDoesNotReauthorizeOrStartMemberService`。在 fake API 返回 READY grant、Activity 恢复待授权状态后注入 `RESULT_CANCELED`，断言 pending permission/grant 被清除，不再次请求服务端授权、不发布进程 handoff、不启动/标记 member tunnel、没有 CONNECTED 广播。该用例单项通过，所在 member-grant instrumentation 整组 4/4 通过；Android JVM、lint、AndroidTest APK 编译通过。只证明系统权限拒绝分支的客户端行为，不证明真实会员节点或撤权断流；使用 disposable `xlb-m9-recovery` AVD，未触及会员真机。
