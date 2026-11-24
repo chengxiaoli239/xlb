@@ -1,11 +1,20 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	agent "xlb/node-agent"
 )
@@ -54,6 +63,43 @@ func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
 				t.Fatalf("validateRuntimeConfig error = %v; want %v", err, test.want)
 			}
 		})
+	}
+}
+
+func TestRuntimeConfigCanSelectIsolatedMihomoRenderer(t *testing.T) {
+	caPEM := testRuntimeRendererCA(t)
+	config := agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV1,
+		Environment:   agent.RuntimeEnvironmentTest,
+		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+		ProofBridge: agent.ProofBridgeRuntimeConfig{
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialTestFile,
+		},
+		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
+			Status: agent.RuntimeProfileMihomoBridgeTest, BridgeEndpoint: "https://bridge.example.invalid:9444",
+			BridgeServerCAPEM: caPEM,
+		},
+	}
+	content, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "runtime.json")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	decoded, err := readRuntimeConfig(path, "node-a")
+	if err != nil {
+		t.Fatalf("readRuntimeConfig error = %v", err)
+	}
+	store, err := openPeerStoreForRuntimeConfig(filepath.Join(t.TempDir(), "agent.json"), "node-a", 4, decoded)
+	if err != nil {
+		t.Fatalf("openPeerStoreForRuntimeConfig error = %v", err)
+	}
+	if store == nil {
+		t.Fatal("openPeerStoreForRuntimeConfig returned a nil store")
 	}
 }
 
@@ -115,4 +161,23 @@ func TestConfiguredCanaryRequiresExplicitProbeListener(t *testing.T) {
 		!strings.Contains(err.Error(), "requires NODE_AGENT_PROBE_LISTEN") {
 		t.Fatalf("newDataPlaneProbeServer error = %v; want explicit probe-listener requirement", err)
 	}
+}
+
+func testRuntimeRendererCA(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "isolated test CA"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true,
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }

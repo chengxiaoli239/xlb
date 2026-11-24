@@ -51,7 +51,7 @@ func run() error {
 	if err != nil || capacity < 1 || capacity > 4096 {
 		return errors.New("NODE_AGENT_CAPACITY must be between 1 and 4096")
 	}
-	store, err := agent.OpenPeerStore(statePath, nodeID, capacity)
+	store, err := openPeerStoreForRuntimeConfig(statePath, nodeID, capacity, runtimeConfig)
 	if err != nil {
 		return err
 	}
@@ -196,12 +196,30 @@ func readRuntimeConfig(path, nodeID string) (agent.TrustedNodeRuntimeConfig, err
 	if err != nil {
 		return agent.TrustedNodeRuntimeConfig{}, err
 	}
-	if config.Environment != agent.RuntimeEnvironmentTest || config.Node.ID != nodeID ||
-		config.ProfileRenderer.Status != agent.RuntimeProfileUnavailable {
+	if config.Environment != agent.RuntimeEnvironmentTest || config.Node.ID != nodeID {
 		return agent.TrustedNodeRuntimeConfig{}, agent.ErrInvalidNodeRuntimeConfig
 	}
 
 	return config, nil
+}
+
+func openPeerStoreForRuntimeConfig(path, nodeID string, capacity int, config agent.TrustedNodeRuntimeConfig) (*agent.PeerStore, error) {
+	switch config.ProfileRenderer.Status {
+	case agent.RuntimeProfileUnavailable:
+		return agent.OpenPeerStore(path, nodeID, capacity)
+	case agent.RuntimeProfileMihomoBridgeTest:
+		renderer, err := agent.NewMihomoBridgeProfileRenderer(
+			config.ProofBridge.ListenAddress,
+			config.ProfileRenderer.BridgeEndpoint,
+			config.ProfileRenderer.BridgeServerCAPEM,
+		)
+		if err != nil {
+			return nil, agent.ErrInvalidNodeRuntimeConfig
+		}
+		return agent.OpenPeerStoreWithTestProfileRenderer(path, nodeID, capacity, renderer)
+	default:
+		return nil, agent.ErrInvalidNodeRuntimeConfig
+	}
 }
 
 func acquireProcessLock(path string) (*os.File, error) {

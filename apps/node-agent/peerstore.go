@@ -136,12 +136,13 @@ type RevocationReceipt struct {
 }
 
 type PeerStore struct {
-	path            string
-	nodeID          string
-	capacity        int
-	profileRenderer ProfileRenderer
-	bridgeEndpoint  string
-	bridgeServerCA  string
+	path                      string
+	nodeID                    string
+	capacity                  int
+	profileRenderer           ProfileRenderer
+	profileConfirmationStatus string
+	bridgeEndpoint            string
+	bridgeServerCA            string
 }
 
 type RuntimeSnapshot struct {
@@ -210,7 +211,7 @@ type agentState struct {
 }
 
 func OpenPeerStore(path, nodeID string, capacity int) (*PeerStore, error) {
-	return openPeerStore(path, nodeID, capacity, nil, "", "")
+	return openPeerStore(path, nodeID, capacity, nil, "", "", "confirmed_test")
 }
 
 func OpenPeerStoreWithProfileRenderer(path, nodeID string, capacity int, renderer ProfileRenderer) (*PeerStore, error) {
@@ -226,11 +227,28 @@ func OpenPeerStoreWithProfileRenderer(path, nodeID string, capacity int, rendere
 		return nil, err
 	}
 
-	return openPeerStore(path, nodeID, capacity, renderer, bridgeEndpoint, bridgeServerCA)
+	return openPeerStore(path, nodeID, capacity, renderer, bridgeEndpoint, bridgeServerCA, "confirmed")
+}
+
+// OpenPeerStoreWithTestProfileRenderer renders isolated-test profiles while preserving test-only receipts.
+func OpenPeerStoreWithTestProfileRenderer(path, nodeID string, capacity int, renderer ProfileRenderer) (*PeerStore, error) {
+	if renderer == nil {
+		return nil, ErrInvalid
+	}
+	descriptor, ok := renderer.(MemberBridgeDescriptorProvider)
+	if !ok {
+		return nil, ErrInvalid
+	}
+	bridgeEndpoint, bridgeServerCA := descriptor.MemberBridgeDescriptor()
+	if err := validateMemberBridgeDescriptor(bridgeEndpoint, bridgeServerCA); err != nil {
+		return nil, err
+	}
+
+	return openPeerStore(path, nodeID, capacity, renderer, bridgeEndpoint, bridgeServerCA, "confirmed_test")
 }
 
 func openPeerStore(path, nodeID string, capacity int, renderer ProfileRenderer,
-	bridgeEndpoint, bridgeServerCA string) (*PeerStore, error) {
+	bridgeEndpoint, bridgeServerCA, profileConfirmationStatus string) (*PeerStore, error) {
 	if path == "" || nodeID == "" || capacity < 1 {
 		return nil, ErrInvalid
 	}
@@ -249,7 +267,8 @@ func openPeerStore(path, nodeID string, capacity int, renderer ProfileRenderer,
 	}
 	store := &PeerStore{
 		path: path, nodeID: nodeID, capacity: capacity, profileRenderer: renderer,
-		bridgeEndpoint: bridgeEndpoint, bridgeServerCA: bridgeServerCA,
+		profileConfirmationStatus: profileConfirmationStatus,
+		bridgeEndpoint:            bridgeEndpoint, bridgeServerCA: bridgeServerCA,
 	}
 	if err := store.update(func(state *agentState) error {
 		if state.NodeID != "" && (state.NodeID != nodeID || state.Capacity != capacity) {
@@ -371,7 +390,7 @@ func (store *PeerStore) EnsurePeer(request EnsurePeerRequest) (EnsurePeerReceipt
 			return EnsurePeerReceipt{}, err
 		}
 		artifact = &rendered
-		confirmationStatus = "confirmed"
+		confirmationStatus = store.profileConfirmationStatus
 	}
 
 	var receipt EnsurePeerReceipt

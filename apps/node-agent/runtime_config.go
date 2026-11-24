@@ -11,15 +11,16 @@ import (
 )
 
 const (
-	TrustedNodeRuntimeSchemaV1 = "xlb-node-runtime/v1"
-	RuntimeEnvironmentTest     = "isolated-test"
-	RuntimeEnvironmentProd     = "production"
-	RuntimeCredentialTestFile  = "test-file-only"
-	RuntimeCredentialSecure    = "platform-secure-store"
-	RuntimeProfileUnavailable  = "unavailable"
-	RuntimeProbeUnavailable    = "unavailable"
-	RuntimeProbeHTTPSCanary    = "https-canary"
-	maxNodeRuntimeConfigBytes  = 64 * 1024
+	TrustedNodeRuntimeSchemaV1     = "xlb-node-runtime/v1"
+	RuntimeEnvironmentTest         = "isolated-test"
+	RuntimeEnvironmentProd         = "production"
+	RuntimeCredentialTestFile      = "test-file-only"
+	RuntimeCredentialSecure        = "platform-secure-store"
+	RuntimeProfileUnavailable      = "unavailable"
+	RuntimeProfileMihomoBridgeTest = "mihomo-bridge-isolated-test"
+	RuntimeProbeUnavailable        = "unavailable"
+	RuntimeProbeHTTPSCanary        = "https-canary"
+	maxNodeRuntimeConfigBytes      = 64 * 1024
 )
 
 var ErrInvalidNodeRuntimeConfig = errors.New("node runtime configuration is invalid")
@@ -47,7 +48,9 @@ type ProofBridgeRuntimeConfig struct {
 }
 
 type ProfileRendererRuntimeConfig struct {
-	Status string `json:"status"`
+	Status            string `json:"status"`
+	BridgeEndpoint    string `json:"bridge_endpoint,omitempty"`
+	BridgeServerCAPEM string `json:"bridge_server_ca_pem,omitempty"`
 }
 
 // DataPlaneProbeRuntimeConfig selects an explicit isolated-test probe target.
@@ -80,7 +83,7 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 		!validRuntimeToken(config.Node.ID, 64) || !validRuntimeToken(config.Node.Provider, 32) ||
 		!validRuntimeToken(config.Node.Region, 64) || config.ProofBridge.Protocol != "xlb-proof-v1" ||
 		!config.ProofBridge.DeviceProofRequired || !isLoopbackListener(config.ProofBridge.ListenAddress) ||
-		config.ProfileRenderer.Status != RuntimeProfileUnavailable ||
+		validateProfileRendererRuntimeConfig(config.Environment, config.ProofBridge, config.ProfileRenderer) != nil ||
 		validateDataPlaneProbeRuntimeConfig(config.Environment, config.DataPlaneProbe) != nil {
 		return ErrInvalidNodeRuntimeConfig
 	}
@@ -93,6 +96,25 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 		return ErrInvalidNodeRuntimeConfig
 	}
 
+	return nil
+}
+
+func validateProfileRendererRuntimeConfig(environment string, bridge ProofBridgeRuntimeConfig, renderer ProfileRendererRuntimeConfig) error {
+	switch renderer.Status {
+	case RuntimeProfileUnavailable:
+		if renderer.BridgeEndpoint != "" || renderer.BridgeServerCAPEM != "" {
+			return ErrInvalidNodeRuntimeConfig
+		}
+	case RuntimeProfileMihomoBridgeTest:
+		if environment != RuntimeEnvironmentTest {
+			return ErrInvalidNodeRuntimeConfig
+		}
+		if _, err := NewMihomoBridgeProfileRenderer(bridge.ListenAddress, renderer.BridgeEndpoint, renderer.BridgeServerCAPEM); err != nil {
+			return ErrInvalidNodeRuntimeConfig
+		}
+	default:
+		return ErrInvalidNodeRuntimeConfig
+	}
 	return nil
 }
 

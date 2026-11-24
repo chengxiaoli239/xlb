@@ -123,6 +123,29 @@ func TestEnsureWithProfileRendererPersistsIdentityBoundArtifactAcrossRetries(t *
 	}
 }
 
+func TestEnsureWithTestProfileRendererKeepsTestOnlyConfirmation(t *testing.T) {
+	request, _ := testEnsureRequest(t, "peer-rendered-test", "ensure-rendered-test")
+	renderer, err := testMihomoRenderer(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenPeerStoreWithTestProfileRenderer(
+		filepath.Join(t.TempDir(), "peer-store.json"), "node-test", 4, renderer,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := store.EnsurePeer(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.ConfirmationStatus != "confirmed_test" || receipt.ProfileArtifact == nil {
+		t.Fatalf("test renderer receipt status/artifact = %q/%v; want confirmed_test with artifact",
+			receipt.ConfirmationStatus, receipt.ProfileArtifact != nil)
+	}
+}
+
 func TestCapacityRejectionConsumesChallengeAndDoesNotAllowStaggeredRetry(t *testing.T) {
 	store := openTestStore(t, 1)
 	firstRequest, firstKey := testEnsureRequest(t, "peer-capacity-first", "ensure-capacity-first")

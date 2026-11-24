@@ -57,6 +57,45 @@ func TestDecodeTrustedNodeRuntimeConfigRejectsUnsafeOrUnsupportedInputs(t *testi
 	}
 }
 
+func TestDecodeTrustedNodeRuntimeConfigAcceptsExplicitTestMihomoRenderer(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	input := rendererRuntimeConfigJSON(RuntimeEnvironmentTest, RuntimeProfileMihomoBridgeTest,
+		"https://bridge.example.invalid:9444", string(caPEM))
+
+	config, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v", err)
+	}
+	if config.ProfileRenderer.Status != RuntimeProfileMihomoBridgeTest {
+		t.Fatalf("renderer status = %q; want %q", config.ProfileRenderer.Status, RuntimeProfileMihomoBridgeTest)
+	}
+}
+
+func TestDecodeTrustedNodeRuntimeConfigRejectsUnsafeMihomoRendererDeclarations(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	tests := []struct {
+		name        string
+		environment string
+		status      string
+		endpoint    string
+		caPEM       string
+	}{
+		{name: "production renderer", environment: RuntimeEnvironmentProd, status: RuntimeProfileMihomoBridgeTest, endpoint: "https://bridge.example.invalid:9444", caPEM: string(caPEM)},
+		{name: "missing endpoint", environment: RuntimeEnvironmentTest, status: RuntimeProfileMihomoBridgeTest, caPEM: string(caPEM)},
+		{name: "insecure endpoint", environment: RuntimeEnvironmentTest, status: RuntimeProfileMihomoBridgeTest, endpoint: "http://bridge.example.invalid:9444", caPEM: string(caPEM)},
+		{name: "invalid CA", environment: RuntimeEnvironmentTest, status: RuntimeProfileMihomoBridgeTest, endpoint: "https://bridge.example.invalid:9444", caPEM: "not-a-certificate"},
+		{name: "descriptor supplied while unavailable", environment: RuntimeEnvironmentTest, status: RuntimeProfileUnavailable, endpoint: "https://bridge.example.invalid:9444", caPEM: string(caPEM)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := rendererRuntimeConfigJSON(test.environment, test.status, test.endpoint, test.caPEM)
+			if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(input)); !errors.Is(err, ErrInvalidNodeRuntimeConfig) {
+				t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v; want ErrInvalidNodeRuntimeConfig", err)
+			}
+		})
+	}
+}
+
 func TestDecodeTrustedNodeRuntimeConfigRejectsOversizedInput(t *testing.T) {
 	input := strings.Repeat(" ", maxNodeRuntimeConfigBytes+1)
 	if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(input)); !errors.Is(err, ErrInvalidNodeRuntimeConfig) {
@@ -108,4 +147,16 @@ func canaryRuntimeConfigJSON(environment, endpoint, caPEM string) string {
 		credentialSource = RuntimeCredentialSecure
 	}
 	return `{"schema_version":"xlb-node-runtime/v1","environment":"` + environment + `","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"` + credentialSource + `"},"profile_renderer":{"status":"unavailable"},"data_plane_probe":{"status":"https-canary","canary_endpoint":` + string(endpointJSON) + `,"server_ca_pem":` + string(caPEMJSON) + `}}`
+}
+
+func rendererRuntimeConfigJSON(environment, status, endpoint, caPEM string) string {
+	endpointJSON, _ := json.Marshal(endpoint)
+	caPEMJSON, _ := json.Marshal(caPEM)
+	credentialSource := RuntimeCredentialTestFile
+	if environment == RuntimeEnvironmentProd {
+		credentialSource = RuntimeCredentialSecure
+	}
+	return `{"schema_version":"xlb-node-runtime/v1","environment":"` + environment +
+		`","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"` + credentialSource +
+		`"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `}}`
 }
