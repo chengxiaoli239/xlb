@@ -408,6 +408,7 @@ fn status(code: i32, action: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DeviceProofProvider;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
@@ -569,6 +570,47 @@ mod tests {
         assert_eq!(signer.scheme(), rustls::SignatureScheme::ECDSA_NISTP256_SHA256);
         assert_eq!(signature.first(), Some(&0x30));
         assert_signature_verifies(&key.open(), message, &signature);
+    }
+
+    #[test]
+    fn verified_member_proof_signs_with_its_bound_cng_device_key() {
+        let installation_id = uuid::Uuid::new_v4().to_string();
+        let key_name = key_name_for_identity(&installation_id).unwrap();
+        drop(DeviceKey::open_or_create(&installation_id).unwrap());
+        let key = TestKey { key_name, installation_id: installation_id.clone() };
+        let signer = std::sync::Arc::new(crate::CngDeviceProof { installation_id: installation_id.clone() });
+        let registered_public_key = signer.public_key_spki_base64url().unwrap();
+        let device = crate::BoundDevice {
+            id: "fd3ae0f1-1234-4234-9234-000000000010".into(),
+            status: "registered".into(),
+            bound: true,
+        };
+        let authorization = crate::DeviceAuthorization {
+            status: "ready".into(),
+            peer_id: Some("fd3ae0f1-1234-4234-9234-000000000011".into()),
+            node_id: Some("fd3ae0f1-1234-4234-9234-000000000012".into()),
+            peer_generation: Some(1),
+            device_binding_generation: Some(1),
+            peer_credential: Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([7u8; 32])),
+            profile: Some("mixed-port: 0\nproxies: []\n".into()),
+        };
+        let proof = crate::proof_bridge::VerifiedMemberDeviceProof::from_authorized_response(
+            "member-1",
+            &installation_id,
+            &device,
+            &authorization,
+            &registered_public_key,
+            signer,
+        )
+        .unwrap();
+        let challenge = [0x5a; 32];
+
+        assert_eq!(proof.signer().public_key_spki_base64url().unwrap(), registered_public_key);
+        let signature = decode_base64url(
+            &proof.signer().sign_challenge_base64url(&challenge).unwrap(),
+        )
+        .unwrap();
+        assert_signature_verifies(&key.open(), &challenge, &signature);
     }
 
     #[test]

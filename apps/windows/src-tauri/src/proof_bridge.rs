@@ -130,7 +130,7 @@ impl VerifiedMemberDeviceProof {
         })
     }
 
-    fn signer(&self) -> &dyn DeviceProofSigner {
+    pub(super) fn signer(&self) -> &dyn DeviceProofSigner {
         self.signer.as_ref()
     }
 
