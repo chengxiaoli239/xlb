@@ -74,6 +74,8 @@
 
 ### 0.2.4 Worktree 未合并成果复核（2026-11-24）
 
+**Web/API 本地浏览器联验（2026-11-24）**：用 Playwright CLI 对本机会员 portal 与 Laravel 完成登录→套餐选择→建单→确认沙箱付款；HTTP 201 创建测试订单和接受模拟付款，UI 展示 `paid_test`、权益延长、固定订阅 QR/link。随后 sandbox refund 清理本次订单，并在 SQLite 核验订单和 entitlement grant 均为 revoked 测试态。浏览器请求没有触达商户 API；不代表真实收款、生产支付、staging 或节点撤权回执。订阅 URL 型凭证只在本机临时浏览器快照显示，本轮快照已删除。
+
 本轮只读盘点发现 34 个 worktree，其中 33 个带分支；按 `git cherry -v origin/main HEAD` 区分 patch 等价与真正独有改动后，仅 3 个分支有主线未包含的 patch：
 
 | 分支 | 独有 patch | 复核结果 |

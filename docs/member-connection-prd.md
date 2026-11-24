@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **会员网站到本地 Laravel 沙箱购买/退款浏览器联验（2026-11-24，本机真实浏览器）**：通过 Playwright CLI 连接本机 Vite `5174` 与 Laravel `4175`，以已存在的本地 seed member 登录，浏览套餐、创建服务端金额订单、在订单弹窗确认沙箱模拟付款；观察到 `POST /api/v1/me/orders` 返回 201、`POST .../sandbox-payment` 返回 201，详情显示 `paid_test`、测试权益从当前到期日后追加 30 天、固定订阅二维码/链接已准备。网络请求只调用本地 sandbox payment API，无真实支付商/checkout/charge 请求。随后通过 local/testing 退款处理器清理本次订单；数据库复核订单 `refunded_test`、grant `revoked_test`。浏览器快照曾含本地 URL 型订阅 token，已删除本轮生成的快照与 console 文件，未将凭证写入报告/仓库。此联验只证明本地网站与 Laravel 沙箱流程，不代表真实付款、真实节点撤权回执、staging 或上线验收。
+
 - **Android native 本地模块依赖回归保护（2026-11-24）**：新增 ops unittest，确认 Debug/Release Mihomo JNI 的 Gradle 注册共同通过 native build helper，且该 helper 将本地替换的 `apps/node-agent` Go 源、`go.mod` 与 `go.sum` 声明为 task inputs。定向 1/1、ops 全套 63/63 通过。此测试防止 Node Agent 修改后 JNI 任务错误显示 `UP-TO-DATE`；不代表 Android 生产 signed candidate 或真实节点验收。
 
 - **Android Mihomo JNI Gradle 输入覆盖本地 Node Agent 替换模块（2026-11-24）**：核对发现 Android `buildMihomoArm64Debug/Release` 的 Gradle inputs 原先只包含 `apps/android/core-native`，漏掉 `go.mod` 本地 replace 的 `apps/node-agent`。补入 Node Agent `.go` 源、`go.mod` 与 `go.sum` 为两种 native 变体输入，确保 bridge/DataPlane 变化会使 Debug 与 Release JNI 重编，而不是误报 `UP-TO-DATE`。本轮两个 variant 实际重建通过；Android Debug/AndroidTest/JVM/lint 和 Release Java 编译通过。该阶段修复构建缓存正确性，不改变运行时 feature gate；新增云资源、生产发布和真实会员线路均未涉及。
