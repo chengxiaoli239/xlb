@@ -22,6 +22,12 @@ class SandboxPaymentProcessor
                 return $this->failure(409, 'invalid_transition', '当前订单不是本地测试订单');
             }
 
+            $providerOrder = DB::table('provider_payment_orders')->where('merchant_order_id', $orderId)
+                ->lockForUpdate()->first();
+            if ($providerOrder) {
+                return $this->failure(409, 'invalid_transition', '订单已进入 provider 付款流程');
+            }
+
             DB::table('users')->where('id', $userId)->lockForUpdate()->first();
 
             $existing = DB::table('sandbox_payment_events')->where('order_id', $orderId)->first();

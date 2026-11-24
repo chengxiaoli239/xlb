@@ -292,6 +292,49 @@ class ProviderPaymentEventLedgerTest extends TestCase
         $this->assertDatabaseCount('entitlements', 2);
     }
 
+    public function test_direct_sandbox_payment_cannot_bypass_an_existing_provider_session(): void
+    {
+        $orderId = $this->createOrder();
+        $session = $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')
+            ->assertOk()->json('data');
+
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-payment')
+            ->assertStatus(409)->assertJsonPath('error.code', 'invalid_transition');
+
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'pending_test']);
+        $this->assertDatabaseHas('provider_payment_orders', [
+            'merchant_order_id' => $orderId,
+            'status' => 'pending',
+            'entitlement_granted' => false,
+        ]);
+        $this->assertDatabaseCount('sandbox_payment_events', 0);
+        $this->assertDatabaseCount('entitlement_grants', 0);
+        $this->assertDatabaseCount('entitlements', 1);
+
+        $this->webhook($this->signedPaidEvent($session))
+            ->assertOk()->assertJsonPath('data.decision', 'apply');
+        $this->artisan('payments:process-sandbox-fulfillments')->assertSuccessful();
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'paid_test']);
+        $this->assertDatabaseCount('entitlement_grants', 1);
+        $this->assertDatabaseCount('entitlements', 2);
+    }
+
+    public function test_provider_session_cannot_be_created_after_direct_sandbox_payment(): void
+    {
+        $orderId = $this->createOrder();
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-payment')
+            ->assertCreated()->assertJsonPath('data.status', 'paid_test');
+
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-provider-session')
+            ->assertStatus(409)->assertJsonPath('error.code', 'invalid_transition');
+
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'paid_test']);
+        $this->assertDatabaseCount('sandbox_payment_events', 1);
+        $this->assertDatabaseCount('provider_payment_orders', 0);
+        $this->assertDatabaseCount('entitlement_grants', 1);
+        $this->assertDatabaseCount('entitlements', 2);
+    }
+
     public function test_refund_compensation_failure_is_retained_for_retry_without_revoking_entitlement_early(): void
     {
         $orderId = $this->createOrder();
