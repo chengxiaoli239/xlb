@@ -96,6 +96,7 @@ public final class MainActivity extends Activity {
     private boolean routeSyncing;
     private String tunnelState = XlbVpnService.currentState();
     private String tunnelMessage;
+    private String tunnelFailureCode = XlbVpnService.currentFailureCode();
     private String routeName;
     private String activeTunnelRouteName = XlbVpnService.currentRouteName();
     private static final int VPN_PERMISSION_REQUEST = 91;
@@ -104,6 +105,7 @@ public final class MainActivity extends Activity {
         public void onReceive(Context context, Intent intent) {
             tunnelState = intent.getStringExtra(XlbVpnService.EXTRA_STATE);
             tunnelMessage = intent.getStringExtra(XlbVpnService.EXTRA_MESSAGE);
+            tunnelFailureCode = intent.getStringExtra(XlbVpnService.EXTRA_FAILURE_CODE);
             activeTunnelRouteName = intent.getStringExtra(XlbVpnService.EXTRA_ROUTE_NAME);
             if (snapshot != null) render();
         }
@@ -492,6 +494,9 @@ public final class MainActivity extends Activity {
         content.addView(subscriptionSummaryCard(current), spacedParams(0, 10));
         if (tunnelMessage != null) {
             content.addView(text(tunnelMessage, 13, COLOR_ERROR, false), spacedParams(4, 4));
+        }
+        if (tunnelFailureCode != null) {
+            content.addView(text("诊断编号 " + tunnelFailureCode, 11, COLOR_MUTED, false), spacedParams(2, 0));
         }
     }
 

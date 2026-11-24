@@ -58,7 +58,7 @@
 
 | 优先级 | 改进 | 可离线推进 | 需真实节点/额外条件 |
 | --- | --- | --- | --- |
-| P0 | 统一故障分类与证据链：`auth_denied`、`capacity`、`health_stale`、`connect_timeout`、`tls_handshake`、`target_unavailable`、`quota_unavailable`、`client_tunnel`；关联脱敏 node/route/config/request ID 与时间 | 事件模型、日志脱敏规则、模拟错误映射、Feature/Go 单测 | 真实生产事件字段和监控接入需部署审查 |
+| P0 | 统一故障分类与证据链：`auth_denied`、`capacity`、`health_stale`、`connect_timeout`、`tls_handshake`、`target_unavailable`、`quota_unavailable`、`client_tunnel`；关联脱敏 node/route/config/request ID 与时间 | Android 现提供仅含安全枚举的客户端诊断编号，区分系统 VPN 权限、profile 不兼容、线路候选为空、启动超时、连接验证未通过、清理待完成、系统隧道不可用和未知启动失败；未回显异常原文。仍需离线补 API 授权/会员 provisioning 状态到 support code 的映射与稳定契约测试 | 真实生产事件字段、跨服务 request ID 关联和监控接入需部署审查；上传遥测另需隐私告知与用户同意 |
 | P0 | 把“看起来不稳定”拆成订阅、授权、握手、出口、DNS、流量和撤权状态；未知仍显示未知，不把健康探针通过等同隧道健康 | 文案/状态机/诊断摘要 | 用真实用户同意的脱敏事件验证可诊断性 |
 | P1 | 将 M10 fail-closed 探测合同接入真实 Agent executor 与受控 scheduler；保留连续失败/恢复熔断、CAS 和独立状态 TTL | HTTP/TLS transport、driver、CAS、一次性命令和条件 15 秒调度均有离线测试；本地 Feature 已串联合成连续失败/恢复阈值、持久熔断状态与账号级 profile 过滤，确认不健康时不发线路、未达到恢复阈值前仍 fail-closed，且不污染 `nodes.health_status` 与 `last_health_check_at` | 必须有获批节点身份/端点/证书与真实数据面 canary 目标；先验证误报阈值，再考虑开启真实路由过滤 |
 | P1 | route failover：`AUTO/url-test`、`fallback`、手动选择按版本化线路发布；故障节点停止新分配，旧线路受控 drain/rollback | local/testing 账号级 profile 的 Mihomo group 结构、route version 候选绑定和 pinned Mihomo parser 已验证；本地回归覆盖健康变化后下一次 profile 拉取剔除候选、管理 API 发布/回滚时订阅候选同步、canary 无健康候选时回退仍健康的 published route，以及拒绝把不健康上一版本重新发布。测试不执行 Mihomo 网络探测、不切换已建立隧道，也不测客户端更新周期或切换时延 | 最少两台隔离节点、持续故障注入、切换时延与 peer 撤销回执 |

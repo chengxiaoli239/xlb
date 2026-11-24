@@ -42,6 +42,7 @@ public final class XlbVpnService extends VpnService {
     public static final String EXTRA_MEMBER_GRANT_HANDOFF_ID = "member_grant_handoff_id";
     public static final String EXTRA_STATE = "state";
     public static final String EXTRA_MESSAGE = "message";
+    public static final String EXTRA_FAILURE_CODE = "failure_code";
     public static final String INTERNAL_PERMISSION = "com.xlb.vpn.permission.INTERNAL";
     public static final String STATE_CONNECTING = "connecting";
     public static final String STATE_CONNECTED = "connected";
@@ -49,6 +50,7 @@ public final class XlbVpnService extends VpnService {
     public static final String STATE_ERROR = "error";
     private static volatile String currentState = STATE_DISCONNECTED;
     private static volatile String currentRouteName = "";
+    private static volatile String currentFailureCode;
     private static volatile boolean currentTunnelIsMember;
 
     private static final String CHANNEL_ID = "xlb_vpn";
@@ -71,6 +73,10 @@ public final class XlbVpnService extends VpnService {
 
     public static String currentRouteName() {
         return currentRouteName;
+    }
+
+    public static String currentFailureCode() {
+        return currentFailureCode;
     }
 
     public static boolean currentTunnelIsMember() {
@@ -532,8 +538,10 @@ public final class XlbVpnService extends VpnService {
 
     private void publish(String state, String message) {
         currentState = state;
+        currentFailureCode = STATE_ERROR.equals(state) ? TunnelFailureDiagnostics.codeFor(message) : null;
         Intent intent = new Intent(ACTION_STATE).setPackage(getPackageName()).putExtra(EXTRA_STATE, state);
         if (message != null) intent.putExtra(EXTRA_MESSAGE, message);
+        if (currentFailureCode != null) intent.putExtra(EXTRA_FAILURE_CODE, currentFailureCode);
         if (!currentRouteName.isEmpty()) intent.putExtra(EXTRA_ROUTE_NAME, currentRouteName);
         sendBroadcast(intent, INTERNAL_PERMISSION);
     }
