@@ -191,7 +191,8 @@ public final class PlatformApiMemberGrantInstrumentedTest {
                 assertFalse("denied permission callback marked the service as a member tunnel",
                         XlbVpnService.currentTunnelIsMember());
                 assertEquals("denied permission callback reported a connected tunnel", 0, connectedStates.get());
-                assertFalse("fake API server observed an invalid request", server.hasFailure());
+                assertFalse("fake API server observed an invalid request: " + server.failureMessage(),
+                        server.hasFailure());
             }
         } finally {
             MemberTunnelGrantStore.clear();
@@ -201,6 +202,100 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             if (installationId != null) MemberTunnelGrantAvdFixture.deleteInstallationKey(installationId);
             assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
             server.close();
+        }
+    }
+
+    @Test
+    public void approvedPermissionCallbackWithRevokedAuthorizationDoesNotPublishGrantOrServiceState()
+            throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SharedPreferences preferences = context.getSharedPreferences("secure_client_state", Context.MODE_PRIVATE);
+        assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+        FakeMemberApi server = new FakeMemberApi(MemberTunnelGrantAvdFixture.trustedSystemCaPem(), 4175);
+        SecureSessionStore sessionStore = new SecureSessionStore(context);
+        sessionStore.updateCookie("xlb_session", "isolated-member-session", false);
+        PlatformApi api = new PlatformApi("http://127.0.0.1:4175", sessionStore);
+        PlatformApi.MemberAccount account = new PlatformApi.MemberAccount(
+                "member-avd", "Disposable member", "member@example.invalid", "member");
+        AtomicInteger connectedStates = new AtomicInteger();
+        AtomicInteger serviceStateEvents = new AtomicInteger();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context receiverContext, Intent intent) {
+                serviceStateEvents.incrementAndGet();
+                if (XlbVpnService.STATE_CONNECTED.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                    connectedStates.incrementAndGet();
+                }
+            }
+        };
+        registerReceiver(context, receiver);
+        MemberTunnelGrantStore.clear();
+        String installationId = null;
+
+        try {
+            PlatformApi.ClientSnapshot initialSnapshot = api.synchronize(account);
+            MemberTunnelGrant originalGrant = api.verifiedMemberTunnelGrant();
+            installationId = sessionStore.installationId();
+            assertEquals(PlatformApi.NodeAuthorizationStatus.READY, initialSnapshot.nodeAuthorizationStatus);
+            assertNotNull("test setup did not produce a verified member grant", originalGrant);
+
+            try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+                assertTrue("MainActivity did not synchronize the fake member API",
+                        awaitApiAuthorizationCount(server, 2));
+                scenario.onActivity(activity -> {
+                    setActivityField(activity, "pendingMemberVpnPermission", true);
+                    setActivityField(activity, "pendingMemberGrant", originalGrant);
+                });
+
+                scenario.recreate();
+
+                assertTrue("recreated MainActivity did not finish its initial authorization sync",
+                        awaitActivitySnapshot(scenario));
+                int authorizationsBeforeCallback = server.authorizationRequestCount();
+                assertTrue("fake member API did not revoke the device", api.removeDevice(
+                        MemberTunnelGrantAvdFixture.DEVICE_ID));
+                int serviceEventsBeforeCallback = serviceStateEvents.get();
+                scenario.onActivity(activity -> {
+                    assertTrue("permission request marker was not restored",
+                            readBooleanField(activity, "pendingMemberVpnPermission"));
+                    assertNull("process-local grant was incorrectly restored", readField(activity, "pendingMemberGrant"));
+                    invokePermissionResult(activity, Activity.RESULT_OK);
+                });
+
+                assertTrue("approved callback did not request fresh authorization",
+                        awaitApiAuthorizationCount(server, authorizationsBeforeCallback + 1));
+                assertTrue("Activity did not apply the revoked fresh authorization",
+                        awaitActivityAuthorizationStatus(scenario, PlatformApi.NodeAuthorizationStatus.UNAVAILABLE));
+                scenario.onActivity(activity -> {
+                    assertFalse("revoked authorization retained the permission marker",
+                            readBooleanField(activity, "pendingMemberVpnPermission"));
+                    assertNull("revoked authorization retained a process-local grant",
+                            readField(activity, "pendingMemberGrant"));
+                });
+                InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+                assertNull("device removal retained a cached member grant", api.verifiedMemberTunnelGrant());
+                assertFalse("revoked authorization published a service grant",
+                        MemberTunnelGrantStore.hasPendingHandoff());
+                assertFalse("revoked authorization marked the service as a member tunnel",
+                        XlbVpnService.currentTunnelIsMember());
+                assertEquals("revoked authorization caused a VPN service state transition",
+                        serviceEventsBeforeCallback, serviceStateEvents.get());
+                assertEquals("revoked authorization reported a connected tunnel", 0, connectedStates.get());
+                assertFalse("fake API server observed an invalid request: " + server.failureMessage(),
+                        server.hasFailure());
+            }
+        } finally {
+            try {
+                MemberTunnelGrantStore.clear();
+                sessionStore.clearSession();
+                context.unregisterReceiver(receiver);
+                context.stopService(new Intent(context, XlbVpnService.class));
+                if (installationId != null) MemberTunnelGrantAvdFixture.deleteInstallationKey(installationId);
+                assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+            } finally {
+                server.close();
+            }
         }
     }
 
@@ -394,6 +489,23 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         return false;
     }
 
+    private static boolean awaitActivityAuthorizationStatus(ActivityScenario<MainActivity> scenario,
+            PlatformApi.NodeAuthorizationStatus expectedStatus) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            AtomicReference<PlatformApi.NodeAuthorizationStatus> status = new AtomicReference<>();
+            scenario.onActivity(activity -> {
+                Object value = readField(activity, "snapshot");
+                if (value instanceof PlatformApi.ClientSnapshot) {
+                    status.set(((PlatformApi.ClientSnapshot) value).nodeAuthorizationStatus);
+                }
+            });
+            if (status.get() == expectedStatus) return true;
+            Thread.sleep(50);
+        }
+        return false;
+    }
+
     private static void setActivityField(MainActivity activity, String name, Object value) {
         try {
             java.lang.reflect.Field field = MainActivity.class.getDeclaredField(name);
@@ -516,7 +628,7 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         private void handle(Socket socket) throws Exception {
             InputStream input = socket.getInputStream();
             String requestLine = readLine(input);
-            if (requestLine == null) throw new IOException("missing request line");
+            if (requestLine == null) return;
             String[] requestParts = requestLine.split(" ", 3);
             if (requestParts.length != 3) throw new IOException("malformed request line");
             String method = requestParts[0];

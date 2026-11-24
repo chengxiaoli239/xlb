@@ -174,6 +174,11 @@ run_instrumentation 'Running authorization refresh and pending-grant lifecycle t
     -e disposable_avd true \
     -e class com.xlb.vpn.tunnel.PlatformApiMemberGrantInstrumentedTest#authorizedSyncGrantIsConsumedByClosedServiceGateAndClearedOnLogout \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
+run_instrumentation 'Running permission callback with revoked fresh authorization test...' \
+    "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+    -e disposable_avd true \
+    -e class com.xlb.vpn.tunnel.PlatformApiMemberGrantInstrumentedTest#approvedPermissionCallbackWithRevokedAuthorizationDoesNotPublishGrantOrServiceState \
+    com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
 run_instrumentation 'Running profile digest rejection test...' \
     "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
