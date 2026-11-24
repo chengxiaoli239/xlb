@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-24）
 
-- **M10 路线回滚拒绝不健康的上一版本（2026-11-24，本地 SQLite）**：新增 API Feature 回归：发布版本 2 后把版本 1 的候选标为 unhealthy，再请求回滚，服务返回 `route_nodes_not_ready`；事务保留版本 2 published、版本 1 draining，实际解析继续选择版本 2。全套 Laravel 258 项中 257 passed、1 个既有 skip、2,299 assertions，定向用例 1/1、8 assertions；Pint 与 PHP syntax 通过。该防护确保控制面不会把不健康节点重新发布，但不代表已建立连接迁移、真实故障恢复或流量切换验收。
+- **M10 路线回滚拒绝不健康的上一版本（2026-11-24，本地与 hosted CI）**：新增 API Feature 回归：发布版本 2 后把版本 1 的候选标为 unhealthy，再请求回滚，服务返回 `route_nodes_not_ready`；事务保留版本 2 published、版本 1 draining，实际解析继续选择版本 2。全套 Laravel 258 项中 257 passed、1 个既有 skip、2,299 assertions，定向用例 1/1、8 assertions；Pint 与 PHP syntax 通过。主线 CI `45298502142` 六个 jobs 全绿，含 Laravel、Android、Go/Agent、容器 smoke、ops 与 SBOM provenance。该防护确保控制面不会把不健康节点重新发布，但不代表已建立连接迁移、真实故障恢复或流量切换验收。
 
 - **M10 canary 全部无健康候选时回退稳定线路（2026-11-24，本地与 hosted CI）**：复现 test-scope 100% canary 已选中但其唯一候选变为 unhealthy 时 `resolve()` 返回无线路；修复为 canary 无任何健康候选时回退到仍有健康候选的 published 版本。新增 Feature 同时断言 canary 健康时仍先选 canary，候选失效后才回退到版本 1 和其节点。Laravel 全套 257 项中 256 passed、1 个既有 skip、2,291 assertions；Pint 与 PHP syntax 通过。主线 CI `45296893259` 六个 jobs 全绿，含 PHP/Laravel、Android、Node Agent、容器 smoke、ops 与 SBOM provenance。该回退仅影响后续账号级线路解析/profile，不修改 canary 发布状态、已建立隧道、逐设备 peer、撤权或节点 drain 状态；无真实节点故障注入与流量回执，不能称为真实故障切换或断流验收。
 
