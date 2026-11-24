@@ -77,6 +77,29 @@ class SandboxPaymentTest extends TestCase
         $this->assertDatabaseCount('subscriptions', 1);
     }
 
+    public function test_distinct_confirmed_orders_append_entitlements_and_reuse_one_subscription(): void
+    {
+        $subscription = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data');
+        $currentEnd = DB::table('entitlements')->where('id', 'entitlement-member-annual')->value('ends_at');
+        $firstOrderId = $this->createOrder();
+        $secondOrderId = $this->createOrder();
+
+        $firstPayment = $this->postJson('/api/v1/me/orders/'.$firstOrderId.'/sandbox-payment')->assertCreated();
+        $secondPayment = $this->postJson('/api/v1/me/orders/'.$secondOrderId.'/sandbox-payment')->assertCreated();
+        $firstGrant = DB::table('entitlement_grants')->where('order_id', $firstOrderId)->first();
+        $secondGrant = DB::table('entitlement_grants')->where('order_id', $secondOrderId)->first();
+
+        $this->assertSame($currentEnd, $firstGrant->starts_at);
+        $this->assertSame($firstGrant->ends_at, $secondGrant->starts_at);
+        $this->assertSame($subscription['id'], $firstPayment->json('data.subscription.id'));
+        $this->assertSame($subscription['id'], $secondPayment->json('data.subscription.id'));
+        $this->assertSame($subscription['url'], $firstPayment->json('data.subscription.url'));
+        $this->assertSame($subscription['url'], $secondPayment->json('data.subscription.url'));
+        $this->assertDatabaseCount('subscriptions', 1);
+        $this->assertDatabaseCount('entitlement_grants', 2);
+        $this->assertDatabaseCount('sandbox_payment_events', 2);
+    }
+
     public function test_expired_sandbox_payment_is_recorded_for_review_without_granting_entitlement(): void
     {
         $orderId = $this->createOrder();
@@ -123,10 +146,10 @@ class SandboxPaymentTest extends TestCase
         $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'pending_test']);
     }
 
-    private function createOrder(): string
+    private function createOrder(string $planId = 'monthly'): string
     {
         return $this->withHeader('Idempotency-Key', (string) Str::uuid())
-            ->postJson('/api/v1/me/orders', ['plan_id' => 'monthly'])
+            ->postJson('/api/v1/me/orders', ['plan_id' => $planId])
             ->assertCreated()
             ->json('data.id');
     }

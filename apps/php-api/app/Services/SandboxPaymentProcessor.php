@@ -22,6 +22,8 @@ class SandboxPaymentProcessor
                 return $this->failure(409, 'invalid_transition', '当前订单不是本地测试订单');
             }
 
+            DB::table('users')->where('id', $userId)->lockForUpdate()->first();
+
             $existing = DB::table('sandbox_payment_events')->where('order_id', $orderId)->first();
             if ($existing) {
                 if ($existing->status === 'accepted_test') {
