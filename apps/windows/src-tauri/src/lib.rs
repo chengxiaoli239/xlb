@@ -908,6 +908,16 @@ mod tests {
                 let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n{body}");
                 stream.write_all(response.as_bytes()).unwrap();
             }
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let count = stream.read(&mut request).unwrap();
+            let request_text = String::from_utf8_lossy(&request[..count]);
+            let path = request_text.lines().next().unwrap_or_default().to_owned();
+            paths.push(path.clone());
+            assert!(path.contains("api/v1/auth/session"));
+            let body = "{\"message\":\"Unauthenticated.\"}";
+            let response = format!("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            stream.write_all(response.as_bytes()).unwrap();
             paths
         });
 
@@ -930,6 +940,11 @@ mod tests {
         assert!(paths[5].contains("device-bindings/authorize"));
         assert!(paths[6].contains("me/devices"));
         assert!(!paths[6].contains("device-bindings"));
+
+        assert!(client.restore().await.unwrap().is_none());
+        assert!(client.verified_member_device_proof.is_none());
+        assert!(store.load().unwrap().is_none());
+        assert!(server.join().unwrap()[7].contains("api/v1/auth/session"));
     }
 
     #[test]
