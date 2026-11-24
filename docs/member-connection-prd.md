@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **Android 隔离会员 grant 经系统 TUN 回显（2026-11-24，专用 AVD）**：新增仅供 Android Debug instrumentation 使用的隔离服务 action，要求显式 test action 且 `BuildConfig.DEBUG=true`；release 调用仍受关闭的 `MEMBER_PROOF_BRIDGE_INTEGRATED=false` 拒绝。专用 API 35 `xlb-m9-recovery` AVD 以临时 Keystore P-256 身份、本地构造的 server-ready grant 和 loopback Node Agent fixture，实跑 `XlbVpnService` 的真实 MemberTunnelSession、mTLS proof bridge、Mihomo 与 Android `VpnService.Builder` TUN；向保留测试地址 `192.0.2.1:443` 发送固定 TCP 字节，经隔离 Agent echo 原样返回。断言不发布 `CONNECTED`，停止后 VPN network 与 pending grant 清理。新 instrumentation 1/1、Android JVM、AndroidTest 编译、Debug APK、lint 通过；完整 `test-anonymous-recovery-emulator.sh` 全通过。Harness 现在拒绝 `OK (0 tests)`，避免错误类名被当作成功。该证据只覆盖隔离 Debug AVD、合成 peer 和本地 echo，不代表真实会员 API、节点、真实流量撤权回执、两台真机复制拒绝或生产可连接；未触及实体手机、AWS 或云资源。下一步仍需生产 member profile/节点 CA/mTLS 运行材料与匹配回执，再进行双真机验收；production gate 保持关闭。
+
 - **首发试点与规模化发布门拆分（2026-11-24）**：按已确认的 Android + 网站/API 单服务商受控试点范围，修订总体计划的优先级和放行条件。真实会员隧道、严格设备限制与节点撤权回执、首发合规、受保护签名候选、获批 staging、最小运行监控和回滚仍是试点硬门；批量节点编排、热备池、规模化容量模型与更高并发 SLO 移入后续扩大规模门，避免将规模化工程误列为初版前置。未放宽设备限制、真实支付或生产发布边界。下一步继续推进 Android/Web/API 可离线关键路径，等待责任人和外部运行材料并行到位。
 
 - **本地沙箱支付/退款 outbox 自动调度（2026-11-24）**：`routes/console.php` 现在只在 `local/testing` 每分钟调度 `payments:process-sandbox-fulfillments` 与 `payments:process-sandbox-refunds`，两条命令自身仍有环境保护；production `schedule:list` 不包含沙箱 worker。新增 schedule 子进程回归验证 local、testing 启用且 production 不注册，定向 3/3、9 assertions；Laravel 全套 261 项中 260 passed、1 skipped、2,310 assertions，Pint 通过。本地 webhook/outbox 无需人工逐条执行命令即可由 scheduler 消费，但本机实测只确认调度注册和 worker 已有的沙箱状态机测试，不代表 staging scheduler 常驻、真实商户支付/退款或真实节点撤权回执。

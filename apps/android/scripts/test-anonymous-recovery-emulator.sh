@@ -46,7 +46,7 @@ run_instrumentation() {
     if ! "$@" 2>&1 | tee "$INSTRUMENTATION_LOG"; then
         fail "$description failed to launch."
     fi
-    if ! grep -Eq 'OK \([0-9]+ tests?\)' "$INSTRUMENTATION_LOG"; then
+    if ! grep -Eq 'OK \([1-9][0-9]* tests?\)' "$INSTRUMENTATION_LOG"; then
         fail "$description reported an instrumentation failure."
     fi
 }
@@ -163,6 +163,11 @@ run_instrumentation 'Running server-authorized member tunnel session test...' \
     "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
     -e class com.xlb.vpn.tunnel.MemberTunnelSessionInstrumentedTest#serverAuthorizedGrantLoadsAuthenticatedProfileAndClosesNativeBridgeResources \
+    com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
+run_instrumentation 'Running isolated Android system TUN and proof-bridge echo test...' \
+    "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+    -e disposable_avd true \
+    -e class com.xlb.vpn.tunnel.MemberTunnelTunInstrumentedTest#authorizedFixturePeerCarriesTcpEchoThroughSystemTunWithoutConnectedState \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
 run_instrumentation 'Running authorization refresh and pending-grant lifecycle test...' \
     "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \

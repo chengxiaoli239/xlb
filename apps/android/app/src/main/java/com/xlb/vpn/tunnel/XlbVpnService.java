@@ -34,6 +34,8 @@ import java.util.concurrent.TimeoutException;
 public final class XlbVpnService extends VpnService {
     public static final String ACTION_START = "com.xlb.vpn.START_TUNNEL";
     public static final String ACTION_START_MEMBER = "com.xlb.vpn.START_MEMBER_TUNNEL";
+    /** Isolated AVD-only path. It never publishes CONNECTED and is rejected by release builds. */
+    public static final String ACTION_START_ISOLATED_MEMBER_TEST = "com.xlb.vpn.START_ISOLATED_MEMBER_TUNNEL_TEST";
     public static final String ACTION_STOP = "com.xlb.vpn.STOP_TUNNEL";
     public static final String ACTION_STATE = "com.xlb.vpn.TUNNEL_STATE";
     public static final String EXTRA_PROFILE = "profile";
@@ -94,7 +96,8 @@ public final class XlbVpnService extends VpnService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_START_MEMBER.equals(intent.getAction())) {
+        boolean isolatedMemberTest = intent != null && ACTION_START_ISOLATED_MEMBER_TEST.equals(intent.getAction());
+        if (intent != null && (ACTION_START_MEMBER.equals(intent.getAction()) || isolatedMemberTest)) {
             memberGrantHandoffId = intent.getLongExtra(EXTRA_MEMBER_GRANT_HANDOFF_ID, 0);
         } else if (memberGrantHandoffId == 0) {
             memberGrantHandoffId = MemberTunnelGrantStore.pendingHandoffId();
@@ -106,7 +109,7 @@ public final class XlbVpnService extends VpnService {
             worker.execute(() -> stopTunnel(attempt));
             return START_NOT_STICKY;
         }
-        if (ACTION_START_MEMBER.equals(intent.getAction())) {
+        if (ACTION_START_MEMBER.equals(intent.getAction()) || isolatedMemberTest) {
             long handoffId = intent.getLongExtra(EXTRA_MEMBER_GRANT_HANDOFF_ID, 0);
             MemberTunnelGrant grant = MemberTunnelGrantStore.consume(handoffId);
             if (grant == null) {
@@ -127,7 +130,7 @@ public final class XlbVpnService extends VpnService {
                 return START_NOT_STICKY;
             }
             currentRouteName = "";
-            if (!MemberTunnelAdmissionPolicy.mayStartMemberTunnel()) {
+            if (!MemberTunnelAdmissionPolicy.mayStartMemberTunnel(BuildConfig.DEBUG, isolatedMemberTest)) {
                 rejectStart("会员安全线路尚未接入", handoffId);
                 return START_NOT_STICKY;
             }
@@ -136,7 +139,7 @@ public final class XlbVpnService extends VpnService {
             createChannel();
             promoteForeground("正在连接");
             publish(STATE_CONNECTING, null);
-            worker.execute(() -> startMemberTunnel(grant, attempt, handoffId));
+            worker.execute(() -> startMemberTunnel(grant, attempt, handoffId, isolatedMemberTest));
             return START_NOT_STICKY;
         }
         if (!ACTION_START.equals(intent.getAction())) {
@@ -246,7 +249,7 @@ public final class XlbVpnService extends VpnService {
         }
     }
 
-    private void startMemberTunnel(MemberTunnelGrant grant, int attempt, long handoffId) {
+    private void startMemberTunnel(MemberTunnelGrant grant, int attempt, long handoffId, boolean isolatedMemberTest) {
         if (!tunnelAttempts.isCurrent(attempt)) return;
         if (!closeMemberSession()) {
             tunnelAttempts.runIfCurrent(attempt, () -> {
@@ -255,7 +258,7 @@ public final class XlbVpnService extends VpnService {
             });
             return;
         }
-        MemberTunnelSession session = new MemberTunnelSession(memberTunnelRuntime(grant, attempt));
+        MemberTunnelSession session = new MemberTunnelSession(memberTunnelRuntime(grant, attempt, isolatedMemberTest));
         synchronized (memberSessionLock) {
             if (!tunnelAttempts.isCurrent(attempt)) return;
             memberSession = session;
@@ -289,6 +292,7 @@ public final class XlbVpnService extends VpnService {
         });
         try {
             operation.get(20, TimeUnit.SECONDS);
+            if (isolatedMemberTest) return;
             boolean published = tunnelAttempts.runIfCurrent(attempt, () -> {
                 publish(STATE_CONNECTED, null);
                 promoteForeground("已连接");
@@ -312,7 +316,8 @@ public final class XlbVpnService extends VpnService {
         }
     }
 
-    private MemberTunnelSession.Runtime memberTunnelRuntime(MemberTunnelGrant grant, int attempt) {
+    private MemberTunnelSession.Runtime memberTunnelRuntime(MemberTunnelGrant grant, int attempt,
+            boolean isolatedMemberTest) {
         return new MemberTunnelSession.Runtime() {
             private DeviceProofCertificate certificate;
             private DeviceProofCertificate.BridgeCredentials credentials;
@@ -348,6 +353,7 @@ public final class XlbVpnService extends VpnService {
 
             @Override
             public void verifyTunnel() throws Exception {
+                if (isolatedMemberTest) return;
                 if (!TunnelVerifier.verify(XlbVpnService.this::probeVpnRoute,
                         () -> !tunnelAttempts.isCurrent(attempt), Thread::sleep, 5)) {
                     throw new IOException("线路连接或网络验证失败");

@@ -12,4 +12,10 @@ public final class MemberTunnelAdmissionPolicy {
     public static boolean mayStartMemberTunnel() {
         return MEMBER_PROOF_BRIDGE_INTEGRATED;
     }
+
+    /** Allows only an explicit fixture run in a debug build without changing the release admission gate. */
+    public static boolean mayStartMemberTunnel(boolean debugBuild, boolean isolatedTestRequest) {
+        if (isolatedTestRequest) return debugBuild;
+        return MEMBER_PROOF_BRIDGE_INTEGRATED;
+    }
 }
