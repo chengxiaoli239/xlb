@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **四象限与一周冲刺排序（2026-11-25）**：全局四象限规范已在知识库 `10-全局/规范/AI项目四象限与持续推进.md`，本项目滚动计划新增 §0.4 模块排序和并行边界。最大技术工作量仍是 Android M8/M6 服务端授权→proof bridge→Mihomo/TUN→节点 peer→撤权回执闭环；其余主要上线耗时来自真实节点、商户沙箱、合规、受保护签名环境和 staging 等外部日历等待。逐项 AI 主动工时没有可靠记录，因此不将已过 2 天 12 小时直接换算成编码工时或完成率。Android 隧道失败诊断的等效主线提交 `5be4a7a` 对应 CI `45316986228` 六个 jobs 全绿，API 授权失败诊断的等效主线提交 `88f5f0c` 对应 CI `45322097403` 六个 jobs 全绿；当前 Android 诊断 worktree 的五个提交均为主线等效 patch，不重复开发。当前本机只有 JDK 26，Android Gradle Kotlin DSL 在解析 `26.0.1` 时失败，故本轮未获得本机 Android 测试结果；主线 CI 是该阶段的验收证据。具体 Q1–Q4、预计区间、责任角色与可并行工作见 [上线工程总体规划 §0.4](launch-engineering-master-plan.md)。
+
 - **首发放行外部状态复核（2026-11-25，只读）**：使用 GitHub API 只读查询确认仓库 Environment 数量为 0，`android-release-candidate` 受保护环境当前不存在或不可见，签名候选仍无法运行；未查询 secrets/variables、未创建 Environment、未写配置。经项目固定包装器运行 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 session expired；本轮没有重试登录、没有继续做 AWS 资源盘点，也没有任何云写操作。后续节点窗口前需用户本人重新 `aws login`，再由获批角色重新只读盘点与审核 plan；签名环境需仓库管理员创建 main-only Environment、设置审批人，凭据负责人经受控通道配置正式签名材料/API origin。用户已表示稍后提供外部放行负责人姓名；当前仍仅按角色记录，不假设已认领。以上不阻断离线代码与测试，但构成真实会员节点和候选放行的外部前置。
 
 - **Web 会员订单取消 UI 回归（2026-11-25，本机 Vitest 与生产构建）**：新增会员订单页取消待支付测试订单的 UI integration regression，验证显式确认后仅调用 local/testing `/api/v1/me/orders/{id}/cancel`，订单详情与列表均更新为 `cancelled_test`，订单列表在取消后重新请求，已取消订单不再提供模拟付款入口。Web 全套 Vitest 2 files / 9 tests 通过，TypeScript build 与 Vite production build 通过，diff check 通过。该测试使用 mock API，不代表真实商户支付、数据库并发或节点撤权；没有外部资金调用。
@@ -107,7 +109,7 @@
 
 - **M11 Docker 忽略规则自动回归（2026-11-24，本机与 hosted CI）**：新增 `ops/test_docker_context.py`，在临时根构建上下文逐项尝试将 10 种合成环境凭据/运行数据 `COPY` 到 `scratch`，确认 Docker 因 `.dockerignore` 排除而拒绝；测试只使用非秘密 sentinel。ops 全套 54/54、Python 编译与 `git diff --check` 通过；主线 CI `45261821374` 中 Docker 忽略规则回归、PHP/Web 镜像构建及全套其他 jobs 均成功。
 
-- **M6/AWS 外部会话状态复核（2026-11-24，只读，后续状态已更新）**：较早调用项目 `ops/aws-cli` 包装器返回 session expired；本轮后续复查 STS 已有效，并完成 us-west-2 实验资源只读盘点，当前结果见本节较新的“M6 / AWS 会话与隔离资源只读复核”。此前过期结果仅保留为同日历史观察，不再作为当前阻塞。真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供；AWS 资源未写入。
+- **M6/AWS 外部会话状态复核（2026-11-24，历史记录）**：较早调用项目 `ops/aws-cli` 包装器返回 session expired；当日后续复查 STS 曾恢复有效并完成 us-west-2 实验资源只读盘点。该结果只代表 11-24 状态。2026-11-25 最新复核见开发进度顶部：STS 再次过期，当前 AWS 资源状态未复查；用户本人重新登录前不运行后续 AWS 盘点。真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供；全程没有云资源写入。
 
 - **M11 Docker 构建上下文与 PHP/Web 镜像 CI 验收（2026-11-24，hosted run 通过）**：仓库根 `.dockerignore` 排除根级/嵌套 `.env`、Composer/npm/netrc 凭据、AWS/SSH 私有配置、私钥/密钥库、SQLite、依赖/build、Laravel runtime storage/cache 与 `ops/.state`；10 个本地 Docker 隔离构建夹具确认这些输入不可被 `COPY`。PHP Composer 阶段增加仅供构建使用的 `unzip` 后，hosted CI `45259345222` 的 PHP 与 Web 镜像构建、Android build/signing-config、Laravel/API/Web/扩展、Go、ops、SBOM provenance 全部通过。该 CI 只构建镜像，不部署 staging/production、不发布制品；本机 Docker Hub 仍返回 OCI config descriptor 错误。没有读取或提交任何真实凭据。
 
@@ -190,7 +192,7 @@
 | 其他客户端 | 首发决策不要求 iOS、Windows、macOS、扩展或多云放量 | 这些平台不构成当前 Android + 网站/API 受控试点完成证据 | 作为后续独立阶段排期，不阻塞当前首发范围 |
 | 签名发布、合规与运营 | 未达到正式上线放行 | 本地 Debug/Release build 不是签名发布；地区/用途、服务条款、隐私与日志政策、退款投诉、值班回滚和责任人放行仍需逐项验证 | 可离线准备发布/回滚清单；正式放行需要对应责任人提供签名制品、书面审查与试运行结论 |
 
-**当前顺序与外部依赖**：xlb-ops 会话现已有效且只读盘点完成，但 M5/M6 lab 栈和节点资源均不存在；2026-11-21 合成 peer live harness 已通过，当前没有需重复部署的协议变更，所以不为重复测试重建资源。节点责任人还需提供真实 DataPlane listener/反向代理路径、每节点 HTTPS origin/CA 与可部署 mTLS runtime；或由用户明确批准新的协议复测范围。满足其一后再生成有界计划、复核 TTL/费用并按授权执行。此后才能做节点协议复测，再接两台真机验证登录、授权、线路、退款撤权及匹配节点回执。支付 fake channel、Web/Android 离线校验、发布清单整理可并行，不以真实商户资料或云会话为由暂停。当前上线规划仍为 2027-02 至 2027-05 的低置信区间，不承诺单日，也不代表已可发布。
+**当前顺序与外部依赖（2026-11-25 更新）**：11-25 经 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 检查，STS 已过期；11-24 的只读盘点确认实验标签资源当日无活动项，是历史快照，不视为当前 AWS 状态。用户本人重新 `aws login` 前不继续做 AWS 资源盘点或计划，期间不影响离线开发。GitHub 环境只读 API 当前返回 Environment 数量 0，`android-release-candidate` 尚不可运行。M5/M6 lab 栈和节点资源最近一次历史盘点未见活动项；2026-11-21 合成 peer live harness 已通过，当前没有需重复部署的协议变更，所以不为重复测试重建资源。节点责任人还需提供真实 DataPlane listener/反向代理路径、每节点 HTTPS origin/CA 与可部署 mTLS runtime，以及匹配的撤权/最终流量回执；或由用户明确批准新的协议复测范围。满足其一后再生成有界计划、复核 TTL/费用并按授权执行，随后安排两台现有真机验证登录、授权、线路、退款撤权及匹配节点回执。支付 fake channel、Web/Android 离线校验、发布清单整理可并行，不以真实商户资料或云会话为由暂停。当前没有可靠受控试点上线日期；此前 2027-02 至 2027-05 是低置信、已撤销为当前预测的历史估计，不承诺单日，也不代表已可发布。
 
 - **M8 Node Agent member bridge trust descriptor artifact（2026-11-23，本机离线验收）**：扩展 Go 生产形状 `ProfileArtifact`，使受信配置创建的 renderer 必须同时注入 node data-plane HTTPS origin 与有效 CA PEM；profile 请求从 `PeerStore` 受信 renderer 配置生成，Go 校验 HTTPS origin、CA constraints/keyCertSign/有效期、响应 descriptor 与可信请求完全相同，profile 内容仍只含 loopback SOCKS bridge。补充非法 origin、伪造 CA 与 artifact descriptor 篡改测试。Node Agent `go test -race ./...` 113 项、vet/build 通过；PHP→Go 本地 mTLS provisioning Feature 8 项/92 assertions 通过。此阶段仅实现 Node Agent artifact 数据契约，不启用 executable renderer；PHP 目前尚未校验/持久化/返回 descriptor，Android grant 无法由当前生产 API 创建。示例 endpoint 与 CA 仅测试临时材料，不对应真实节点；生产 gate 仍关闭。下一步在 PHP acknowledgement/persistence/authorization response 中校验 endpoint 与管理员信任边界、加密保存 CA 并在授权响应输出，缺少受信 node runtime 实际 endpoint/CA 时继续失败关闭。
 
