@@ -131,7 +131,7 @@ M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求�
 
 ### 0.3 一周 AI 冲刺目标与整体放行时间分开估计（2026-11-24）
 
-此前“3–6 个月、约 2027-02 至 2027-05”是包含节点、商户、合规、staging 和试运行等待的整体日历估计，并非 AI 编码工期。该估计假设外部材料在约两周内到位；目前 AWS 会话已过期、Android signed-candidate GitHub Environment 未创建或不可见，真实节点材料、商户沙箱契约和合规书面意见也未到位，因此这个日历区间的前提不成立，撤销为当前上线预测。
+此前“3–6 个月、约 2027-02 至 2027-05”是包含节点、商户、合规、staging 和试运行等待的低置信整体日历估计，并非 AI 编码工期。其“两周内外部材料到位”前提未满足，已撤销为当前上线预测。当前按 §0.2 以 2026-12-01 为一周冲刺检查点，覆盖 Android + 网站/API 单服务商受控试点的代码、离线验收和候选审查；受控试点能否按期上线，仍取决于真实节点、商户沙箱、合规、受保护签名 Environment 和 staging 放行门。
 
 | 交付范围 | 当前估计 | 说明 |
 | --- | --- | --- |
@@ -139,7 +139,7 @@ M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求�
 | Android + Web/API 单服务商受控试点 | 暂无可靠日历日期 | 需真实 member profile、节点 endpoint/CA/mTLS 与撤权回执，真实商户沙箱/回调契约、合规意见、受保护签名环境、staging/回滚/监控和试运行观察。取得可用材料和责任人日期后，再按实际验收步骤重算 |
 | Android、Windows、macOS、iOS 全平台公开发布，并完成多云与放量门 | 至少数月，尚无可承诺区间 | 首发受控试点之后再排期，另需 Windows sidecar/TUN、macOS/iOS 系统扩展与商店/签名验收、第二家 provider conformance、容量模型及 E6/E7 放量退出门 |
 
-当前最快关键路径是 Android M8 bridge / M6 真会员数据面：PRD 记录的两台现有真机 installation 与 P-256 绑定已足够，不缺第三台手机；手机已拔除，不影响离线工作。PHP Admin per-node endpoint/CA、descriptor 持久化和 Android grant metadata 已实现，但 Android member gate 仍关闭，production Agent/runtime 不可用。2026-11-24 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 session expired；最近成功只读盘点确认 lab stack、标记节点资源、Scheduler 和 SSM managed instances 均为空，但此为历史快照，当前资源状态尚未复核，本轮没有云写入。用户本人需重新 `aws login` 后，才可继续只读复核和获批 plan。节点侧仍须提供真实会员 profile、节点 endpoint/CA、mTLS 材料和可核对撤权回执。2026-11-24 本机 Laravel 全套为 250 项中 249 passed、1 existing skip、2,174 assertions；CI `45265827064` 全绿，PHP/Web Composer 镜像在有限 HTTP 5xx 重试后构建成功，容器上下文、Android、Laravel/API/Web/扩展、Go、ops 与 SBOM 全部通过。CI `45254810782`、`45271249999` 曾有 `NodePeerProvisioningTest` 瞬时失败，根因未知；最新代码增加真实 UUID/outbox 查询和完成状态断言，定向测试在本机连续 30 次通过，等待主线 CI 再验。离线可并行工作包括 Android 失败关闭、M10/运维契约测试、签名/staging 发布清单和受控沙箱支付；真实节点与双机会员验收串行依赖可信 profile 与节点回执。
+当前 M8/M6 关键路径仍是 Android member bridge 与真实会员数据面。两台现有真机 installation 的独立 P-256 绑定已具备，不需要第三台手机；离线开发不依赖手机在线。Android member admission gate 仍关闭，production Node Agent runtime 尚无可用真实 `DataPlaneProbeExecutor`。2026-11-24 经 `ops/aws-cli` 包装器复核 `xlb-ops` STS 有效；us-west-2 唯一活动 XLB 栈为既有 `xlb-node-manager-access-usw2`，历史实验栈均 `DELETE_COMPLETE`，带 `ManagedBy=xlb-node-lab` 的 EC2、EBS、ENI、安全组、公网地址、Scheduler 与 SSM 托管实例查询为空。本轮仅只读，无云资源写入。真实会员 profile、节点 endpoint/CA/mTLS 材料及匹配撤权最终流量回执仍未提供。CI `45323947112` 六个 jobs 全绿，覆盖 Laravel、Web/API、Android native build/JVM/lint、ops、Node Agent 与 SBOM provenance；该证据不代表生产签名候选、真实会员线路或 M6 放行。剩余可离线工作继续按 §0.2 及 PRD 逐阶段推进。
 
 **需要用户/外部协助，但不阻断上述离线工作：**
 
@@ -149,7 +149,7 @@ M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求�
 4. 商业放行材料：真实支付服务商的商户沙箱账号、API/验签与回调契约，以及目标市场对应的合规书面结论；凭据使用安全注入。provider-neutral 支付代码可继续，但不能宣称真实支付已验收。
 5. 分发条件：若 Windows/iOS 纳入首发，需要相应代码签名、分发/商店账号和可用验收设备；若不纳入，可在 Android 首发之后推进。
 
-**时间判断更新（2026-11-23；外部状态于 2026-11-24 复核）**：Android + Web/API 单服务商受控试点暂按 3–6 个月（约 2027-02 至 2027-05）做内部排期。该区间建立在首发范围已收敛、节点及合规材料约两周内到位的假设上，属于低置信资源计划，不能给出无条件预计上线日。2026-11-24 `xlb-ops` STS 已过期，重新登录后须先只读盘点；最近成功盘点是历史快照，不能当作当前资源状态。会员节点材料、合规书面意见与真实支付商户沙箱契约仍未到位。若目标是全平台公开发布并完成多云放量，仍按 6–12 个月以上估算，且受 iOS/Windows 系统隧道、签名/商店审核和第二服务商 conformance 影响。当前最能缩短关键路径的协助是用户本人重新登录 AWS，并安排节点侧提供经批准的验收材料/窗口，取得目标市场合规书面意见；真实商户资料到位前，provider-neutral 沙箱工作继续推进。
+**时间判断更新（2026-11-24）**：AI 可控代码和离线候选以 2026-12-01 为低置信冲刺检查点；这不是受控试点上线承诺。受控试点暂没有可靠日历日期，必须等真实会员节点及撤权回执、商户沙箱契约、合规书面意见、受保护签名 Environment 与 staging/回滚门落实后，再按实际验收计划重估。`xlb-ops` 当前 STS 有效且本轮已只读盘点，AWS 会话不再是现时阻塞；本轮未创建、删除或修改云资源。全平台公开发布及多云放量仍需数月以上，且涉及 Android/Windows/macOS/iOS 各自系统隧道、签名/分发审核和第二服务商 conformance。
 
 ## 1. 与既有文档的关系（不重复）
 
