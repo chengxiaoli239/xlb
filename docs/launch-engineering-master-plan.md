@@ -72,6 +72,18 @@
 
 每个工作项开工前登记四象限、范围/文件所有权、可验收证据和估时。若一个单元超过两小时仍无边界，拆成检查点。只有存在真实上线阻塞的 Q1 才可打断已开始的工作；Q3 状态同步集中处理，Q4 不进入一周首发排期。知识库通用规则见 `10-全局/规范/AI项目四象限与持续推进.md`。
 
+### 0.2.4 Worktree 未合并成果复核（2026-11-24）
+
+本轮只读盘点发现 34 个 worktree，其中 33 个带分支；按 `git cherry -v origin/main HEAD` 区分 patch 等价与真正独有改动后，仅 3 个分支有主线未包含的 patch：
+
+| 分支 | 独有 patch | 复核结果 |
+| --- | --- | --- |
+| `codex/android-node-auth-status` | 1 条节点授权状态历史说明 | 对应代码已进入主线，当前 PRD 已包含较新的 Android API/授权诊断状态；旧段落仍称其代码提交待合并，事实已过期，未合并旧文档 |
+| `codex/aws-inventory-status-refresh` | 3 条 Android grant handoff / foreground-start 提交 | 主线已有后续 handoff 和 stale-intent 修复及 Android JVM/AVD/CI 证据（如 `d718d90`、`b283316`），接口与测试已演进；不把旧实现重复 cherry-pick，也不覆盖当前文件 |
+| `codex/fleet-recovery-preview` | 1 条 11-23 估期与 AWS 状态记录 | 与 11-24 冲刺目标、AWS 复核状态和 blocker 清单冲突，属于过时历史文案，未合并 |
+
+其余 worktree 的领先提交均为 patch 等价或没有领先提交。主线及两个辅助 worktree 当前存在未提交/未跟踪内容；只读检查后全部保留，其中不提交 Playwright/output 临时目录、Android 辅助 worktree 测试编辑与内存转储文件。未重置、清理或合并任何辅助 worktree。后续并行审查以独有 patch 和当前代码语义为准，单看 ahead/behind 数量不能作为待合并工作量。
+
 ### 0.2.3 Android 候选阶段 Go/No-Go 检查清单（2026-11-24）
 
 这是候选构建与后续受控试点的检查单，不授权创建 GitHub Environment、写入 secrets、部署或发布。

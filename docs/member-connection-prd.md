@@ -39,6 +39,8 @@
 
 - **项目管理计划/候选清单/沙箱回归记录主线验收（2026-11-24，hosted CI）**：规划提交 `579b971` 的 run `45391159683` 在 PHP/Web 镜像构建阶段遇 GitHub zipball HTTP/2 504；同一代码的后续提交 `70c0dad` run `45391511265` 六个 jobs 全绿。进度记录提交 `65a2320` 的 run `45392286105` 六个 jobs 全绿，含 PHP/Web container build/smoke、Laravel/API/Web/extension、Go Agent、Android native/JVM/lint、ops 与 SBOM provenance。前一下载失败记为一次可恢复的 CI 外部依赖故障，不改变通过提交的测试结果。
 
+- **全工作树未合并成果复核（2026-11-24，只读）**：盘点到 34 个 worktree/33 个分支，按 patch-id 仅有 3 个分支含 patch 独有提交。`codex/android-node-auth-status` 与 `codex/fleet-recovery-preview` 的独有内容是过时阶段文案；`codex/aws-inventory-status-refresh` 的 3 个独有 Android handoff/foreground patches 已被主线后续实现和测试覆盖，不重复合并。两个辅助 worktree 存在未提交编辑，本轮未触碰；主线 Playwright/output 未跟踪目录原样保留。明细与后续工作树审查准则见 [总体规划 §0.2.4](launch-engineering-master-plan.md)。此项是仓库集成状态审计，不代表 Android 或发布里程碑新完成。
+
 - **Android API 授权失败安全诊断编号（2026-11-24，本机离线验收）**：PHP JSON error code/HTTP status 现在通过 allowlist 映射为稳定编号，覆盖设备满额、会员权益失效、设备已撤销、身份不匹配、challenge/proof 拒绝、会话过期、权限拒绝、限流、服务不可用与网络不可达；未知服务端错误只显示 `api_request_failed`，不回显服务器内部 code。编号经 `ClientSnapshot` 保留并显示在会员线路状态卡，没有新遥测或写日志。新增纯 JVM 映射测试 2 项；Android 全套 JVM、AndroidTest 编译、lint、Debug APK build 通过。仅验证客户端如何分类 server response，不证明生产 API 会产生对应状态、真实授权拒绝或节点端状态。
 
 - **Android 连接失败安全诊断编号（2026-11-24，本机与 hosted CI）**：`XlbVpnService` 现在根据安全用户文案附带稳定失败编号，覆盖系统 VPN 权限、空线路候选、配置不兼容、启动超时、连接验证未通过、资源清理待完成、系统隧道不可用、会员线路门关闭及内核不可用；未知错误统一为 `startup_failed`。编号随内部状态广播到 UI，原错误文案仍由白名单映射生成，异常原文、URL、凭据和 TLS 细节不会展示；错误解除/状态变化后编号清除。新增单元测试验证已知分类与含假凭据的未知错误不回显。Android 全套 JVM tests、AndroidTest 编译、lint、Debug APK build 通过；主线 CI `45316986228` 六个 jobs 全绿。未运行 AVD/实体设备或真实节点。编号描述客户端观察到的失败边界，不诊断封锁原因、不宣称节点故障或断流。
