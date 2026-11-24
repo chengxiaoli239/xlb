@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **Android native 本地模块依赖回归保护（2026-11-24）**：新增 ops unittest，确认 Debug/Release Mihomo JNI 的 Gradle 注册共同通过 native build helper，且该 helper 将本地替换的 `apps/node-agent` Go 源、`go.mod` 与 `go.sum` 声明为 task inputs。定向 1/1、ops 全套 63/63 通过。此测试防止 Node Agent 修改后 JNI 任务错误显示 `UP-TO-DATE`；不代表 Android 生产 signed candidate 或真实节点验收。
+
 - **Android Mihomo JNI Gradle 输入覆盖本地 Node Agent 替换模块（2026-11-24）**：核对发现 Android `buildMihomoArm64Debug/Release` 的 Gradle inputs 原先只包含 `apps/android/core-native`，漏掉 `go.mod` 本地 replace 的 `apps/node-agent`。补入 Node Agent `.go` 源、`go.mod` 与 `go.sum` 为两种 native 变体输入，确保 bridge/DataPlane 变化会使 Debug 与 Release JNI 重编，而不是误报 `UP-TO-DATE`。本轮两个 variant 实际重建通过；Android Debug/AndroidTest/JVM/lint 和 Release Java 编译通过。该阶段修复构建缓存正确性，不改变运行时 feature gate；新增云资源、生产发布和真实会员线路均未涉及。
 
 - **Android 会员隧道运行期健康监测与失败关闭（2026-11-24）**：会员 tunnel 建立后启动 attempt-bound 路由监测，每 10 秒经当前 VPN network 请求两个既有 HTTPS 204 探针之一，连续两次失败则取消监测、关闭会员 session/TUN 并发布白名单 `connection_unverified` 错误；成功探针清零连续失败计数。STOP、revoke、重连、service destroy 会取消监测，过时代次不能关闭新连接。隔离 Debug AVD 使用专用 1 秒间隔和 loopback echo 探针，Node Agent fixture 撤权后续探针得到 403，服务发布 ERROR、清理 VPN network，不发布 CONNECTED。monitor JVM 4 项通过；Debug/AndroidTest 构建、JVM、lint 和 Release Java 编译通过；完整 AVD harness 全通过。该能力只将已有连通性探针接入会员 session 生命周期，不是生产节点撤权事件 feed；探针只能发现路由失效，尚不能识别具体 peer generation，也不替代真实节点回执。production gate 仍关闭。先前复现的 409 `capacity_reached` 根因是 bridge 关闭时 HTTP/2 peer session 尚未释放；现有受 mTLS 保护的 `/v1/tunnel/disconnect` 在 bridge 关闭时注销 session，关闭本地 SOCKS 流、等待处理完成再关闭 HTTP/2 transport。Node Agent race 133 项通过，集成测试确认 bridge close 后 active session 归零，完整 AVD harness 复验通过。期间曾有一次旧 stop/start AVD 用例超时，独立重跑和后续两次完整 harness 通过，继续观察。下一步验证普通丢包/探针间歇恢复、STALE attempt 与停止竞态，并等待真实会员节点和撤权回执材料。
