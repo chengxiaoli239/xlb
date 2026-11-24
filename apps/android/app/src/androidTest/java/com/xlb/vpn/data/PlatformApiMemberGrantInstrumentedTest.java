@@ -1,6 +1,7 @@
 package com.xlb.vpn.tunnel;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -12,6 +13,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.SystemClock;
@@ -20,7 +24,11 @@ import android.app.Activity;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.uiautomator.By;
+import androidx.test.uiautomator.UiDevice;
+import androidx.test.uiautomator.Until;
 
+import com.xlb.vpn.data.DeviceProofJni;
 import com.xlb.vpn.data.MemberTunnelGrant;
 import com.xlb.vpn.data.MemberTunnelGrantAvdFixture;
 import com.xlb.vpn.data.PlatformApi;
@@ -35,9 +43,11 @@ import org.junit.Assume;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -48,6 +58,7 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -55,6 +66,128 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @RunWith(AndroidJUnit4.class)
 public final class PlatformApiMemberGrantInstrumentedTest {
+    private static final String TEST_TARGET = "192.0.2.1";
+    private static final int TEST_TARGET_PORT = 443;
+
+    @Test
+    public void synchronizedServerGrantCarriesTunTrafficAndRevocationReceipt() throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SharedPreferences preferences = context.getSharedPreferences("secure_client_state", Context.MODE_PRIVATE);
+        assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+        SecureSessionStore sessionStore = new SecureSessionStore(context);
+        sessionStore.updateCookie("xlb_session", "isolated-member-session", false);
+        String installationId = sessionStore.installationId();
+        String publicKey = MemberTunnelGrantAvdFixture.publicKey(installationId);
+        File stateDirectory = new File(context.getCacheDir(), "isolated-node-agent-" + UUID.randomUUID());
+        assertTrue(stateDirectory.mkdirs());
+
+        JSONObject peerRequest = new JSONObject()
+                .put("node_id", MemberTunnelGrantAvdFixture.NODE_ID)
+                .put("peer_id", MemberTunnelGrantAvdFixture.PEER_ID)
+                .put("entitlement_id", "81000000-0000-4000-8000-000000000004")
+                .put("request_id", UUID.randomUUID().toString())
+                .put("generation", MemberTunnelGrantAvdFixture.PEER_GENERATION)
+                .put("device_id", MemberTunnelGrantAvdFixture.DEVICE_ID)
+                .put("device_name", "Disposable authorized grant TUN")
+                .put("device_public_key", publicKey)
+                .put("device_key_fingerprint", MemberTunnelGrantAvdFixture.publicKeyFingerprint(publicKey))
+                .put("device_binding_generation", MemberTunnelGrantAvdFixture.DEVICE_GENERATION)
+                .put("peer_generation", MemberTunnelGrantAvdFixture.PEER_GENERATION)
+                .put("device_generation", MemberTunnelGrantAvdFixture.DEVICE_GENERATION)
+                .put("expires_at", java.time.Instant.now().plus(1, java.time.temporal.ChronoUnit.HOURS).toString())
+                .put("credential", "isolated-test-credential")
+                .put("state_path", new File(stateDirectory, "peer-store.json").getAbsolutePath());
+
+        AtomicInteger connectedStates = new AtomicInteger();
+        AtomicReference<String> lastError = new AtomicReference<>();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context receiverContext, Intent intent) {
+                String state = intent.getStringExtra(XlbVpnService.EXTRA_STATE);
+                if (XlbVpnService.STATE_CONNECTED.equals(state)) connectedStates.incrementAndGet();
+                if (XlbVpnService.STATE_ERROR.equals(state)) {
+                    lastError.set(intent.getStringExtra(XlbVpnService.EXTRA_MESSAGE));
+                }
+            }
+        };
+        registerReceiver(context, receiver);
+        boolean serviceStarted = false;
+        FakeMemberApi server = null;
+        try {
+            JSONObject node = new JSONObject(DeviceProofJni.startNodeAgentFixture(peerRequest.toString()));
+            assertFalse("isolated Node Agent fixture did not start: " + node, node.has("error"));
+            server = new FakeMemberApi(node.getString("ca_pem"));
+            server.setBridgeEndpoint(node.getString("endpoint"));
+            PlatformApi api = new PlatformApi("http://127.0.0.1:" + server.port(), sessionStore);
+            PlatformApi.MemberAccount account = new PlatformApi.MemberAccount(
+                    "member-avd", "Disposable member", "member@example.invalid", "member");
+
+            PlatformApi.ClientSnapshot snapshot = api.synchronize(account);
+            MemberTunnelGrant grant = api.verifiedMemberTunnelGrant();
+            assertEquals(PlatformApi.NodeAuthorizationStatus.READY, snapshot.nodeAuthorizationStatus);
+            assertNotNull("PlatformApi did not produce a verified grant from the signed challenge", grant);
+            assertTrue("fake API did not verify the Android Keystore challenge signature",
+                    server.challengeSignatureVerified());
+            assertFalse("fake API observed an invalid request: " + server.failureMessage(), server.hasFailure());
+
+            requestVpnPermission(context);
+            long handoffId = MemberTunnelGrantStore.publish(grant);
+            Intent startIntent = new Intent(context, XlbVpnService.class)
+                    .setAction(XlbVpnService.ACTION_START_ISOLATED_MEMBER_TEST)
+                    .putExtra(XlbVpnService.EXTRA_MEMBER_GRANT_HANDOFF_ID, handoffId);
+            ComponentName started = startVpnService(context, startIntent);
+            assertNotNull("VPN service did not start", started);
+            serviceStarted = true;
+
+            Network vpnNetwork = awaitActiveVpnNetwork(context, TimeUnit.SECONDS.toMillis(10));
+            assertNotNull("Android did not expose the VPN network; state=" + XlbVpnService.currentState()
+                    + ", failure=" + XlbVpnService.currentFailureCode() + ", message=" + lastError.get(), vpnNetwork);
+            assertTrue("service did not retain the server-authorized member session",
+                    XlbVpnService.currentTunnelIsMember());
+            assertEquals("isolated service must not publish a production connected state", 0,
+                    connectedStates.get());
+
+            byte[] payload = "xlb-authorized-api-grant-tun-echo".getBytes(StandardCharsets.US_ASCII);
+            try (Socket activeFlow = openEchoThroughVpn(vpnNetwork, payload)) {
+                JSONObject receipt = new JSONObject(DeviceProofJni.revokeNodeAgentFixturePeer());
+                assertFalse("isolated Node Agent did not return a revocation receipt", receipt.has("error"));
+                assertEquals("confirmed_test", receipt.getString("confirmation_status"));
+                assertTrue("revocation receipt did not include uploaded traffic", receipt.getLong("upload_bytes") > 0);
+                assertTrue("revocation receipt did not include downloaded traffic", receipt.getLong("download_bytes") > 0);
+                assertEquals("active TUN flow remained open after peer revocation", -1,
+                        activeFlow.getInputStream().read());
+            }
+            assertTrue("revoked peer did not fail the member tunnel health monitor",
+                    awaitState(XlbVpnService.STATE_ERROR, TimeUnit.SECONDS.toMillis(5)));
+            JSONObject rejection = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus());
+            assertEquals("revoked peer health probe did not reach the isolated Node Agent", 403,
+                    rejection.getInt("status"));
+            assertTrue(rejection.getString("body").contains("unauthorized"));
+            assertFalse("revoked member tunnel still owns its session", XlbVpnService.currentTunnelIsMember());
+            assertTrue("revoked member tunnel retained the Android VPN network",
+                    awaitVpnNetworkGone(context, TimeUnit.SECONDS.toMillis(5)));
+            assertEquals("isolated service must not publish a production connected state", 0,
+                    connectedStates.get());
+            assertFalse("fake API observed an invalid request: " + server.failureMessage(), server.hasFailure());
+        } finally {
+            if (serviceStarted) {
+                startVpnService(context, new Intent(context, XlbVpnService.class)
+                        .setAction(XlbVpnService.ACTION_STOP));
+                awaitVpnStopped(context, TimeUnit.SECONDS.toMillis(10));
+            } else {
+                MemberTunnelGrantStore.clear();
+            }
+            context.unregisterReceiver(receiver);
+            sessionStore.clearSession();
+            if (server != null) server.close();
+            DeviceProofJni.stopNodeAgentFixture();
+            MemberTunnelGrantAvdFixture.deleteInstallationKey(installationId);
+            deleteRecursively(stateDirectory);
+            assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+        }
+    }
+
     @Test
     public void approvedPermissionCallbackRevalidatesGrantAfterActivityRecreation() throws Exception {
         requireDisposableEmulator();
@@ -482,6 +615,127 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         return false;
     }
 
+    private static void requestVpnPermission(Context context) throws Exception {
+        Intent approval = VpnService.prepare(context);
+        if (approval == null) return;
+        try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+            scenario.onActivity(activity -> activity.startActivityForResult(approval, 7814));
+            UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+            Pattern approvalLabel = Pattern.compile("(?i)^(allow|ok|允许)$");
+            assertTrue("VPN permission dialog did not appear on the disposable AVD",
+                    device.wait(Until.hasObject(By.text(approvalLabel)), TimeUnit.SECONDS.toMillis(15)));
+            device.findObject(By.text(approvalLabel)).click();
+            long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+            while (VpnService.prepare(context) != null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(100);
+            }
+            assertNull("VPN permission was not granted on the disposable AVD", VpnService.prepare(context));
+        }
+    }
+
+    private static ComponentName startVpnService(Context context, Intent intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !XlbVpnService.ACTION_STOP.equals(intent.getAction())) {
+            return context.startForegroundService(intent);
+        }
+        return context.startService(intent);
+    }
+
+    private static Network awaitActiveVpnNetwork(Context context, long timeoutMillis) throws Exception {
+        ConnectivityManager manager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            Network network = manager == null ? null : manager.getActiveNetwork();
+            NetworkCapabilities capabilities = network == null || manager == null
+                    ? null : manager.getNetworkCapabilities(network);
+            if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return network;
+            Thread.sleep(25);
+        }
+        return null;
+    }
+
+    private static boolean awaitVpnNetworkGone(Context context, long timeoutMillis) throws Exception {
+        ConnectivityManager manager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            Network network = manager == null ? null : manager.getActiveNetwork();
+            NetworkCapabilities capabilities = network == null || manager == null
+                    ? null : manager.getNetworkCapabilities(network);
+            if (capabilities == null || !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return true;
+            Thread.sleep(25);
+        }
+        return false;
+    }
+
+    private static void awaitVpnStopped(Context context, long timeoutMillis) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (XlbVpnService.currentTunnelIsMember()
+                || XlbVpnService.STATE_CONNECTED.equals(XlbVpnService.currentState())) {
+            if (System.currentTimeMillis() >= deadline) {
+                throw new AssertionError("VPN service did not leave its active state after stop");
+            }
+            Thread.sleep(50);
+        }
+        ConnectivityManager manager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        boolean vpnNetworkGone = manager == null;
+        while (manager != null && System.currentTimeMillis() < deadline) {
+            Network network = manager.getActiveNetwork();
+            NetworkCapabilities capabilities = network == null ? null : manager.getNetworkCapabilities(network);
+            if (capabilities == null || !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                vpnNetworkGone = true;
+                break;
+            }
+            Thread.sleep(50);
+        }
+        if (!vpnNetworkGone) throw new AssertionError("Android retained the VPN network after stop");
+        assertFalse("isolated tunnel stop left a pending member grant", MemberTunnelGrantStore.hasPendingHandoff());
+    }
+
+    private static void deleteRecursively(File file) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) deleteRecursively(child);
+            }
+        }
+        if (file.exists()) file.delete();
+    }
+
+    private static boolean awaitState(String expectedState, long timeoutMillis) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            if (expectedState.equals(XlbVpnService.currentState())) return true;
+            Thread.sleep(25);
+        }
+        return expectedState.equals(XlbVpnService.currentState());
+    }
+
+    private static Socket openEchoThroughVpn(Network network, byte[] payload) throws Exception {
+        Socket socket = network.getSocketFactory().createSocket();
+        try {
+            socket.connect(new InetSocketAddress(TEST_TARGET, TEST_TARGET_PORT), 3_000);
+            socket.setSoTimeout(3_000);
+            OutputStream output = socket.getOutputStream();
+            InputStream input = socket.getInputStream();
+            output.write(payload);
+            output.flush();
+            byte[] response = new byte[payload.length];
+            int offset = 0;
+            while (offset < response.length) {
+                int count = input.read(response, offset, response.length - offset);
+                if (count < 0) break;
+                offset += count;
+            }
+            assertEquals("TCP echo through the isolated member peer was incomplete", payload.length, offset);
+            assertArrayEquals("TCP bytes did not return through system TUN, Mihomo, proof bridge, and fixture peer",
+                    payload, response);
+            return socket;
+        } catch (Exception exception) {
+            socket.close();
+            throw exception;
+        }
+    }
+
     private static boolean awaitActivitySnapshot(ActivityScenario<MainActivity> scenario)
             throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -576,6 +830,7 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         private volatile boolean challengeSignatureVerified;
         private volatile boolean deviceRemovalPending;
         private volatile String profileDigestOverride;
+        private volatile String bridgeEndpoint = "https://node.example.invalid:9443";
         private final AtomicInteger authorizationRequests = new AtomicInteger();
 
         private FakeMemberApi(String trustedCa) throws IOException {
@@ -592,6 +847,10 @@ public final class PlatformApiMemberGrantInstrumentedTest {
 
         private int port() {
             return serverSocket.getLocalPort();
+        }
+
+        private void setBridgeEndpoint(String endpoint) {
+            bridgeEndpoint = endpoint;
         }
 
         private boolean challengeSignatureVerified() {
@@ -740,7 +999,7 @@ public final class PlatformApiMemberGrantInstrumentedTest {
                             .put("device_binding_generation", MemberTunnelGrantAvdFixture.DEVICE_GENERATION)
                             .put("peer_credential", Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]))
                             .put("profile", profile)
-                            .put("bridge_endpoint", "https://node.example.invalid:9443")
+                            .put("bridge_endpoint", bridgeEndpoint)
                             .put("bridge_server_ca_pem", trustedCa)
                             .put("profile_sha256", profileDigestOverride == null ? sha256(profile) : profileDigestOverride)
                             .put("profile_renderer_id", "xlb-mihomo-bridge-v1")

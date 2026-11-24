@@ -281,6 +281,11 @@ run_instrumentation 'Running isolated Android system TUN and proof-bridge echo t
     -e disposable_avd true \
     -e class com.xlb.vpn.tunnel.MemberTunnelTunInstrumentedTest#authorizedFixturePeerCarriesTcpEchoThroughSystemTunWithoutConnectedState \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
+run_instrumentation 'Running synchronized API grant through Android system TUN and revocation receipt...' \
+    "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+    -e disposable_avd true \
+    -e class com.xlb.vpn.tunnel.PlatformApiMemberGrantInstrumentedTest#synchronizedServerGrantCarriesTunTrafficAndRevocationReceipt \
+    com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
 run_instrumentation 'Running authorization refresh and pending-grant lifecycle test...' \
     "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
