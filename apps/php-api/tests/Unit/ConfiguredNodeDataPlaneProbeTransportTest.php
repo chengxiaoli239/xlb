@@ -8,8 +8,6 @@ use App\Services\DatabaseNodeHealthStateStore;
 use App\Services\MtlsNodeHealthProbeDriver;
 use App\Services\NodeDataPlaneProbeFailure;
 use App\Services\NodeDataPlaneProbeTransportException;
-use App\Services\NodeHealthCircuitBreaker;
-use App\Services\NodeHealthProbeCoordinator;
 use App\Services\NodeHealthProbeDriver;
 use App\Services\NodeHealthState;
 use App\Services\NodeRoutingPolicy;
@@ -174,8 +172,9 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
             $this->markTestSkipped('A timeout utility is required for the PHP-to-Go mTLS integration test.');
         }
 
+        $this->seed();
         $credentials = $this->mutualTlsCredentialFiles();
-        $nodeId = 'node-go-loopback';
+        $nodeId = 'node-test-1';
         $nodeAgentDirectory = base_path('../node-agent');
         $helperSource = $nodeAgentDirectory.'/testdata/php-probe/main.go';
         $helperBinary = $credentials['directory'].'/node-agent-php-probe';
@@ -219,12 +218,11 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
                 $credentials['client_key'],
             );
 
-            $stateStore = new DatabaseNodeHealthStateStore;
-            $assessment = (new NodeHealthProbeCoordinator(
-                new MtlsNodeHealthProbeDriver($transport, 5000),
-                new NodeHealthCircuitBreaker,
-                $stateStore,
-            ))->probe($nodeId);
+            config(['node_health_probe.enabled' => true]);
+            $this->app->instance(NodeHealthProbeDriver::class, new MtlsNodeHealthProbeDriver($transport, 5000));
+            $this->artisan('nodes:probe-health', ['--node' => [$nodeId]])
+                ->expectsOutputToContain('已保存 1 条探测成功和 0 条探测失败的内部状态；这不构成节点连接或会员隧道验收')
+                ->assertExitCode(0);
             $status = proc_get_status($server);
             $shutdownDeadline = microtime(true) + 1.0;
             while ($status['running'] && microtime(true) < $shutdownDeadline) {
@@ -233,11 +231,8 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
             }
             $this->assertFalse($status['running'], 'The Go fixture did not shut down after serving one probe.');
 
-            $this->assertTrue($assessment->result->succeeded);
-            $this->assertNotNull($assessment->result->latencyMs);
-            $this->assertNull($assessment->result->failureCode);
-            $this->assertFalse($assessment->transition->ignoredAsStale);
-            $persistedState = (new DatabaseNodeHealthStateStore)->get($nodeId);
+            $stateStore = new DatabaseNodeHealthStateStore;
+            $persistedState = $stateStore->get($nodeId);
             $this->assertSame('healthy', $persistedState?->status);
             $this->assertSame(0, $persistedState?->failureStreak);
             $this->assertNotNull($persistedState?->lastProbeAt);

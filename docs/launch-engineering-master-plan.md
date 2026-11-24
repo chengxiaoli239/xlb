@@ -44,6 +44,23 @@
 
 一周目标是压缩 AI 可控开发与审查周期。以当前已核实状态，正式受控试点能否在 12-01 上线取决于节点/撤权材料、签名 Environment、staging、商户沙箱与合规书面意见能否在前半周落实；这些事项有明确负责人并行完成前，试点日期置信度低。
 
+### 0.2.1 四象限复盘与本周工作重排（2026-11-24）
+
+四象限按对 12-01 Android + 网站/API 受控试点的影响与实际截止时间排序。两天半以上的项目运行时长不能直接当作 AI 编码工时；PRD/提交记录显示近期高投入集中在 Android service/grant 并发与生命周期失败关闭、M10 探测到路由过滤的多层测试与 hosted CI。它们是重要的安全/稳定性建设，但本机 canary 与合成状态不能交付真实会员线路；额外离线细节的边际价值已经低于外部放行材料。
+
+| 象限 | 当前事项 | 下一步、负责人和退出证据 |
+| --- | --- | --- |
+| Q1 重要且紧急 | 真实会员 profile、节点 endpoint/CA/mTLS 身份与匹配撤权/最终流量回执 | 节点/运维负责人提供获批材料和隔离窗口；AI 先只读检查目标，再按授权 plan/apply，完成两台会员身份的真实连接、复制拒绝和撤权回执验收。没有节点回执不宣称稳定、精确限设备或断流。 |
+| Q1 重要且紧急 | 受保护 Android release Environment、审批人、正式签名与 approved API origin | 仓库管理员/凭据负责人配置并证明环境保护和凭据可用；签名候选 workflow 成功产出 APK、SBOM、manifest 与 provenance。当前只读 API 查询未列出任何 Environment，因此该门尚未打开。 |
+| Q1 重要且紧急 | 获批 staging、部署/回滚责任人与窗口 | staging 负责人给出隔离环境和维护窗口；通过候选摘要核验、登录/权益/支付沙箱 smoke 与回滚演练。不得未经批准创建云资源或产生费用。 |
+| Q1 重要且紧急 | 商户沙箱回调契约、首发市场合规书面意见 | 支付/业务负责人提供商户 sandbox、签名/重试/对账契约，合规负责人给出针对首发市场的书面意见；provider-neutral 代码和本地沙箱不能代替这些材料。 |
+| Q2 重要但不紧急 | Android + API 离线关键路径、默认关闭的安全门和失败处理 | AI 继续补最小的独立回归，优先会员授权/失败关闭、沙箱购买退款及当前已打开阶段；遇到节点材料时转入 Q1 联验。已经有高覆盖的 M10 本机 probe/route-filter 回归暂缓继续加同类细节。 |
+| Q2 重要但不紧急 | 候选可追溯性、恢复/回滚与小范围运维手册 | AI 复用已有 workflow/manifest/SBOM，补齐 staging 前所需的最小检查表；只做会影响首发决策或应急处理的项目。 |
+| Q3 紧急但不重要 | 外部负责人催办、短状态同步、临时资料归档 | 项目负责人按依赖清单协调，集中处理而非打断连续开发；仅在实际影响截止期时升级优先级。AI 不擅自向外部联系人发消息。 |
+| Q4 不重要且不紧急 | Windows/macOS/iOS 数据面、3000 并发扩容、CDN/多云扩展、非首发产品细节与重复文档润色 | 移出本周首发关键路径，记录在后续路线图；本周不因容易实现或测试漂亮而抢占真实会员线路、签名、staging 和合规放行工作。 |
+
+**重新排序规则**：将可离线推进的 M10 深度补测设为当前停止扩张的 Q2 工作包；每轮先列出一个 Q1 外部行动及一个 AI 可交付工作，外部阻塞期间继续不依赖该材料的首发代码/候选检查。每个子任务目标控制在约 2 小时内可验收，超出时拆成明确检查点；外部等待和 CI/设备运行单独计时。不得通过降低设备限制、关闭安全门或跳过真实回执压缩日历。
+
 **2026-11-24 Android service 销毁清理未消费 grant**：专用 `xlb-m9-recovery` AVD instrumentation 先复现 service 销毁后单次 member handoff 仍留在进程级 grant store；`XlbVpnService.onDestroy()` 现在同步清除 pending grant。修复后定向 instrumentation 1/1、service admission instrumentation 整组 4/4 与 Android 全量 JVM、lint、AndroidTest 编译、Debug APK build 通过，主线 CI `45278603034` 全绿。仅验证 AVD service 生命周期，不开启生产 member gate，不建立真实 VPN/TUN 或节点连接。
 
 **2026-11-24 Android member grant 并发单次消费**：新增 8 个并发消费者竞争同一 `MemberTunnelGrantStore` handoff ID 的 JVM 回归测试，唯一消费者取得 grant，其余均为空；Android JVM 全套、lint 与 AndroidTest 编译通过，主线 CI `45276068548` 六个 jobs 全绿。生产 gate 保持关闭，未连接真机、建立 TUN 或接入真实节点。
@@ -84,7 +101,7 @@
 
 | 工作包 | 文件/模块边界 | 依赖与退出条件 |
 | --- | --- | --- |
-| A. M10 真实 probe executor 与运行验收 | `apps/node-agent/**`、`apps/php-api/**` 分别限定 Agent executor/runtime 与 PHP transport/config/Feature tests | PHP transport 已通过本机 TLS 1.3/mTLS 对 Go Node Agent 的全链测试，Go Agent 再通过 HTTPS TLS 1.3 连本地 canary 回显，并经真实 `MtlsNodeHealthProbeDriver` / `NodeHealthProbeCoordinator` 更新 RefreshDatabase 管理的临时 SQLite 健康状态；`NodeRoutingPolicy` 接受新鲜健康候选并拒绝过期或 unhealthy 状态；PHP 定向 1/1、36 assertions。Node Agent 新增 trusted-runtime opt-in HTTPS canary executor，固定 endpoint path、公网 TCP/443、显式 CA、无代理/redirect、限长 JSON 和 exact challenge echo；Node Agent race 133、vet/build 通过。该代码只证明本地/隔离 canary 协议，真实 URL/CA 未配置且无隔离节点运行；probe/route filter/scheduler 默认仍关闭。下一步须由节点/运维提供获批 canary URL、CA 与节点 server/client identity，运行隔离联验并检查 timeout/cert failure、状态新鲜度和恢复，不让 liveness 或合成回执标记真实健康。`health_check_ttl_seconds=300` 与 probe route-state TTL=30 秒是不同状态源 |
+| A. M10 真实 probe executor 与运行验收 | `apps/node-agent/**`、`apps/php-api/**` 分别限定 Agent executor/runtime 与 PHP transport/config/Feature tests | `nodes:probe-health` 命令现经本机 TLS 1.3/mTLS 调用 Go Node Agent，Agent 再连本地 HTTPS canary，并将结果写入 RefreshDatabase 管理的临时 SQLite；`NodeRoutingPolicy` 接受新鲜健康候选并拒绝过期或 unhealthy 状态；PHP 定向 1/1、34 assertions。Node Agent race 133、vet/build 通过。该代码只证明本地/隔离 canary 协议，真实 URL/CA 未配置且无隔离节点运行；probe/route filter/scheduler 默认仍关闭。下一步须由节点/运维提供获批 canary URL、CA 与节点 server/client identity，运行隔离联验并检查 timeout/cert failure、状态新鲜度和恢复，不让 liveness 或合成回执标记真实健康。`health_check_ttl_seconds=300` 与 probe route-state TTL=30 秒是不同状态源 |
 | B. E0 制品可追溯性 | `.github/workflows/**`、`ops/build_artifact_manifest.py`、Android Gradle | Debug APK 来源/摘要清单及 6 项测试已实现，hosted run `44943107063` 全绿；Syft 源码/锁文件 SBOM 与 Android Release runtime CycloneDX SBOM 在 `45013262238` 全绿并上传为两个 7 天 Actions artifacts。main push 上的 GitHub SBOM provenance attestation 在 run `45028876877` 全绿，source 与 Android SBOM 下载后的 subject digest 匹配，`gh attestation verify` 各验证通过 1 份；此前 tlog `404` 后，attestation 移入可见但不阻断开发 CI 的独立 job，并单次延迟重试。E0 放行仍要求 attestation job 成功且 artifact digest 验证通过。registry push/storage record 关闭；该 attestation 不给 APK/Release 签名、不上传 APK、不建 Release；生产制品签名、可信存储/保留与发布审批仍未实现 |
 | C. M11 本地负载分层 | `loadtest/**`、验收报告 | 80请求的 loopback smoke 已完成；后续需在获批 staging 测控制面阶梯/长稳并单独审批，现有结果不能外推生产容量或 VPN 节点 |
 | D. Windows CNG verifier/真实 sidecar adapter | `apps/windows/src-tauri/**`，Rust supervisor/lifecycle contract 与 CNG signer 已合入 | CNG P-256 signer hosted 验收（29/29，`44959472000`）与 server-authorized peer capability 门禁已完成（36/36、MSVC build、UI tests/build，全绿，`44994703324`）；graceful-stop 回退已通过 `45013647469`（41/41）。权益快照门禁通过 `45015001854`（42/42）。生产 `start` 现实际检查 constant-false feature flag，在 flag 关闭时 fail closed 且不调用 adapter；正向 fake lifecycle 仅经 `cfg(test)` helper。Windows workflow `45019455975` 与整仓 CI `45019456008` 全绿；bridge/TUN 仍未接入，不得外推为会员线路/严格限设备验收 |
