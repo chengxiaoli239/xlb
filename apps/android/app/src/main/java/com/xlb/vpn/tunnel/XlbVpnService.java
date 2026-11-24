@@ -64,6 +64,7 @@ public final class XlbVpnService extends VpnService {
     private final TunnelAttemptGate tunnelAttempts = new TunnelAttemptGate();
     private final Object memberSessionLock = new Object();
     private volatile boolean foregroundServiceStarted;
+    private long memberGrantHandoffId;
     private ParcelFileDescriptor tun;
     private MemberTunnelSession memberSession;
 
@@ -93,6 +94,11 @@ public final class XlbVpnService extends VpnService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_START_MEMBER.equals(intent.getAction())) {
+            memberGrantHandoffId = intent.getLongExtra(EXTRA_MEMBER_GRANT_HANDOFF_ID, 0);
+        } else if (memberGrantHandoffId == 0) {
+            memberGrantHandoffId = MemberTunnelGrantStore.pendingHandoffId();
+        }
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
             int attempt = tunnelAttempts.invalidate();
             MemberTunnelGrantStore.clear();
@@ -177,7 +183,7 @@ public final class XlbVpnService extends VpnService {
     @Override
     public void onDestroy() {
         int attempt = tunnelAttempts.invalidate();
-        MemberTunnelGrantStore.clear();
+        MemberTunnelGrantStore.clear(memberGrantHandoffId);
         requestMemberSessionStop();
         worker.execute(() -> {
             if (closeMemberSession()) setMemberTunnelForAttempt(attempt, false);

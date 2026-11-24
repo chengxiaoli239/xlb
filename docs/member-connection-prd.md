@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M8 Android service 销毁与新 grant handoff 竞态修复（2026-11-24，专用 AVD）**：专用 API 35 `xlb-m9-recovery` AVD 先复现旧 `XlbVpnService.onDestroy()` 无条件清空进程级 grant store，导致授权刷新期间新 handoff 丢失；现由 service 捕获其所属 handoff ID，销毁时只清除该 ID，旧实例不能清掉替代 grant。扩展 AVD harness 对每个 instrumentation 输出强制要求 `OK (n test[s])`，避免 `adb am instrument` 失败仍以退出码 0 被误记为通过。`test-anonymous-recovery-emulator.sh` 全套 Android instrumentation 22/22 通过，另有 Keystore→JNI→Go→隔离 Node Agent peer 1/1、member tunnel session 1/1、授权刷新撤权与 pending grant 1/1、profile digest 拒绝 1/1 通过；构建期间的 JVM tests、lint 与 AndroidTest compile 通过。全部使用专用 AVD、临时 SQLite 和 loopback API，未触及两台会员真机、AWS 或真实节点；member gate 仍关闭，不证明真实会员线路或节点撤权断流。
+
 - **一周首版冲刺目标（2026-11-24）**：按用户已确认的 Android + 网站/API 单服务商受控试点范围，以 2026-12-01 为冲刺检查点。AI 可控代码、离线自动化、签名候选与审查材料按此节奏推进；真实会员节点/撤权回执、签名 Environment、staging、商户沙箱契约和合规书面意见仍是独立放行门，必须并行落实，不能由离线测试替代。若这些外部门未按期满足，12-01 只能交付候选或内部技术预览，不得称为受控试点已上线；不据此承诺公开付费上线日期。
 
 - **Android API 授权失败安全诊断编号（2026-11-24，本机离线验收）**：PHP JSON error code/HTTP status 现在通过 allowlist 映射为稳定编号，覆盖设备满额、会员权益失效、设备已撤销、身份不匹配、challenge/proof 拒绝、会话过期、权限拒绝、限流、服务不可用与网络不可达；未知服务端错误只显示 `api_request_failed`，不回显服务器内部 code。编号经 `ClientSnapshot` 保留并显示在会员线路状态卡，没有新遥测或写日志。新增纯 JVM 映射测试 2 项；Android 全套 JVM、AndroidTest 编译、lint、Debug APK build 通过。仅验证客户端如何分类 server response，不证明生产 API 会产生对应状态、真实授权拒绝或节点端状态。

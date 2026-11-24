@@ -29,6 +29,10 @@ public final class MemberTunnelGrantStore {
         return pendingGrant != null;
     }
 
+    static synchronized long pendingHandoffId() {
+        return pendingGrant == null ? 0 : pendingHandoffId;
+    }
+
     public static synchronized void clear(long handoffId) {
         if (handoffId <= 0 || handoffId != pendingHandoffId) return;
         pendingGrant = null;

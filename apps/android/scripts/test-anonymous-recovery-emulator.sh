@@ -15,6 +15,7 @@ API_URL="http://127.0.0.1:$API_PORT"
 TEST_DIR=""
 API_PID=""
 REVERSE_ACTIVE="false"
+INSTRUMENTATION_LOG=""
 
 fail() {
     printf 'ERROR: %s\n' "$1" >&2
@@ -34,6 +35,19 @@ cleanup() {
     fi
     if [[ -n "$TEST_DIR" && "$TEST_DIR" == "${TMPDIR:-/tmp}/xlb-m9-recovery."* ]]; then
         rm -rf "$TEST_DIR"
+    fi
+}
+
+run_instrumentation() {
+    local description="$1"
+    shift
+    INSTRUMENTATION_LOG="$TEST_DIR/instrumentation.log"
+    printf '%s\n' "$description"
+    if ! "$@" 2>&1 | tee "$INSTRUMENTATION_LOG"; then
+        fail "$description failed to launch."
+    fi
+    if ! grep -Eq 'OK \([0-9]+ tests?\)' "$INSTRUMENTATION_LOG"; then
+        fail "$description reported an instrumentation failure."
     fi
 }
 
@@ -134,26 +148,29 @@ printf 'Installing test APKs on %s only...\n' "$EMULATOR_SERIAL"
 "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" install -r "$REPO_ROOT/apps/android/app/build/outputs/apk/debug/app-debug.apk"
 "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" install -r "$REPO_ROOT/apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
 
-printf 'Running Keystore and anonymous recovery instrumentation...\n'
-"$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+run_instrumentation 'Running Keystore and anonymous recovery instrumentation...' \
+    "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
     -e isolated_api true \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
 
-printf 'Running proof-bridge and member-session native integration tests...\n'
-"$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+run_instrumentation 'Running proof-bridge and member-session native integration tests...' \
+    "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
     -e class com.xlb.vpn.data.DeviceProofCertificateInstrumentedTest#keystoreSignerConnectsThroughNativeBridgeToAuthorizedIsolatedNodePeer \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
-"$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+run_instrumentation 'Running server-authorized member tunnel session test...' \
+    "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
     -e class com.xlb.vpn.tunnel.MemberTunnelSessionInstrumentedTest#serverAuthorizedGrantLoadsAuthenticatedProfileAndClosesNativeBridgeResources \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
-"$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+run_instrumentation 'Running authorization refresh and pending-grant lifecycle test...' \
+    "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
     -e class com.xlb.vpn.tunnel.PlatformApiMemberGrantInstrumentedTest#authorizedSyncGrantIsConsumedByClosedServiceGateAndClearedOnLogout \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
-"$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+run_instrumentation 'Running profile digest rejection test...' \
+    "$ANDROID_ROOT/platform-tools/adb" -s "$EMULATOR_SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
     -e class com.xlb.vpn.tunnel.PlatformApiMemberGrantInstrumentedTest#profileDigestMismatchNeverPublishesReadyGrant \
     com.xlb.vpn.debug.test/androidx.test.runner.AndroidJUnitRunner
