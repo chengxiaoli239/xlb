@@ -840,7 +840,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_runs_device_challenge_before_loading_devices_and_keeps_ready_as_auth_only() {
+    async fn snapshot_clears_verified_proof_when_device_list_no_longer_matches() {
         use std::{io::{Read, Write}, net::TcpListener, thread};
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -875,9 +875,17 @@ mod tests {
             serde_json::json!({"data": {"token": "csrf"}}),
             serde_json::json!({"data": {
                 "device": {"id": "fd3ae0f1-1234-4234-9234-000000000002", "status": "registered", "bound": true},
-                "node_authorization": {"status": "provisioning"}
+                "node_authorization": {
+                    "status": "ready",
+                    "peer_id": "fd3ae0f1-1234-4234-9234-000000000003",
+                    "node_id": "fd3ae0f1-1234-4234-9234-000000000004",
+                    "peer_generation": 2,
+                    "device_binding_generation": 2,
+                    "peer_credential": peer_credential.clone(),
+                    "profile": profile
+                }
             }}),
-            serde_json::json!({"data": {"entitlement_active": true, "max_devices": 5, "registered_count": 1, "available_slots": 4, "devices": [{"id": "fd3ae0f1-1234-4234-9234-000000000002", "installation_id": "fd3ae0f1-1234-4234-9234-000000000002", "name": "Windows", "platform": "windows", "status": "registered", "created_at": "2026-11-22T00:00:00Z"}]}}),
+            serde_json::json!({"data": {"entitlement_active": true, "max_devices": 5, "registered_count": 1, "available_slots": 4, "devices": [{"id": "fd3ae0f1-1234-4234-9234-000000000099", "installation_id": "fd3ae0f1-1234-4234-9234-000000000099", "name": "Other device", "platform": "windows", "status": "registered", "created_at": "2026-11-22T00:00:00Z"}]}}),
         ];
         let server = thread::spawn(move || {
             let mut paths = Vec::new();
@@ -947,7 +955,7 @@ mod tests {
         assert!(!snapshot_json.contains(profile));
 
         let refreshed = client.restore().await.unwrap().unwrap();
-        assert_eq!(refreshed.node_authorization, NodeAuthorizationStatus::Provisioning);
+        assert_eq!(refreshed.node_authorization, NodeAuthorizationStatus::Unavailable);
         assert!(client.verified_member_device_proof.is_none());
 
         assert!(client.restore().await.unwrap().is_none());
