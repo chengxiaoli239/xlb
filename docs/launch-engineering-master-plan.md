@@ -56,12 +56,14 @@
 | **Q1 M11 签名候选与 staging** | APK、runtime SBOM、摘要 manifest、provenance workflow 有离线/CI 验证；protected Environment 未配置，无 staging 部署/回滚验收 | Environment 元数据可见后约 2–4 小时配置核对与候选流程复核；staging 演练约 0.5–1.5 日，环境和负责人等待另计 | 仓库管理员建受保护 Environment 并设审核者；凭据负责人经批准通道提供正式签名配置/API origin；staging 负责人给环境、窗口和回滚人。AI 不读取/提交凭据，不部署 | 获批者产出同一 commit 的签名 APK、SBOM、manifest、provenance；staging smoke 与回滚形成独立记录 |
 | **Q1 商户沙箱与首发合规** | provider-neutral 契约和 local/testing 付款退款账本已经存在；真实商户 sandbox、首发地区合规意见未验收 | 商户契约到位后约 0.5–1.5 日接入/验收，审查时间由外部负责人决定 | 支付负责人提供回调、签名、重试、对账字段；合规负责人确认地区和书面意见。不得以本地假渠道宣称真实支付已验收 | 测试下单→回调→权益→退款→对账可追溯，并取得书面放行意见 |
 | **Q2 Android 离线失败处理** | 连接与 API 失败的安全诊断编号已有实现；首页连接失败有“重试连接”、账户节点线路不可用卡有“重试同步”。本轮为 attempt-bound monitor 补上“probe 进行中旧 attempt 被替换”回归；JVM 全量、AndroidTest compile、lint、Debug APK 本机通过，主线 `f07465d` CI `45406085919` 六个 jobs 全绿。未发现还需重复建设诊断 UI 的离线缺口 | 本阶段已完成；后续由新的复现问题驱动 | 真实节点材料缺失期间可继续其它工作，但不把客户端 probe 说成节点撤权事件/线路稳定证明 | 将 Android 诊断入口从本周 AI 待办移出；真实 member profile、节点证书和回执到位后转入 Q1 真机验收 |
-| **Q2 Web/API 沙箱首发回归** | 2026-11-24 本机订单、沙箱付款/退款和 provider ledger 测试通过（既有结果）；直接付款和 provider fulfillment 两条续费路径均锁会员行后计算新权益，定向付款/ledger 18/18、完整 Laravel 262 passed / 1 skipped、两条支付修复 CI `45397671907` / `45400453880` 全绿。本轮真实浏览器联验会员网站→Laravel：建单与 sandbox payment 均 HTTP 201，权益延长、固定订阅 QR/link 展示，退款后测试订单/grant 为 revoked；该测试数据已清理。未完成真实商户/staging 流程或 MySQL/PostgreSQL 并发锁竞争 | 本地沙箱入口已验收；真实商户/staging 依赖外部环境 | 可与 Android 离线验证并行，文件所有权分离；真实商户接入仍等 Q1 资料 | 不重复本地 mock/浏览器沙箱链路；真实渠道到位后验收真实商户回调/对账和目标数据库锁语义，当前仍无真实收款 |
+| **Q2 Web/API 沙箱首发回归** | 2026-11-24 本机订单、沙箱付款/退款和 provider ledger 测试通过；直接付款和 provider fulfillment 两条续费路径均锁会员行后计算新权益，相关 CI 全绿。本机浏览器联验会员网站→Laravel：建单与 sandbox payment 均 HTTP 201，退款后测试订单/grant 已清理。2026-11-25 新增会员取消 pending test order 的 Web UI 回归，断言 cancel API、列表刷新与状态/操作更新；Web Vitest 2 files / 9 tests 与 production build 通过。未完成真实商户/staging 流程或 MySQL/PostgreSQL 并发锁竞争 | 本地沙箱入口已验收；真实商户/staging 依赖外部环境 | 可与 Android 离线验证并行，文件所有权分离；真实商户接入仍等 Q1 资料 | 不重复本地支付成功路径；后续仅补新暴露的订单状态/恢复缺陷；真实渠道到位后验收商户回调/对账和目标数据库锁语义，当前仍无真实收款 |
 | **Q2 发布可追溯性** | 候选 artifact 校验与 SBOM/provenance CI 已覆盖；缺 protected Environment 和正式签名运行证据 | 离线 checklist 复核约 1–2 小时，正式候选时间取决于外部配置 | 与 Web/API 回归并行；不得创建环境或注入秘密，除非用户授权且相应负责人执行 | 对照 workflow、权限、制品摘要和审批门形成短 go/no-go 清单 |
 | **Q3 外部协调** | 节点、仓库 Environment、staging、商户、合规负责人及日期尚未确认；用户已表示稍后提供外部放行责任人 | AI 汇总缺项约 30–60 分钟/轮；等待时长未知 | 用户提供负责人后再登记姓名和承诺日期；未经授权不代发消息 | 把负责人和下一动作映射到上方 Q1 表，按真实日期重排 |
 | **Q4 后续范围** | Windows 数据面、macOS/iOS、规模化并发、多云/CDN、非首发细节不影响 Android + Web/API 单服务商受控试点的近期最短路径 | 当前冲刺不分配 | 放入后续路线图；只有 Q1 发布门和首发链路稳定后再重估 | 暂无，本周不启动 |
 
 **2026-11-25 Android 进程死亡冷启动恢复阶段**：四象限为 Q2（重要的客户端生命周期失败恢复，不解除真实会员节点 Q1 上线门）。新增独立 Android process-death host instrumentation，专用 AVD 上由 host 精确杀掉 debug app，之后经 VPN consent 批准与显式重新 launch 恢复 pending member request；local/testing Cookie 会话仍有效，客户端重新提交 P-256 proof 并进入生产关闭 gate。独立命令 `PROCESS_DEATH_ONLY=true apps/android/scripts/test-anonymous-recovery-emulator.sh` 与完整 AVD harness 均退出码 0；主 instrumentation 25/25、6 项专项测试通过；Debug/AndroidTest JVM/编译/lint 通过，hosted CI `45446581811` 六个 jobs 全绿且 Android job 编译独立 host APK/instrumentation APK。该测试明确覆盖显式冷启动恢复，不声称 OS 自动重建 Activity。下一项继续处理 Android/API 首发离线缺口，并优先跟踪真实节点 profile/mTLS/撤权回执外部门。文件所有权限于 Android app、process-death-host 与 AVD harness；未碰 AWS/云、生产环境或真实节点。
+
+**2026-11-25 Web 订单取消 UI 阶段**：四象限为 Q2，针对会员本地测试订单生命周期补齐“用户取消待付款订单”前端验收。新增测试验证确认取消后的 POST、详情状态、订单列表再次获取及已取消后不显示沙箱付款入口。Web 2 个测试文件、9 项通过，`pnpm --filter @xlb/web build` 通过。此阶段不触发真实资金、商户 API 或节点撤权；后续优先从新缺陷证据推进，不重复本地 happy-path mock。
 
 **关键路径**：节点/撤权材料 → Android 真实会员 profile 与双身份回执 → 受保护签名候选 → staging 登录/支付沙箱/回滚 → go/no-go。商户 sandbox 与合规可和节点开发、签名准备并行，但都必须在开放付费试点前通过。Android 离线失败处理、Web/API 沙箱回归、候选 workflow 检查可按目录边界并行，集成时统一以最新 main 运行全套 CI。AI 当前主要耗时应投到 Android 会员路径缺口与候选/测试的可重复性，不再继续深挖已经覆盖较多的 M10 合成探测状态边界。
 
@@ -124,18 +126,18 @@
 
 **重新排序规则**：将可离线推进的 M10 深度补测设为当前停止扩张的 Q2 工作包；每轮先列出一个 Q1 外部行动及一个 AI 可交付工作，外部阻塞期间继续不依赖该材料的首发代码/候选检查。每个子任务目标控制在约 2 小时内可验收，超出时拆成明确检查点；外部等待和 CI/设备运行单独计时。不得通过降低设备限制、关闭安全门或跳过真实回执压缩日历。
 
-### 0.2.2 Q1 放行门外部行动清单（2026-11-24 复核）
+### 0.2.2 Q1 放行门外部行动清单（2026-11-25 复核）
 
 以下工作不能由 AI 离线代码替代。负责人按职责角色列出，具体姓名/日期未由用户或责任人确认，因此记录为待落实，不假设已经有人承接。每个行动项需要在本周首发 go/no-go 前更新状态。
 
 | Q1 门 | 当前证据/状态 | 需要的负责人动作 | 可核对退出证据 | 截止检查点 |
 | --- | --- | --- | --- | --- |
-| 会员节点与撤权回执 | AWS `xlb-ops` STS 在 11-24 记录有效，实验资源只读盘点为空；尚无会员专属线路/节点材料 | 节点/运维负责人提供隔离节点 endpoint、节点身份、CA 与生产用途 mTLS 注入路径、获批 canary 地址；指定窗口让两台绑定设备跑连接/复制拒绝/退款撤权 | 节点 `node/peer/request/generation` 匹配的回执、最终累计流量与重连拒绝；两台设备各自输出脱敏版本/时间证据 | 11-25 前确认材料与窗口；11-27 前执行，否则 12-01 不能称受控试点上线 |
-| Android 受保护签名候选 | 候选 workflow 和签名配置离线验证通过；签名 Environment 只读 API 当前返回 0 项 | 仓库管理员创建 `android-release-candidate` protected environment，限定 main、设置审核者；凭据负责人按批准通道注入 keystore/password 与 approved API origin，不在仓库/聊天传递 | 获批者手动运行 workflow，保存 APK、BOM、manifest、provenance 与审核结果；不自动建 GitHub Release 或上架 | 11-25 确认管理员/凭据负责人；11-27 前产候选，否则不能称候选可审核 |
+| 会员节点与撤权回执 | 11-25 经 `ops/aws-cli` 只读尝试确认 `xlb-ops` STS 已过期，未继续查询 AWS 资源；实验资源最新一次历史只读盘点为空（11-24）；尚无会员专属线路/节点材料 | 节点/运维负责人提供隔离节点 endpoint、节点身份、CA 与生产用途 mTLS 注入路径、获批 canary 地址；用户本人先重新 `aws login`，之后只读盘点并审查获批 plan；指定窗口让两台绑定设备跑连接/复制拒绝/退款撤权 | 节点 `node/peer/request/generation` 匹配的回执、最终累计流量与重连拒绝；两台设备各自输出脱敏版本/时间证据 | 11-25 负责人/材料尚未确认；11-27 仍为原计划目标、并非已承诺窗口；缺材料则 12-01 不可称受控试点上线 |
+| Android 受保护签名候选 | 候选 workflow 和签名配置离线验证通过；11-25 GitHub 只读 API 返回 Environment 数量 0 项 | 仓库管理员创建 `android-release-candidate` protected environment，限定 main、设置审核者；凭据负责人按批准通道注入 keystore/password 与 approved API origin，不在仓库/聊天传递 | 获批者手动运行 workflow，保存 APK、BOM、manifest、provenance 与审核结果；不自动建 GitHub Release 或上架 | 11-25 管理员/凭据负责人尚未确认；11-27 仍为原计划目标、并非已承诺候选日期；未配置不得称候选可审核 |
 | staging 与回滚 | CI 容器构建/HTTP smoke 通过；无 staging 部署记录 | staging 负责人确认隔离 URL、数据库/数据保留、部署权限、回滚责任人与维护窗口；任何新增费用/云资源先单独审批 | 按同一源 commit 部署、健康检查、登录/权益/支付沙箱 smoke、回滚演练记录 | 11-25 确认窗口；11-28 前验收，否则不开放付费试点 |
 | 商户沙箱与首发合规 | provider-neutral 支付及退款状态机只有 local/testing 证据；真实商户与首发市场书面意见未登记 | 支付负责人提供单一商户 sandbox、回调契约、签名/重试规则和对账字段；合规负责人确认首发地区、退款/隐私/服务条款并给书面意见 | 商户 sandbox 下单→回调→权益→退款→对账记录，以及可审计合规结论 | 11-25 确认资料/责任人；11-28 前验收，否则只保留本地沙箱演示，不宣称可收真实款或可上线 |
 
-**当前判断**：负责人及日期都没有本轮确认，核心节点材料和签名 Environment 明确缺失；因此 12-01 是内部冲刺检查点，不是可信的上线承诺。外部泳道应与离线代码并行，但等待责任人不能由 AI 通过重复增加本机测试替代。下一 AI 工作限于首发 Android/Web/API 测试缺口、候选 workflow 检查和不依赖真实凭据的恢复验证；M10 同类全链探测测试暂时冻结，直到出现新故障证据或真实 canary 材料。
+**当前判断（2026-11-25）**：负责人及日期都没有本轮确认，核心节点材料、签名 Environment 明确缺失，`xlb-ops` 会话本轮检查时已过期；因此 12-01 是内部冲刺检查点，不是可信的上线承诺。用户本人需恢复 AWS CLI 登录后，才能进行获批窗口前的只读资源盘点；不得为恢复会话而代替用户登录。外部泳道应与离线代码并行，但等待责任人不能由 AI 通过重复增加本机测试替代。下一 AI 工作限于首发 Android/Web/API 有新证据支持的测试缺口和候选 workflow 检查；M10 同类全链探测测试暂时冻结，直到出现新故障证据或真实 canary 材料。
 
 **2026-11-24 Android service 销毁清理未消费 grant**：专用 `xlb-m9-recovery` AVD instrumentation 先复现 service 销毁后单次 member handoff 仍留在进程级 grant store；`XlbVpnService.onDestroy()` 现在同步清除 pending grant。修复后定向 instrumentation 1/1、service admission instrumentation 整组 4/4 与 Android 全量 JVM、lint、AndroidTest 编译、Debug APK build 通过，主线 CI `45278603034` 全绿。仅验证 AVD service 生命周期，不开启生产 member gate，不建立真实 VPN/TUN 或节点连接。
 

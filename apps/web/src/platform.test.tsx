@@ -144,6 +144,60 @@ describe('member sandbox purchase flow', () => {
       && !String(input).includes('/sandbox-payment'))).toBe(false);
   });
 
+  it('cancels a pending test order and refreshes the order state', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    window.history.replaceState({}, '', '/account?view=orders');
+    let cancelled = false;
+    let orderListFetches = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith('/api/v1/auth/session')) return json(member);
+      if (path.endsWith('/api/v1/auth/csrf')) return json({ token: 'test-csrf-token' });
+      if (path.endsWith('/api/v1/me/overview')) {
+        return json({ user: member, entitlement: null, activeSubscriptions: 0, recentOrders: [order] });
+      }
+      if (path.includes('/api/v1/me/orders?')) {
+        orderListFetches += 1;
+        return new Response(JSON.stringify({ data: [cancelled ? { ...order, status: 'cancelled_test' } : order],
+          meta: { total: 1, page: 1, per_page: 20, total_pages: 1 } }), {
+          status: 200, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (path.endsWith('/api/v1/me/orders/order-sandbox-test/cancel') && init?.method === 'POST') {
+        cancelled = true;
+        return json({ ...orderDetail(false), status: 'cancelled_test', events: [{
+          id: 'order-cancel-event', from_status: 'pending_test', to_status: 'cancelled_test',
+          created_at: '2026-11-24T00:02:00Z', actor_name: member.name,
+        }] });
+      }
+      if (path.endsWith('/api/v1/me/orders/order-sandbox-test')) {
+        return json(cancelled ? { ...orderDetail(false), status: 'cancelled_test' } : orderDetail(false));
+      }
+      return json(null);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = await render(<App />);
+    await settle();
+    expect(container.textContent).toContain(order.id);
+    await fireEvent([...container.querySelectorAll('button')].find(button => button.textContent === '详情')!, 'click');
+    await settle();
+    expect(container.textContent).toContain('取消测试订单');
+    await fireEvent([...container.querySelectorAll('button')]
+      .find(button => button.textContent?.includes('取消测试订单'))!, 'click');
+    expect(container.textContent).toContain('确认取消此测试订单');
+    await fireEvent([...container.querySelectorAll('button')]
+      .find(button => button.textContent?.includes('确认取消订单'))!, 'click');
+    await settle();
+
+    expect(fetchMock.mock.calls.some(([input, init]) => String(input).endsWith('/api/v1/me/orders/order-sandbox-test/cancel')
+      && init?.method === 'POST')).toBe(true);
+    expect(orderListFetches).toBeGreaterThan(1);
+    expect(container.querySelector('tbody')?.textContent).toContain('已取消 · 测试');
+    expect(container.textContent).toContain('已取消 · 测试');
+    expect(container.textContent).not.toContain('模拟沙箱付款');
+  });
+
   it('records an admin sandbox refund with an idempotency key and pending node receipt', async () => {
     window.history.replaceState({}, '', '/');
     let loggedIn = false;
