@@ -210,6 +210,8 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 
 **worktree 用户改动与主线测试语义复核（2026-11-24，基于 `3174559`）**：逐项只读比较 `android-native-ci` 的 Gradle/AndroidTest 文件与 `android-revoked-permission` 的会员授权 instrumentation。Gradle runner 与 AndroidX test 依赖已在主线；主线 `SecureSessionStoreInstrumentedTest` 有 5 个测试方法，旧 worktree 文件有其中 4 个。旧分支新增的“Activity 重建后拒绝系统 VPN 权限”情形已由主线 `deniedPermissionCallbackDoesNotReauthorizeOrStartMemberService` 覆盖，主线还断言无 `CONNECTED` 广播。没有发现待补的独立行为断言；保留两处原始用户改动和 `.hprof`，不重复移植、不暂存或清理。
 
+**worktree / 并行成果复核（2026-11-25，基线 `main=c9779b2`）**：只读盘点 34 个登记 checkout，主线仅有预存 `.playwright-cli/`、`output/` 未跟踪目录。`android-native-ci` 保留 1 处 Gradle runner/AndroidX instrumentation 依赖改动和未跟踪 AndroidTest 文件；detached `android-revoked-permission` 保留 1 个未提交 instrumentation 用例及 `java_pid90057.hprof`；均未改动、暂存或清理。默认 checkout `android-stale-grant-foreground` 为 `e65718a`，相对 `origin/main` 落后 77 个提交、领先 5 个；这 5 个提交的 patch 均已存在于主线 `5be4a7a` / `88f5f0c`，不重复合入。`aws-inventory-status-refresh`、`android-node-auth-status`、`fleet-recovery-preview` 仍各有 patch-ID 不同的历史提交；逐项核对发现 grant handoff/foreground stale-intent 行为与测试、节点授权状态映射与诊断测试、review-only fleet recovery CLI 与单测均已在当前主线存在，另外只剩过时进度记录/估期文字，不是未交付功能。未发现需要倒合的功能；不删除旧 worktree，不触碰用户改动。后续新 worktree 应从更新后的 main 创建，旧分支只在其新增独立验收价值重新出现时处理。
+
 近期按“共用契约先锁定、平台实现并行、真实节点串行验收”推进。下列早期 11-24 至 11-25 事件与会话记录均按其日期保留为历史，不表示当前外部会话或环境状态：
 
 1. **Android M8 离线证明阶段（2026-11-22 已完成）**：专用隔离 AVD instrumentation 已验证同 installation ID 稳定复用 P-256 公钥、不同 installation ID 得到不同公钥、challenge 签名可由对应公钥验证、私钥不可导出；完整 instrumentation 6/6 通过。此阶段不证明硬件 backed provenance，也未接入会员隧道。
