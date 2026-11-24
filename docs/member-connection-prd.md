@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **Android 设备移除名额提示与撤权语义一致（2026-11-25，本机 JBR 21）**：设备移除确认框此前无条件表示“移除后不再占用套餐名额”，与服务端在有活动 peer 时返回 `revocation_pending`、须等节点确认才释放名额的规则冲突。现改为在确认前说明节点需要撤权时需等待确认，并提示用户之后可查看设备列表状态；本机安装 Android Studio JBR 21 与 SDK 后运行 `./gradlew testDebugUnitTest lintDebug assembleDebug` 成功。只修正用户可见提示，不改变额度/撤权状态机，不宣称当前真实节点已回执或立即断流。
+
 - **Q2 Windows proof 生命周期缺口核查（2026-11-25，主线 `b4bea1a`）**：独立 worktree 对照 Tauri `AccountClient`、`AppState` 与 `proof_bridge.rs` 后确认：账户客户端在登录/恢复、授权设备快照变化、session 401 和 logout 时会清除本地 `VerifiedMemberDeviceProof`；但 `AppState` 目前只持有 AccountClient/API URL，没有 bridge supervisor，代码也没有 production `ProofBridgeAdapter`、启动命令或子进程句柄。`PROOF_BRIDGE_ENABLED` 仍为 `false`，唯一 supervisor 只由 fake adapter 单测驱动。因缺少可接入的真实运行契约，本阶段没有添加孤立测试适配器或虚构运行行为，也未运行测试。下一项离线阶段是先定义生产 bridge/process 的启动、peer 重新授权、revoke 检查、停止与 reap 契约，再把 proof-invalidated 生命周期接到 supervisor 并补 fake-process 集成回归；在此之前 Windows bridge/TUN 仍未实现或验收，默认 gate 保持关闭。
 
 - **M6 服务端严格设备名额回归复核（2026-11-25）**：在代码基线 `158d93f` 运行 `apps/php-api/tests/Feature/MemberDeviceApiTest.php`，19/19 通过、248 assertions。测试覆盖会员计划名额为 1 时，第一安装身份完成设备 challenge 签名绑定，第二个不同 installation 的独立 P-256 身份得到 `409 device_limit_reached`，数据库中仍只有一台登记设备；同一已登记身份的幂等重试仍可返回原设备。记录该结果的提交 `4d7f514` hosted CI `45505126826` 全部 jobs success。该证据验证 Laravel Feature 环境的服务端名额控制，不证明 Android 真机连接生产 API、真实节点拒绝复制凭证或撤权最终流量；M6 放行仍需真实 member profile/node 身份/endpoint/CA/mTLS 与匹配节点回执。默认 Android 诊断 worktree 的 5 个领先提交均已有等效主线补丁，不再重复合入。下一步仍按 Q1 外部材料清单推进真实节点联验，资料未到前继续做不改变设备限制的离线关键路径。

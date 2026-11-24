@@ -1246,8 +1246,8 @@ public final class MainActivity extends Activity {
     private void confirmDeviceRemoval(PlatformApi.MemberAccount account, PlatformApi.RegisteredDevice device) {
         if (busy) return;
         String detail = device.current ?
-                "移除本机会断开 VPN 并退出登录。重新登录后会作为新设备加入。" :
-                "移除后，这台设备将不再占用套餐名额。";
+                "移除本机会断开 VPN 并退出登录。若需要节点撤权，设备名额会在节点确认后释放。" :
+                "若需要节点撤权，设备名额会在节点确认后释放；提交后可在设备列表查看状态。";
         new AlertDialog.Builder(this)
                 .setTitle("移除" + device.name + "？")
                 .setMessage(detail)
