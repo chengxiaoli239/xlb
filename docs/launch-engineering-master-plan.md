@@ -56,7 +56,7 @@
 | **Q1 M11 签名候选与 staging** | APK、runtime SBOM、摘要 manifest、provenance workflow 有离线/CI 验证；protected Environment 未配置，无 staging 部署/回滚验收 | Environment 元数据可见后约 2–4 小时配置核对与候选流程复核；staging 演练约 0.5–1.5 日，环境和负责人等待另计 | 仓库管理员建受保护 Environment 并设审核者；凭据负责人经批准通道提供正式签名配置/API origin；staging 负责人给环境、窗口和回滚人。AI 不读取/提交凭据，不部署 | 获批者产出同一 commit 的签名 APK、SBOM、manifest、provenance；staging smoke 与回滚形成独立记录 |
 | **Q1 商户沙箱与首发合规** | provider-neutral 契约和 local/testing 付款退款账本已经存在；真实商户 sandbox、首发地区合规意见未验收 | 商户契约到位后约 0.5–1.5 日接入/验收，审查时间由外部负责人决定 | 支付负责人提供回调、签名、重试、对账字段；合规负责人确认地区和书面意见。不得以本地假渠道宣称真实支付已验收 | 测试下单→回调→权益→退款→对账可追溯，并取得书面放行意见 |
 | **Q2 Android 离线失败处理** | Android API 与 VPN 错误已安全归类，主线提交 `54c2b12` 的 hosted CI `45389731860` 六个 jobs 全绿；尚需围绕首发连接入口检查用户可操作恢复与诊断编号覆盖，避免重复增加低风险映射枚举 | 每个明确缺口约 1–3 小时；需先找出现有入口的可复现缺口 | 与真实节点材料独立，可继续本机/CI；不把错误编号当根因诊断或运行遥测 | 选定一个真实 UI/API 状态转换，补最小回归和文档证据后合入主线 |
-| **Q2 Web/API 沙箱首发回归** | 本地订单/权益/退款/对账和调度有测试，尚需确认首发路径 smoke 在干净测试环境可重复、敏感数据不进入报告 | 约 2–5 小时，按发现的问题拆分 | 可与 Android 离线验证并行，文件所有权分离；真实商户接入仍等 Q1 资料 | 一次完整 local/testing 购买→退款→撤权 outbox/审计验收报告，明确非真实支付 |
+| **Q2 Web/API 沙箱首发回归** | 2026-11-24 本机复跑订单、沙箱付款/退款、provider event ledger 31/31（325 assertions），Web account tests 8/8；覆盖建单幂等、模拟入账、退款撤权、outbox 重试和事件去重。未运行浏览器端到端或 staging | 代码回归已完成；浏览器 smoke 如纳入当前冲刺约 1–3 小时 | 可与 Android 离线验证并行，文件所有权分离；真实商户接入仍等 Q1 资料 | 复用现有测试证据，本周不重复造沙箱链路；若要补 UI journey，限定为本地测试环境且不触发真实资金 |
 | **Q2 发布可追溯性** | 候选 artifact 校验与 SBOM/provenance CI 已覆盖；缺 protected Environment 和正式签名运行证据 | 离线 checklist 复核约 1–2 小时，正式候选时间取决于外部配置 | 与 Web/API 回归并行；不得创建环境或注入秘密，除非用户授权且相应负责人执行 | 对照 workflow、权限、制品摘要和审批门形成短 go/no-go 清单 |
 | **Q3 外部协调** | 节点、仓库 Environment、staging、商户、合规负责人及日期尚未确认；用户已表示稍后提供外部放行责任人 | AI 汇总缺项约 30–60 分钟/轮；等待时长未知 | 用户提供负责人后再登记姓名和承诺日期；未经授权不代发消息 | 把负责人和下一动作映射到上方 Q1 表，按真实日期重排 |
 | **Q4 后续范围** | Windows 数据面、macOS/iOS、规模化并发、多云/CDN、非首发细节不影响 Android + Web/API 单服务商受控试点的近期最短路径 | 当前冲刺不分配 | 放入后续路线图；只有 Q1 发布门和首发链路稳定后再重估 | 暂无，本周不启动 |
@@ -86,6 +86,8 @@
 | 付费试点 Go/No-Go | Android 双身份复制拒绝和匹配节点撤权最终流量回执、商户 sandbox 对账、目标市场合规意见、签名/制品审查、staging 和支持/回滚责任均有证据 | 任一缺项都为 No-Go；离线 CI、AVD、合成 peer、local/testing 不能代替放行证据 |
 
 **本轮离线检查**：`python3 -m unittest ops.test_workflow_action_pins ops.test_verify_artifact_manifest`，10 项通过。该检查验证 workflow 权限/步骤和 artifact manifest 正负例，不实际运行签名 workflow、不访问 secrets、不产生候选 APK，也不代表 protected Environment 或发布放行已验收。
+
+**沙箱购买/退款回归复核**：`apps/php-api` 的 `OrderLifecycleTest`、`SandboxPaymentTest`、`SandboxRefundTest` 与 `Payments/ProviderPaymentEventLedgerTest` 共 31/31（325 assertions），Web Vitest 2 files / 8 tests 通过。验证的是 local/testing 数据库和组件/接口测试，不包含浏览器真实支付流程、真实商户、节点断流或 production/staging。
 
 四象限按对 12-01 Android + 网站/API 受控试点的影响与实际截止时间排序。两天半以上的项目运行时长不能直接当作 AI 编码工时；PRD/提交记录显示近期高投入集中在 Android service/grant 并发与生命周期失败关闭、M10 探测到路由过滤的多层测试与 hosted CI。它们是重要的安全/稳定性建设，但本机 canary 与合成状态不能交付真实会员线路；额外离线细节的边际价值已经低于外部放行材料。
 
