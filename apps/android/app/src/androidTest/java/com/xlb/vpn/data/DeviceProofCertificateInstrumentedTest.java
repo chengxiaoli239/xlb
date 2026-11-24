@@ -243,6 +243,7 @@ public final class DeviceProofCertificateInstrumentedTest {
             }
 
             certificate.close();
+            awaitNoActiveFixtureSessions();
             certificate = DeviceProofCertificate.create(proof);
             credentials = certificate.startProofBridge(fixture.getString("endpoint"), fixture.getString("ca_pem"));
             try (Socket revocationConnection = new Socket("127.0.0.1", 17890)) {
@@ -314,6 +315,17 @@ public final class DeviceProofCertificateInstrumentedTest {
         return MemberDeviceProof.fromAuthorizedResponse("member-1", installationId, publicKey,
                 DEVICE_ID, "registered", true, "ready", PEER_ID, NODE_ID, 3, 7,
                 DeviceBindingProof.encode(new byte[32]), "proxy-groups: []\n", signer);
+    }
+
+    private static void awaitNoActiveFixtureSessions() throws Exception {
+        long deadline = System.currentTimeMillis() + 2_000;
+        JSONObject status;
+        do {
+            status = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus());
+            if (status.getInt("active_sessions") == 0) return;
+            Thread.sleep(25);
+        } while (System.currentTimeMillis() < deadline);
+        throw new AssertionError("isolated peer session did not close before the next identity check: " + status);
     }
 
     private static X509Certificate parseCertificate(byte[] encoded) throws Exception {

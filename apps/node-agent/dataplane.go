@@ -126,6 +126,7 @@ func (plane *DataPlane) Handler() http.Handler {
 		writeJSON(writer, http.StatusOK, apiResponse{Data: map[string]string{"status": "isolated-test"}})
 	})
 	mux.HandleFunc("POST /v1/tunnel/heartbeat", plane.handleHeartbeat)
+	mux.HandleFunc("POST /v1/tunnel/disconnect", plane.handleDisconnect)
 	mux.HandleFunc("POST /v1/tunnel/connect", plane.handleConnect)
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.TLS == nil || len(request.TLS.PeerCertificates) == 0 {
@@ -236,6 +237,23 @@ func (plane *DataPlane) handleHeartbeat(writer http.ResponseWriter, request *htt
 		return
 	}
 	writeJSON(writer, http.StatusOK, apiResponse{Data: map[string]string{"status": "active"}})
+}
+
+func (plane *DataPlane) handleDisconnect(writer http.ResponseWriter, request *http.Request) {
+	tracked, sessionID, err := plane.authorizeConnection(request)
+	if err != nil {
+		writeFailure(writer, err)
+		return
+	}
+	if err := plane.store.Disconnect(sessionID); err != nil {
+		writeFailure(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, apiResponse{Data: map[string]string{"status": "disconnected"}})
+	if flusher, ok := writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	plane.closeConnection(tracked)
 }
 
 func (plane *DataPlane) handleConnect(writer http.ResponseWriter, request *http.Request) {

@@ -28,6 +28,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -57,6 +58,9 @@ public final class XlbVpnService extends VpnService {
 
     private static final String CHANNEL_ID = "xlb_vpn";
     private static final int NOTIFICATION_ID = 31;
+    private static final long MEMBER_HEALTH_CHECK_INTERVAL_MILLIS = 10_000;
+    private static final int MEMBER_HEALTH_FAILURE_THRESHOLD = 2;
+    private static final long ISOLATED_MEMBER_HEALTH_CHECK_INTERVAL_MILLIS = 1_000;
     private static final String[] PROBE_URLS = {
             "https://www.gstatic.com/generate_204",
             "https://cp.cloudflare.com/generate_204"
@@ -65,10 +69,12 @@ public final class XlbVpnService extends VpnService {
     private final ExecutorService tunnelWorker = Executors.newSingleThreadExecutor();
     private final TunnelAttemptGate tunnelAttempts = new TunnelAttemptGate();
     private final Object memberSessionLock = new Object();
+    private final Object memberHealthMonitorLock = new Object();
     private volatile boolean foregroundServiceStarted;
     private long memberGrantHandoffId;
     private ParcelFileDescriptor tun;
     private MemberTunnelSession memberSession;
+    private MemberTunnelHealthMonitor memberHealthMonitor;
 
     public static String currentState() {
         return currentState;
@@ -103,6 +109,7 @@ public final class XlbVpnService extends VpnService {
             memberGrantHandoffId = MemberTunnelGrantStore.pendingHandoffId();
         }
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
+            cancelMemberTunnelHealthMonitor();
             int attempt = tunnelAttempts.invalidate();
             MemberTunnelGrantStore.clear();
             requestMemberSessionStop();
@@ -135,6 +142,7 @@ public final class XlbVpnService extends VpnService {
                 return START_NOT_STICKY;
             }
             int attempt = tunnelAttempts.begin();
+            cancelMemberTunnelHealthMonitor();
             setMemberTunnelForAttempt(attempt, true);
             createChannel();
             promoteForeground("正在连接");
@@ -162,6 +170,7 @@ public final class XlbVpnService extends VpnService {
             return START_NOT_STICKY;
         }
         int attempt = tunnelAttempts.begin();
+        cancelMemberTunnelHealthMonitor();
         createChannel();
         promoteForeground("正在连接");
         publish(STATE_CONNECTING, null);
@@ -176,6 +185,7 @@ public final class XlbVpnService extends VpnService {
 
     @Override
     public void onRevoke() {
+        cancelMemberTunnelHealthMonitor();
         int attempt = tunnelAttempts.invalidate();
         MemberTunnelGrantStore.clear();
         requestMemberSessionStop();
@@ -185,6 +195,7 @@ public final class XlbVpnService extends VpnService {
 
     @Override
     public void onDestroy() {
+        cancelMemberTunnelHealthMonitor();
         int attempt = tunnelAttempts.invalidate();
         MemberTunnelGrantStore.clear(memberGrantHandoffId);
         requestMemberSessionStop();
@@ -292,12 +303,19 @@ public final class XlbVpnService extends VpnService {
         });
         try {
             operation.get(20, TimeUnit.SECONDS);
-            if (isolatedMemberTest) return;
+            if (isolatedMemberTest) {
+                startMemberTunnelHealthMonitor(attempt, true);
+                return;
+            }
             boolean published = tunnelAttempts.runIfCurrent(attempt, () -> {
                 publish(STATE_CONNECTED, null);
                 promoteForeground("已连接");
             });
-            if (!published) closeMemberSession();
+            if (!published) {
+                closeMemberSession();
+            } else {
+                startMemberTunnelHealthMonitor(attempt, false);
+            }
         } catch (TimeoutException exception) {
             operation.cancel(true);
             session.requestStop();
@@ -370,6 +388,89 @@ public final class XlbVpnService extends VpnService {
                 if (certificate != null) certificate.stopProofBridge();
             }
         };
+    }
+
+    private void startMemberTunnelHealthMonitor(int attempt, boolean isolatedMemberTest) {
+        long intervalMillis = isolatedMemberTest
+                ? ISOLATED_MEMBER_HEALTH_CHECK_INTERVAL_MILLIS
+                : MEMBER_HEALTH_CHECK_INTERVAL_MILLIS;
+        MemberTunnelHealthMonitor monitor = new MemberTunnelHealthMonitor(
+                () -> tunnelAttempts.isCurrent(attempt) && currentTunnelIsMember,
+                isolatedMemberTest ? this::probeIsolatedMemberEcho : this::probeVpnRoute,
+                () -> {
+                    cancelMemberTunnelHealthMonitor();
+                    try {
+                        worker.execute(() -> failMemberTunnelAfterHealthCheck(attempt));
+                    } catch (RejectedExecutionException ignored) {
+                        // Service destruction invalidated the worker before this monitor callback ran.
+                    }
+                },
+                intervalMillis,
+                MEMBER_HEALTH_FAILURE_THRESHOLD);
+
+        synchronized (memberHealthMonitorLock) {
+            if (!tunnelAttempts.isCurrent(attempt) || !currentTunnelIsMember) {
+                monitor.close();
+                return;
+            }
+            memberHealthMonitor = monitor;
+        }
+        monitor.start();
+    }
+
+    private boolean probeIsolatedMemberEcho() throws IOException {
+        ConnectivityManager manager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network network = manager == null ? null : manager.getActiveNetwork();
+        NetworkCapabilities capabilities = network == null || manager == null
+                ? null : manager.getNetworkCapabilities(network);
+        if (network == null || capabilities == null
+                || !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) return false;
+
+        byte[] probe = "xlb-health".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        try (java.net.Socket socket = network.getSocketFactory().createSocket()) {
+            socket.connect(new java.net.InetSocketAddress("192.0.2.1", 443), 1_000);
+            socket.setSoTimeout(1_000);
+            socket.getOutputStream().write(probe);
+            socket.getOutputStream().flush();
+            byte[] response = new byte[probe.length];
+            int offset = 0;
+            while (offset < response.length) {
+                int count = socket.getInputStream().read(response, offset, response.length - offset);
+                if (count < 0) return false;
+                offset += count;
+            }
+            return java.util.Arrays.equals(probe, response);
+        }
+    }
+
+    private void cancelMemberTunnelHealthMonitor() {
+        MemberTunnelHealthMonitor monitor;
+        synchronized (memberHealthMonitorLock) {
+            monitor = memberHealthMonitor;
+            memberHealthMonitor = null;
+        }
+        if (monitor != null) monitor.close();
+    }
+
+    private void failMemberTunnelAfterHealthCheck(int attempt) {
+        if (!tunnelAttempts.isCurrent(attempt)) return;
+        if (!closeMemberSession()) {
+            closeCore();
+            currentRouteName = "";
+            tunnelAttempts.runIfCurrent(attempt, () -> {
+                publish(STATE_ERROR, "VPN 资源清理尚未完成，请重试");
+                stopSelf();
+            });
+            return;
+        }
+
+        closeCore();
+        currentRouteName = "";
+        tunnelAttempts.finishIfCurrent(attempt, () -> {
+            currentTunnelIsMember = false;
+            publish(STATE_ERROR, "会员线路连接或网络验证失败，请重试");
+            stopSelf();
+        });
     }
 
 

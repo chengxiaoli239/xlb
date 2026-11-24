@@ -139,6 +139,7 @@ android {
 }
 
 def goCoreDir = file('../core-native')
+def goNodeAgentDir = file('../../node-agent')
 def ndkPrebuiltDir = file("${android.sdkDirectory}/ndk/${android.ndkVersion}/toolchains/llvm/prebuilt")
 def ndkCompilerName = 'aarch64-linux-android26-clang'
 def ndkHostTag
@@ -168,6 +169,7 @@ def registerMihomoArm64Build = { String variant, boolean includeTestSignerCallba
         workingDir goCoreDir
         outputs.file(file("$outputDir/libxlbcore.so"))
         inputs.files(fileTree(goCoreDir) { include '*.go', '*.c', '*.h', 'go.mod', 'go.sum' })
+        inputs.files(fileTree(goNodeAgentDir) { include '**/*.go', 'go.mod', 'go.sum' })
         inputs.property('testSignerCallbackEnabled', includeTestSignerCallback)
         doFirst { outputDir.mkdirs() }
         environment 'CGO_ENABLED', '1'

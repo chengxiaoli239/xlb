@@ -40,8 +40,13 @@ type Bridge struct {
 	transport     *http.Transport
 	ctx           context.Context
 	cancel        context.CancelFunc
+	closeOnce     sync.Once
+	closeErr      error
 	connected     atomic.Bool
-	mu            sync.Mutex
+	lifecycleMu   sync.Mutex
+	handlers      sync.WaitGroup
+	localClients  map[net.Conn]struct{}
+	closing       bool
 	credentialsMu sync.RWMutex
 	listener      net.Listener
 	localUser     []byte
@@ -118,7 +123,8 @@ func New(config Config) (*Bridge, error) {
 	bridge := &Bridge{
 		identity: identity, remoteURL: remote, client: &http.Client{Transport: transport},
 		transport: transport, ctx: ctx, cancel: cancel,
-		localUser: []byte(config.LocalUsername), localPass: []byte(config.LocalPassword),
+		localClients: make(map[net.Conn]struct{}),
+		localUser:    []byte(config.LocalUsername), localPass: []byte(config.LocalPassword),
 	}
 	go bridge.heartbeatLoop()
 	return bridge, nil
@@ -132,9 +138,13 @@ func (bridge *Bridge) Serve(listener net.Listener) error {
 	if !ok || address.IP == nil || !address.IP.IsLoopback() {
 		return errors.New("bridge listener must bind to loopback")
 	}
-	bridge.mu.Lock()
+	bridge.lifecycleMu.Lock()
+	if bridge.closing {
+		bridge.lifecycleMu.Unlock()
+		return errors.New("bridge is closed")
+	}
 	bridge.listener = listener
-	bridge.mu.Unlock()
+	bridge.lifecycleMu.Unlock()
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
@@ -145,28 +155,87 @@ func (bridge *Bridge) Serve(listener net.Listener) error {
 			}
 			return err
 		}
-		go bridge.serveSOCKSConnection(connection)
+		bridge.lifecycleMu.Lock()
+		if bridge.closing {
+			bridge.lifecycleMu.Unlock()
+			_ = connection.Close()
+			return nil
+		}
+		bridge.localClients[connection] = struct{}{}
+		bridge.handlers.Add(1)
+		bridge.lifecycleMu.Unlock()
+		go func() {
+			defer bridge.handlers.Done()
+			defer func() {
+				bridge.lifecycleMu.Lock()
+				delete(bridge.localClients, connection)
+				bridge.lifecycleMu.Unlock()
+			}()
+			bridge.serveSOCKSConnection(connection)
+		}()
 	}
 }
 
 func (bridge *Bridge) Close() error {
-	bridge.cancel()
-	bridge.mu.Lock()
-	listener := bridge.listener
-	bridge.mu.Unlock()
-	if listener != nil {
-		_ = listener.Close()
+	bridge.closeOnce.Do(func() {
+		bridge.lifecycleMu.Lock()
+		bridge.closing = true
+		listener := bridge.listener
+		clients := make([]net.Conn, 0, len(bridge.localClients))
+		for connection := range bridge.localClients {
+			clients = append(clients, connection)
+		}
+		bridge.lifecycleMu.Unlock()
+		bridge.cancel()
+		if listener != nil {
+			_ = listener.Close()
+		}
+		for _, connection := range clients {
+			_ = connection.Close()
+		}
+		done := make(chan struct{})
+		go func() {
+			bridge.handlers.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+		if bridge.connected.Load() {
+			bridge.disconnectRemoteSession()
+		}
+		bridge.transport.CloseIdleConnections()
+		bridge.credentialsMu.Lock()
+		for index := range bridge.localUser {
+			bridge.localUser[index] = 0
+		}
+		for index := range bridge.localPass {
+			bridge.localPass[index] = 0
+		}
+		bridge.credentialsMu.Unlock()
+	})
+	return bridge.closeErr
+}
+
+func (bridge *Bridge) disconnectRemoteSession() {
+	requestContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestContext, http.MethodPost,
+		bridge.endpoint("/v1/tunnel/disconnect", nil), nil)
+	if err != nil {
+		bridge.closeErr = err
+		return
 	}
-	bridge.transport.CloseIdleConnections()
-	bridge.credentialsMu.Lock()
-	for index := range bridge.localUser {
-		bridge.localUser[index] = 0
+	response, err := bridge.client.Do(request)
+	if err != nil {
+		bridge.closeErr = err
+		return
 	}
-	for index := range bridge.localPass {
-		bridge.localPass[index] = 0
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNotFound {
+		bridge.closeErr = fmt.Errorf("node tunnel session disconnect returned status %d", response.StatusCode)
 	}
-	bridge.credentialsMu.Unlock()
-	return nil
 }
 
 func (bridge *Bridge) heartbeatLoop() {

@@ -136,6 +136,30 @@ func TestSOCKSBridgeUsesDeviceProofAndForwardsTCPOverHTTP2(t *testing.T) {
 	if count := binary.BigEndian.Uint16(connectReply[8:]); count != 0 {
 		t.Fatalf("SOCKS bound port=%d; want zero placeholder", count)
 	}
+	if err := proxy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForNoActiveSessions(t, store)
+}
+
+func waitForNoActiveSessions(t *testing.T, store *agent.PeerStore) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, err := store.RuntimeSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.ActiveSessions == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snapshot, err := store.RuntimeSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Fatalf("closing the bridge left %d active peer sessions", snapshot.ActiveSessions)
 }
 
 func TestSOCKSBridgeRequiresConfiguredUserPassword(t *testing.T) {

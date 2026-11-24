@@ -61,6 +61,7 @@ type androidNodeAgentFixtureResponse struct {
 var androidNodeAgentFixture struct {
 	sync.Mutex
 	server     *httptest.Server
+	store      *agent.PeerStore
 	dataPlane  *agent.DataPlane
 	nodeID     string
 	peerID     string
@@ -99,6 +100,7 @@ func XlbStopAndroidNodeAgentFixture() {
 	androidNodeAgentFixture.Lock()
 	server := androidNodeAgentFixture.server
 	androidNodeAgentFixture.server = nil
+	androidNodeAgentFixture.store = nil
 	androidNodeAgentFixture.dataPlane = nil
 	androidNodeAgentFixture.Unlock()
 	if server == nil {
@@ -110,10 +112,20 @@ func XlbStopAndroidNodeAgentFixture() {
 //export XlbAndroidNodeAgentFixtureStatus
 func XlbAndroidNodeAgentFixtureStatus() *C.char {
 	androidNodeAgentFixture.Lock()
-	defer androidNodeAgentFixture.Unlock()
+	status := androidNodeAgentFixture.lastStatus
+	body := androidNodeAgentFixture.lastBody
+	store := androidNodeAgentFixture.store
+	androidNodeAgentFixture.Unlock()
+	activeSessions := 0
+	if store != nil {
+		if snapshot, err := store.RuntimeSnapshot(); err == nil {
+			activeSessions = snapshot.ActiveSessions
+		}
+	}
 	encoded, err := json.Marshal(map[string]any{
-		"status": androidNodeAgentFixture.lastStatus,
-		"body":   androidNodeAgentFixture.lastBody,
+		"status":          status,
+		"body":            body,
+		"active_sessions": activeSessions,
 	})
 	if err != nil {
 		return C.CString(`{"status":0,"body":""}`)
@@ -205,6 +217,7 @@ func startAndroidNodeAgentFixture(request androidNodeAgentFixtureRequest) (andro
 		return androidNodeAgentFixtureResponse{}, errors.New("fixture listener is not loopback")
 	}
 	androidNodeAgentFixture.server = server
+	androidNodeAgentFixture.store = store
 	androidNodeAgentFixture.dataPlane = dataPlane
 	androidNodeAgentFixture.nodeID = request.NodeID
 	androidNodeAgentFixture.peerID = request.PeerID
