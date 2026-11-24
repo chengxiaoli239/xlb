@@ -16,6 +16,7 @@ use GuzzleHttp\Psr7\Request as GuzzleRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -89,6 +90,9 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
 
     public function test_probe_performs_a_real_tls_13_mutual_tls_exchange_with_the_configured_credentials(): void
     {
+        if (DB::getDefaultConnection() !== 'sqlite') {
+            $this->markTestSkipped('The forked loopback TLS test is covered by the SQLite CI job to avoid sharing a database socket across processes.');
+        }
         if (! function_exists('pcntl_fork') || ! function_exists('posix_kill') || ! function_exists('stream_socket_server')) {
             $this->markTestSkipped('pcntl, POSIX signals, and PHP stream sockets are required for the local mTLS integration test.');
         }

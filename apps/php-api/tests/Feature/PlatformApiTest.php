@@ -199,6 +199,9 @@ class PlatformApiTest extends TestCase
     public function test_subscription_can_be_created_before_membership_and_used_after_it_starts(): void
     {
         $this->actingAs(User::findOrFail('user-member'));
+        $peerIds = DB::table('node_access_peers')->where('user_id', 'user-member')->select('id');
+        DB::table('node_traffic_reservations')->whereIn('peer_id', $peerIds)->delete();
+        DB::table('node_access_peers')->where('user_id', 'user-member')->delete();
         DB::table('entitlements')->where('user_id', 'user-member')->delete();
 
         $created = $this->postJson('/api/v1/me/subscriptions')->assertCreated()->json('data');

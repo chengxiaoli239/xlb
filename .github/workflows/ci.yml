@@ -204,15 +204,26 @@ jobs:
         working-directory: apps/php-api
         run: composer install --no-interaction --prefer-dist
 
-      - name: Run order, payment, and refund Feature tests
+      - name: Set up Go for the pinned Mihomo parser
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: apps/node-agent/go.mod
+          cache-dependency-path: |
+            apps/node-agent/go.sum
+            apps/android/core-native/go.sum
+
+      - name: Build the pinned Mihomo profile parser
+        working-directory: apps/android/core-native
+        run: |
+          mihomo_version=$(go list -m -f '{{.Version}}' github.com/metacubex/mihomo)
+          go mod download "github.com/metacubex/mihomo@${mihomo_version}"
+          mihomo_dir="$(go env GOMODCACHE)/github.com/metacubex/mihomo@${mihomo_version}"
+          mkdir -p "$RUNNER_TEMP/mihomo-bin"
+          (cd "$mihomo_dir" && go build -o "$RUNNER_TEMP/mihomo-bin/mihomo" .)
+
+      - name: Run full Laravel test suite
         working-directory: apps/php-api
-        run: >-
-          php artisan test --compact
-          tests/Feature/NodeAutomationTest.php
-          tests/Feature/OrderLifecycleTest.php
-          tests/Feature/SandboxPaymentTest.php
-          tests/Feature/SandboxRefundTest.php
-          tests/Feature/Payments/ProviderPaymentEventLedgerTest.php
+        run: php artisan test --compact
         env:
           APP_ENV: testing
           APP_KEY: base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
@@ -223,6 +234,7 @@ jobs:
           DB_PORT: ${{ matrix.port }}
           DB_URL: ''
           DB_USERNAME: ${{ matrix.username }}
+          XLB_MIHOMO_BINARY: ${{ runner.temp }}/mihomo-bin/mihomo
 
   node-agent:
     name: Isolated node agent tests and build

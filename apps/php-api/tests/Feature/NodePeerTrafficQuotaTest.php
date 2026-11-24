@@ -14,19 +14,24 @@ final class NodePeerTrafficQuotaTest extends TestCase
 {
     private string $databasePath;
 
+    private string $defaultDatabaseConnection;
+
     protected function setUp(): void
     {
         parent::setUp();
         $path = tempnam(sys_get_temp_dir(), 'xlb-quota-');
         $this->assertNotFalse($path);
         $this->databasePath = $path;
+        $this->defaultDatabaseConnection = (string) config('database.default');
         config([
+            'database.default' => 'sqlite',
             'database.connections.sqlite.database' => $path,
             'database.connections.sqlite.busy_timeout' => 15000,
             'database.connections.sqlite.transaction_mode' => 'IMMEDIATE',
         ]);
+        DB::setDefaultConnection('sqlite');
         DB::purge('sqlite');
-        Artisan::call('migrate:fresh', ['--force' => true]);
+        Artisan::call('migrate:fresh', ['--database' => 'sqlite', '--force' => true]);
         $this->seed();
         $this->createPeer(1024);
     }
@@ -42,6 +47,8 @@ final class NodePeerTrafficQuotaTest extends TestCase
                 unlink($path);
             }
         }
+        config(['database.default' => $this->defaultDatabaseConnection]);
+        DB::setDefaultConnection($this->defaultDatabaseConnection);
 
         parent::tearDown();
     }
@@ -445,7 +452,7 @@ final class NodePeerTrafficQuotaTest extends TestCase
             'endpoint_host' => '127.0.0.1', 'endpoint_port' => 9443, 'status' => 'available',
             'is_test' => false, 'max_sessions' => 10, 'active_sessions' => 0, 'latency_ms' => 1,
             'updated_at' => $now, 'health_status' => 'healthy', 'last_health_check_at' => $now,
-            'config_version' => 'quota-test', 'agent_client_cert_sha256' => null,
+            'config_version' => 1, 'agent_client_cert_sha256' => null,
         ]);
         DB::table('member_devices')->insert([
             'id' => $deviceId, 'user_id' => 'user-member', 'installation_id' => (string) Str::uuid(),

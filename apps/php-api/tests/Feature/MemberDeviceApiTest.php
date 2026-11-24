@@ -78,6 +78,9 @@ class MemberDeviceApiTest extends TestCase
             'platform' => 'windows',
         ])->assertStatus(409)->assertJsonPath('error.code', 'device_limit_reached');
 
+        $peerIds = DB::table('node_access_peers')->where('user_id', 'user-member')->select('id');
+        DB::table('node_traffic_reservations')->whereIn('peer_id', $peerIds)->delete();
+        DB::table('node_access_peers')->where('user_id', 'user-member')->delete();
         DB::table('entitlements')->where('user_id', 'user-member')->delete();
         $this->postJson('/api/v1/me/devices', [
             'installation_id' => 'cfcb24d3-d51a-4e93-89c7-f643fc9b338d',

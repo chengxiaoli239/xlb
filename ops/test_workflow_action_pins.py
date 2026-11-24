@@ -46,7 +46,7 @@ class WorkflowActionPinsTest(unittest.TestCase):
                 "actions/checkout": 8,
                 "actions/setup-node": 3,
                 "pnpm/action-setup": 3,
-                "actions/setup-go": 4,
+                "actions/setup-go": 5,
                 "actions/setup-java": 2,
                 "actions/setup-python": 1,
                 "actions/upload-artifact": 3,
