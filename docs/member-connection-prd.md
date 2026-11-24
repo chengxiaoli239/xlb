@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M10 canary 全部无健康候选时回退稳定线路（2026-11-24，本地 SQLite）**：复现 test-scope 100% canary 已选中但其唯一候选变为 unhealthy 时 `resolve()` 返回无线路；修复为 canary 无任何健康候选时回退到仍有健康候选的 published 版本。新增 Feature 同时断言 canary 健康时仍先选 canary，候选失效后才回退到版本 1 和其节点。Laravel 全套 257 项中 256 passed、1 个既有 skip、2,291 assertions；Pint 与 PHP syntax 通过。该回退仅影响后续账号级线路解析/profile，不修改 canary 发布状态、已建立隧道、逐设备 peer、撤权或节点 drain 状态；无真实节点故障注入与流量回执，不能称为真实故障切换或断流验收。
+
 - **M10 探测熔断恢复门槛到订阅路由联验（2026-11-24，本地 SQLite + 合成 driver）**：扩展 route-filter 联验覆盖完整状态路径：三次合成成功后 profile 可返回，三次合成超时后不可返回，熔断打开时前两次成功仍保持不可用，第三次成功后状态恢复 healthy 且 profile 才重新包含该节点。定向 1/1、20 assertions；Laravel 全套 256 项中 255 passed、1 个既有 skip、2,284 assertions，Pint 与 PHP syntax 通过。该测试只验证合成结果经过持久状态和 profile 路由的 fail-closed / recovery 阈值，不发起网络探测，不证明真实节点恢复速度、误报率、线路流量或生产 scheduler。route filter 与 scheduler 仍默认关闭；真实 canary 需要获批节点身份/证书/目标。
 
 - **M10 熔断状态到订阅路由 fail-closed 联验（2026-11-24，本地 SQLite + 合成 driver）**：增加端到端 Feature 回归，在 route filter 关闭时读取 local/test 节点 profile；启用过滤后以合成 driver 连续产生三次 timeout，确认持久 probe 状态开路，profile 不再包含该节点并返回线路不可用，节点既有 `health_status` 和 `last_health_check_at` 保持不变。定向 1/1、15 assertions；Laravel 全套 255 项中 254 passed、1 个既有 skip、2,264 assertions，Pint 与 PHP syntax 通过。此测试没有发起网络探测，合成失败不会写入节点验收健康字段；配置默认关闭，因此不证明真实节点故障、稳定性或生产 failover。下一步仍需为真实 executor、受控 scheduler 和目标 canary 准备隔离环境，代码侧继续完善可离线验证的恢复/过期边界。

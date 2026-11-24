@@ -145,9 +145,21 @@ class SubscriptionRouteService
         if (! $selected) {
             return null;
         }
+
+        $nodes = $this->resolveHealthyNodes($selected, $scope);
+        if ($nodes->isEmpty() && $selected->id !== $published->id) {
+            $selected = $published;
+            $nodes = $this->resolveHealthyNodes($selected, $scope);
+        }
+
+        return $nodes->isEmpty() ? null : ['version' => $selected, 'nodes' => $nodes->all()];
+    }
+
+    private function resolveHealthyNodes(object $version, string $scope): Collection
+    {
         $healthyStatuses = $scope === 'production' ? ['healthy'] : ['verified_test', 'healthy'];
         $nodes = DB::table('nodes as n')->join('subscription_route_nodes as rn', 'rn.node_id', '=', 'n.id')
-            ->where('rn.route_version_id', $selected->id)->where('n.status', 'available')->whereIn('n.health_status', $healthyStatuses)
+            ->where('rn.route_version_id', $version->id)->where('n.status', 'available')->whereIn('n.health_status', $healthyStatuses)
             ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('node_deployments as d')->whereColumn('d.node_id', 'n.id'))
             ->orderByDesc('rn.weight')->orderBy('n.id')
             ->get(['n.id', 'n.name', 'n.endpoint_host', 'n.endpoint_port', 'n.agent_endpoint', 'n.max_sessions', 'n.active_sessions', 'n.last_health_check_at'])
@@ -162,7 +174,7 @@ class SubscriptionRouteService
             $nodes = $nodes->filter(fn (object $node): bool => isset($freshProbeStates[$node->id]))->values();
         }
 
-        return $nodes->isEmpty() ? null : ['version' => $selected, 'nodes' => $nodes->all()];
+        return $nodes;
     }
 
     public function reconcile(): int

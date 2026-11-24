@@ -192,6 +192,35 @@ class SubscriptionRouteTest extends TestCase
             ->assertJsonPath('data.items.0.nodes.0.id', 'node-test-1');
     }
 
+    public function test_canary_route_falls_back_to_published_route_when_candidates_become_unhealthy(): void
+    {
+        $this->actingAs(User::findOrFail('user-admin'));
+        DB::table('nodes')->insert([
+            'id' => 'node-test-2', 'name' => '演示节点 02', 'region' => '测试区域 B', 'protocol' => 'SOCKS5',
+            'endpoint_host' => '198.51.100.11', 'endpoint_port' => 1080, 'status' => 'available', 'is_test' => true,
+            'max_sessions' => 100, 'active_sessions' => 0, 'latency_ms' => 42, 'health_status' => 'verified_test',
+            'last_health_check_at' => now()->toIso8601String(), 'config_version' => 1, 'updated_at' => now()->toIso8601String(),
+        ]);
+        $routeId = $this->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'test', 'node_ids' => ['node-test-2'], 'note' => 'canary fallback test',
+        ])->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/admin/subscription-routes/'.$routeId.'/canary', ['percent' => 100])
+            ->assertOk()->assertJsonPath('data.status', 'canary');
+        $selectedCanary = app(SubscriptionRouteService::class)->resolve('user-member', 'test');
+        $this->assertSame($routeId, $selectedCanary['version']->id);
+
+        DB::table('nodes')->where('id', 'node-test-2')->update(['health_status' => 'unhealthy']);
+
+        $route = app(SubscriptionRouteService::class)->resolve('user-member', 'test');
+
+        $this->assertNotNull($route);
+        $this->assertSame('route-test-v1', $route['version']->id);
+        $this->assertSame(['node-test-1'], array_map(
+            static fn (object $node): string => $node->id,
+            $route['nodes'],
+        ));
+    }
+
     public function test_subscription_profile_contains_all_nodes_in_published_route(): void
     {
         $this->actingAs(User::findOrFail('user-admin'));
