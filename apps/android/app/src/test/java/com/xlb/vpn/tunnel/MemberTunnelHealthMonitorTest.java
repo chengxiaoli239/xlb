@@ -94,4 +94,33 @@ public final class MemberTunnelHealthMonitorTest {
         assertEquals(0, probes.get());
         assertFalse("monitor reported a stale attempt failure", callbackFailure.get() != null);
     }
+
+    @Test
+    public void closingDuringProbePreventsLateFailureCallback() throws Exception {
+        CountDownLatch probeStarted = new CountDownLatch(1);
+        CountDownLatch releaseProbe = new CountDownLatch(1);
+        AtomicInteger failures = new AtomicInteger();
+        MemberTunnelHealthMonitor monitor = new MemberTunnelHealthMonitor(
+                () -> true,
+                () -> {
+                    probeStarted.countDown();
+                    try {
+                        releaseProbe.await();
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return false;
+                },
+                failures::incrementAndGet,
+                5,
+                1);
+
+        monitor.start();
+        assertTrue("health probe did not start", probeStarted.await(1, TimeUnit.SECONDS));
+        monitor.close();
+        releaseProbe.countDown();
+        Thread.sleep(25);
+
+        assertEquals("closed monitor reported a late probe failure", 0, failures.get());
+    }
 }
