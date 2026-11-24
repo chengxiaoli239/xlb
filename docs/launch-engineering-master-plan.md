@@ -106,7 +106,7 @@
 
 | 阶段 | Go 条件 | 当前结论/动作 |
 | --- | --- | --- |
-| 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | `main@f507db0` 已推送，CI `45456754780` 六个 jobs 全绿；当前代码/CI 证据满足构建基线，正式候选冻结仍须绑定审核/审批记录 |
+| 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | 当前基线 `main=origin/main=158d93f`；hosted CI `45502035208` 状态 success。该基线含 Android 双身份隔离 peer 拒绝计划记录；正式候选冻结仍须绑定审核/审批记录 |
 | 签名权限 | `android-release-candidate` Environment 存在、仅允许 main、设置人工审核者；签名 secrets 和 approved API origin 由负责人经受控通道配置 | 2026-11-25 GitHub 只读 API 返回 Environment 数量为 0；未查询 secrets、未创建或修改 Environment，签名候选不可运行 |
 | 候选构建 | 获批者手动运行 workflow；Release unit tests、lint、APK signature/package identity 检查、runtime SBOM、APK+SBOM source-bound manifest、manifest 校验及两项 provenance attest 全部成功 | 常规 CI 仅以临时测试密钥检查签名配置并产出 Debug APK/SBOM；正式 workflow 仍受 `workflow_dispatch`、`main` 与 protected Environment 限制。没有正式凭据，未构建签名候选 |
 | 候选审查 | 下载 APK/BOM/manifest；核对 manifest source commit 等于审阅 commit、摘要一致；验证 APK signer/package 与来源证明；记录审阅结果 | 当前无正式签名候选制品；脚本和 CI 规则已覆盖校验路径，但该阶段未通过 |
@@ -114,6 +114,8 @@
 | 付费试点 Go/No-Go | Android 双身份复制拒绝和匹配节点撤权最终流量回执、商户 sandbox 对账、目标市场合规意见、签名/制品审查、staging 和支持/回滚责任均有证据 | **No-Go**：真实会员节点/撤权回执、真实商户 sandbox/对账、合规意见、正式签名候选、staging 与责任人日期均未齐。离线 CI、AVD、合成 peer、local/testing 不能代替放行证据 |
 
 **离线检查证据**：ops workflow 权限/步骤和 artifact manifest 正负例测试曾 10 项通过，常规主线 CI `45455644892` 六个 jobs 全绿。它们验证规则和候选构建技术路径，不实际运行正式签名 workflow、不访问 secrets、不产生正式候选 APK，也不代表 protected Environment 或发布放行已验收。
+
+**2026-11-25 主线设备名额复核**：在 `main@158d93f` 运行 `apps/php-api/tests/Feature/MemberDeviceApiTest.php`，19/19、248 assertions 通过。包括名额为 1 时第二个不同安装身份经设备 challenge 签名后仍被 `409 device_limit_reached` 拒绝，登记数保持 1；这是 Laravel Feature 控制面证据，不替代 Android 真机、生产 API、真实节点复制拒绝或撤权回执。此次复核不改变 Go/No-Go：Environment 为 0，签名候选、staging、商户 sandbox、合规意见及真实会员节点回执仍未验收。
 
 **沙箱购买/退款回归复核**：`apps/php-api` 的 `OrderLifecycleTest`、`SandboxPaymentTest`、`SandboxRefundTest` 与 `Payments/ProviderPaymentEventLedgerTest` 共 31/31（325 assertions），Web Vitest 2 files / 8 tests 通过。验证的是 local/testing 数据库和组件/接口测试，不包含浏览器真实支付流程、真实商户、节点断流或 production/staging。
 
