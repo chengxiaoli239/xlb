@@ -4,8 +4,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -101,6 +104,14 @@ func TestRuntimeConfigCanSelectIsolatedMihomoRenderer(t *testing.T) {
 	if store == nil {
 		t.Fatal("openPeerStoreForRuntimeConfig returned a nil store")
 	}
+	receipt, err := store.EnsurePeer(testRuntimeEnsureRequest(t))
+	if err != nil {
+		t.Fatalf("EnsurePeer error = %v", err)
+	}
+	if receipt.ConfirmationStatus != "confirmed_test" || receipt.ProfileArtifact == nil {
+		t.Fatalf("renderer receipt status/artifact = %q/%v; want confirmed_test with profile",
+			receipt.ConfirmationStatus, receipt.ProfileArtifact != nil)
+	}
 }
 
 func TestRuntimeConfigPathIsRequiredAtStartup(t *testing.T) {
@@ -180,4 +191,25 @@ func testRuntimeRendererCA(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func testRuntimeEnsureRequest(t *testing.T) agent.EnsurePeerRequest {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKeyDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := sha256.Sum256(publicKeyDER)
+	return agent.EnsurePeerRequest{
+		NodeID: "node-a", PeerID: "peer-a", EntitlementID: "entitlement-a", RequestID: "request-a",
+		Generation: 1, DeviceID: "device-a", DeviceName: "isolated test device",
+		DevicePublicKey:      base64.RawURLEncoding.EncodeToString(publicKeyDER),
+		DeviceKeyFingerprint: hex.EncodeToString(fingerprint[:]), DeviceBindingGeneration: 2,
+		SubscriptionID: "subscription-a", SubscriptionToken: "test-token-a", SubscriptionGeneration: 1,
+		PeerGeneration: 1, DeviceGeneration: 2, ExpiresAt: time.Now().Add(time.Hour), Credential: "test-peer-credential",
+	}
 }
