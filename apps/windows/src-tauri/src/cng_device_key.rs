@@ -615,6 +615,54 @@ mod tests {
     }
 
     #[test]
+    fn verified_member_proof_rejects_a_different_cng_device_public_key() {
+        let installation_id = uuid::Uuid::new_v4().to_string();
+        let other_installation_id = uuid::Uuid::new_v4().to_string();
+        let installation_key_name = key_name_for_identity(&installation_id).unwrap();
+        let other_key_name = key_name_for_identity(&other_installation_id).unwrap();
+        drop(DeviceKey::open_or_create(&installation_id).unwrap());
+        drop(DeviceKey::open_or_create(&other_installation_id).unwrap());
+        let _installation_key = TestKey {
+            key_name: installation_key_name,
+            installation_id: installation_id.clone(),
+        };
+        let other_key = TestKey {
+            key_name: other_key_name,
+            installation_id: other_installation_id.clone(),
+        };
+        let signer = std::sync::Arc::new(crate::CngDeviceProof { installation_id: installation_id.clone() });
+        let other_registered_public_key = other_key.open().public_key_spki_base64url().unwrap();
+        let device = crate::BoundDevice {
+            id: "fd3ae0f1-1234-4234-9234-000000000010".into(),
+            status: "registered".into(),
+            bound: true,
+        };
+        let authorization = crate::DeviceAuthorization {
+            status: "ready".into(),
+            peer_id: Some("fd3ae0f1-1234-4234-9234-000000000011".into()),
+            node_id: Some("fd3ae0f1-1234-4234-9234-000000000012".into()),
+            peer_generation: Some(1),
+            device_binding_generation: Some(1),
+            peer_credential: Some(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([7u8; 32])),
+            profile: Some("mixed-port: 0\nproxies: []\n".into()),
+        };
+
+        let result = crate::proof_bridge::VerifiedMemberDeviceProof::from_authorized_response(
+            "member-1",
+            &installation_id,
+            &device,
+            &authorization,
+            &other_registered_public_key,
+            signer,
+        );
+
+        assert!(matches!(
+            result,
+            Err(crate::proof_bridge::BridgeFailure::DeviceKeyUnavailable)
+        ));
+    }
+
+    #[test]
     fn rejects_wrong_challenge_length() {
         let key = TestKey::for_identity("length");
         assert!(key.open().sign_challenge_base64url(&[0; 31]).is_err());
