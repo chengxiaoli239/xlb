@@ -6,6 +6,8 @@
 
 - **四象限与一周冲刺排序（2026-11-25）**：全局四象限规范已在知识库 `10-全局/规范/AI项目四象限与持续推进.md`，本项目滚动计划新增 §0.4 模块排序和并行边界。最大技术工作量仍是 Android M8/M6 服务端授权→proof bridge→Mihomo/TUN→节点 peer→撤权回执闭环；其余主要上线耗时来自真实节点、商户沙箱、合规、受保护签名环境和 staging 等外部日历等待。逐项 AI 主动工时没有可靠记录，因此不将已过 2 天 12 小时直接换算成编码工时或完成率。Android 隧道失败诊断的等效主线提交 `5be4a7a` 对应 CI `45316986228` 六个 jobs 全绿，API 授权失败诊断的等效主线提交 `88f5f0c` 对应 CI `45322097403` 六个 jobs 全绿；当前 Android 诊断 worktree 的五个提交均为主线等效 patch，不重复开发。当前本机只有 JDK 26，Android Gradle Kotlin DSL 在解析 `26.0.1` 时失败，故本轮未获得本机 Android 测试结果；主线 CI 是该阶段的验收证据。具体 Q1–Q4、预计区间、责任角色与可并行工作见 [上线工程总体规划 §0.4](launch-engineering-master-plan.md)。
 
+- **Android 候选阶段 Go/No-Go 清单复核（2026-11-25）**：刷新 §0.2.3，将源码基线记录为 `main@2fc0312` / CI `45455644892` 六个 jobs 全绿；GitHub Environment 查询总数为 0，正式签名候选未运行，staging/回滚、真实会员节点与撤权回执、商户对账和合规意见仍未满足。当前决策为 **No-Go**，不部署、不签发正式候选、不产生云费用。清单已区分常规 CI 临时密钥与正式签名制品；该离线复核没有读取 secrets 或修改 GitHub 环境。
+
 - **首发放行外部状态复核（2026-11-25，只读）**：使用 GitHub API 只读查询确认仓库 Environment 数量为 0，`android-release-candidate` 受保护环境当前不存在或不可见，签名候选仍无法运行；未查询 secrets/variables、未创建 Environment、未写配置。经项目固定包装器运行 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 session expired；本轮没有重试登录、没有继续做 AWS 资源盘点，也没有任何云写操作。后续节点窗口前需用户本人重新 `aws login`，再由获批角色重新只读盘点与审核 plan；签名环境需仓库管理员创建 main-only Environment、设置审批人，凭据负责人经受控通道配置正式签名材料/API origin。用户已表示稍后提供外部放行负责人姓名；当前仍仅按角色记录，不假设已认领。以上不阻断离线代码与测试，但构成真实会员节点和候选放行的外部前置。
 
 - **Web 会员订单取消 UI 回归（2026-11-25，本机 Vitest 与生产构建）**：新增会员订单页取消待支付测试订单的 UI integration regression，验证显式确认后仅调用 local/testing `/api/v1/me/orders/{id}/cancel`，订单详情与列表均更新为 `cancelled_test`，订单列表在取消后重新请求，已取消订单不再提供模拟付款入口。Web 全套 Vitest 2 files / 9 tests 通过，TypeScript build 与 Vite production build 通过，diff check 通过。该测试使用 mock API，不代表真实商户支付、数据库并发或节点撤权；没有外部资金调用。

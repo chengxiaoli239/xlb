@@ -94,20 +94,20 @@
 
 其余 worktree 的领先提交均为 patch 等价或没有领先提交。主线及两个辅助 worktree 当前存在未提交/未跟踪内容；只读检查后全部保留，其中不提交 Playwright/output 临时目录、Android 辅助 worktree 测试编辑与内存转储文件。未重置、清理或合并任何辅助 worktree。后续并行审查以独有 patch 和当前代码语义为准，单看 ahead/behind 数量不能作为待合并工作量。
 
-### 0.2.3 Android 候选阶段 Go/No-Go 检查清单（2026-11-24）
+### 0.2.3 Android 候选阶段 Go/No-Go 检查清单（2026-11-25 复核）
 
 这是候选构建与后续受控试点的检查单，不授权创建 GitHub Environment、写入 secrets、部署或发布。
 
 | 阶段 | Go 条件 | 当前结论/动作 |
 | --- | --- | --- |
-| 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | `579b971` 已推送；对应 hosted CI `45391159683` 尚待结束，本轮不能提前标绿 |
-| 签名权限 | `android-release-candidate` Environment 存在、仅允许 main、设置人工审核者；签名 secrets 和 approved API origin 由负责人经受控通道配置 | PRD 最近一次只读核查记为 Environment 查询 404、环境列表为空。未重查外部设置前维持“未确认/不可运行”，由管理员处理 |
-| 候选构建 | 获批者手动运行 workflow；Release unit tests、lint、APK signature/package identity 检查、runtime SBOM、APK+SBOM source-bound manifest、manifest 校验及两项 provenance attest 全部成功 | workflow 只响应 `workflow_dispatch`，job 限 `refs/heads/main`，以 protected Environment 取凭据，仅 `contents: read` 加 attest 所需权限；失败即不进入 staging |
-| 候选审查 | 下载 APK/BOM/manifest；核对 manifest source commit 等于审阅 commit、摘要一致；验证 APK signer/package 与来源证明；记录审阅结果 | 当前只有脚本/CI 规则覆盖，无正式签名候选制品，因此该阶段未通过 |
-| staging 放行 | 负责人提供已批准 staging、数据保留与回滚窗口；候选摘要固定后部署；登录/权益、商户沙箱、Android 安装/线路和撤权回执 smoke 通过；回滚演练有记录 | 未有 staging 窗口与回滚责任人记录，不部署、不产生云费用 |
-| 付费试点 Go/No-Go | Android 双身份复制拒绝和匹配节点撤权最终流量回执、商户 sandbox 对账、目标市场合规意见、签名/制品审查、staging 和支持/回滚责任均有证据 | 任一缺项都为 No-Go；离线 CI、AVD、合成 peer、local/testing 不能代替放行证据 |
+| 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | `main@2fc0312` 已推送，CI `45455644892` 六个 jobs 全绿；当前代码/CI 证据满足构建基线，正式候选冻结仍须绑定审核/审批记录 |
+| 签名权限 | `android-release-candidate` Environment 存在、仅允许 main、设置人工审核者；签名 secrets 和 approved API origin 由负责人经受控通道配置 | 2026-11-25 GitHub 只读 API 返回 Environment 数量为 0；未查询 secrets、未创建或修改 Environment，签名候选不可运行 |
+| 候选构建 | 获批者手动运行 workflow；Release unit tests、lint、APK signature/package identity 检查、runtime SBOM、APK+SBOM source-bound manifest、manifest 校验及两项 provenance attest 全部成功 | 常规 CI 仅以临时测试密钥检查签名配置并产出 Debug APK/SBOM；正式 workflow 仍受 `workflow_dispatch`、`main` 与 protected Environment 限制。没有正式凭据，未构建签名候选 |
+| 候选审查 | 下载 APK/BOM/manifest；核对 manifest source commit 等于审阅 commit、摘要一致；验证 APK signer/package 与来源证明；记录审阅结果 | 当前无正式签名候选制品；脚本和 CI 规则已覆盖校验路径，但该阶段未通过 |
+| staging 放行 | 负责人提供已批准 staging、数据保留与回滚窗口；候选摘要固定后部署；登录/权益、商户沙箱、Android 安装/线路和撤权回执 smoke 通过；回滚演练有记录 | 尚无 staging 环境、窗口与回滚责任人记录；不部署、不产生云费用 |
+| 付费试点 Go/No-Go | Android 双身份复制拒绝和匹配节点撤权最终流量回执、商户 sandbox 对账、目标市场合规意见、签名/制品审查、staging 和支持/回滚责任均有证据 | **No-Go**：真实会员节点/撤权回执、真实商户 sandbox/对账、合规意见、正式签名候选、staging 与责任人日期均未齐。离线 CI、AVD、合成 peer、local/testing 不能代替放行证据 |
 
-**本轮离线检查**：`python3 -m unittest ops.test_workflow_action_pins ops.test_verify_artifact_manifest`，10 项通过。该检查验证 workflow 权限/步骤和 artifact manifest 正负例，不实际运行签名 workflow、不访问 secrets、不产生候选 APK，也不代表 protected Environment 或发布放行已验收。
+**离线检查证据**：ops workflow 权限/步骤和 artifact manifest 正负例测试曾 10 项通过，常规主线 CI `45455644892` 六个 jobs 全绿。它们验证规则和候选构建技术路径，不实际运行正式签名 workflow、不访问 secrets、不产生正式候选 APK，也不代表 protected Environment 或发布放行已验收。
 
 **沙箱购买/退款回归复核**：`apps/php-api` 的 `OrderLifecycleTest`、`SandboxPaymentTest`、`SandboxRefundTest` 与 `Payments/ProviderPaymentEventLedgerTest` 共 31/31（325 assertions），Web Vitest 2 files / 8 tests 通过。验证的是 local/testing 数据库和组件/接口测试，不包含浏览器真实支付流程、真实商户、节点断流或 production/staging。
 
