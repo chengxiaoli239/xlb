@@ -4,7 +4,7 @@ namespace Tests\Unit;
 
 use App\Providers\AppServiceProvider;
 use App\Services\ConfiguredNodeDataPlaneProbeTransport;
-use App\Services\InMemoryNodeHealthStateStore;
+use App\Services\DatabaseNodeHealthStateStore;
 use App\Services\MtlsNodeHealthProbeDriver;
 use App\Services\NodeDataPlaneProbeFailure;
 use App\Services\NodeDataPlaneProbeTransportException;
@@ -13,6 +13,7 @@ use App\Services\NodeHealthProbeCoordinator;
 use App\Services\NodeHealthProbeDriver;
 use GuzzleHttp\Exception\NetworkTimeoutException;
 use GuzzleHttp\Psr7\Request as GuzzleRequest;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -20,6 +21,8 @@ use Tests\TestCase;
 
 final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
 {
+    use RefreshDatabase;
+
     /** @var list<string> */
     private array $credentialFiles = [];
 
@@ -214,7 +217,7 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
                 $credentials['client_key'],
             );
 
-            $stateStore = new InMemoryNodeHealthStateStore;
+            $stateStore = new DatabaseNodeHealthStateStore;
             $assessment = (new NodeHealthProbeCoordinator(
                 new MtlsNodeHealthProbeDriver($transport, 5000),
                 new NodeHealthCircuitBreaker,
@@ -232,9 +235,10 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
             $this->assertNotNull($assessment->result->latencyMs);
             $this->assertNull($assessment->result->failureCode);
             $this->assertFalse($assessment->transition->ignoredAsStale);
-            $this->assertSame('healthy', $stateStore->get($nodeId)?->status);
-            $this->assertSame(0, $stateStore->get($nodeId)?->failureStreak);
-            $this->assertNotNull($stateStore->get($nodeId)?->lastProbeAt);
+            $persistedState = (new DatabaseNodeHealthStateStore)->get($nodeId);
+            $this->assertSame('healthy', $persistedState?->status);
+            $this->assertSame(0, $persistedState?->failureStreak);
+            $this->assertNotNull($persistedState?->lastProbeAt);
         } finally {
             $status = proc_get_status($server);
             $shutdownDeadline = microtime(true) + 1.0;
