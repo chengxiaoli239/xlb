@@ -67,10 +67,14 @@ public final class XlbVpnServiceAdmissionInstrumentedTest {
                 "https://node.example.invalid:9443", MemberTunnelGrantAvdFixture.trustedSystemCaPem());
         CountDownLatch rejected = new CountDownLatch(1);
         AtomicReference<String> message = new AtomicReference<>();
+        AtomicInteger connectedStates = new AtomicInteger();
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context receiverContext, Intent intent) {
-                if (XlbVpnService.STATE_ERROR.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                String state = intent.getStringExtra(XlbVpnService.EXTRA_STATE);
+                if (XlbVpnService.STATE_CONNECTED.equals(state)) {
+                    connectedStates.incrementAndGet();
+                } else if (XlbVpnService.STATE_ERROR.equals(state)) {
                     message.set(intent.getStringExtra(XlbVpnService.EXTRA_MESSAGE));
                     rejected.countDown();
                 }
@@ -99,6 +103,9 @@ public final class XlbVpnServiceAdmissionInstrumentedTest {
             assertNull(MemberTunnelGrantStore.consume(handoffId));
             assertFalse(XlbVpnService.currentTunnelIsMember());
             assertEquals("", XlbVpnService.currentRouteName());
+            assertEquals("closed member gate broadcast a connected state", 0, connectedStates.get());
+            assertFalse("closed member gate marked the VPN service connected",
+                    XlbVpnService.STATE_CONNECTED.equals(XlbVpnService.currentState()));
         } finally {
             MemberTunnelGrantStore.clear();
             context.unregisterReceiver(receiver);
