@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M10 Node Agent opt-in HTTPS canary executor（2026-11-24，本地 race/integration 验收）**：为 `xlb-node-runtime/v1` 增加默认 unavailable 的探测配置；仅 `isolated-test` 可显式设置 HTTPS canary endpoint 和 server CA，并且 Node Agent 还必须显式启用独立 loopback `NODE_AGENT_PROBE_LISTEN`。执行器禁用代理/重定向，仅通过 `PublicTargetDialer` 连接 DNS 解析结果全部为公网的 TCP/443，按配置 CA 验证 TLS，发送 32-byte 随机 challenge，严格限制响应大小和 JSON 字段并要求 challenge 原样回显。新增 TLS CA 可信/不可信、challenge 匹配/不匹配、重定向、畸形/未知/超大响应、context timeout、runtime config 不安全目标拒绝及 mTLS probe listener→HTTPS canary 集成测试。`go test -race ./...` 132 passed、`go vet ./...` 与 `go build ./...` 通过。默认仍返回 `503 probe_unavailable`，生产 mode 仍拒绝启动；本轮没有可批准的真实 canary URL/CA，也未接触 AWS、节点或会员流量，因此该结果只证明隔离配置下的节点到 canary HTTPS echo 合同，不能标注真实节点健康、VPN 连接、客户 SLO 或撤权断流。真实目标证书、获批 canary URL 和隔离节点运行验收仍待节点/运维侧提供。
+
 - **M8 Android service 销毁与新 grant handoff 竞态修复（2026-11-24，专用 AVD）**：专用 API 35 `xlb-m9-recovery` AVD 先复现旧 `XlbVpnService.onDestroy()` 无条件清空进程级 grant store，导致授权刷新期间新 handoff 丢失；现由 service 捕获其所属 handoff ID，销毁时只清除该 ID，旧实例不能清掉替代 grant。扩展 AVD harness 对每个 instrumentation 输出强制要求 `OK (n test[s])`，避免 `adb am instrument` 失败仍以退出码 0 被误记为通过。`test-anonymous-recovery-emulator.sh` 全套 Android instrumentation 22/22 通过，另有 Keystore→JNI→Go→隔离 Node Agent peer 1/1、member tunnel session 1/1、授权刷新撤权与 pending grant 1/1、profile digest 拒绝 1/1 通过；构建期间的 JVM tests、lint 与 AndroidTest compile 通过。全部使用专用 AVD、临时 SQLite 和 loopback API，未触及两台会员真机、AWS 或真实节点；member gate 仍关闭，不证明真实会员线路或节点撤权断流。
 
 - **一周首版冲刺目标（2026-11-24）**：按用户已确认的 Android + 网站/API 单服务商受控试点范围，以 2026-12-01 为冲刺检查点。AI 可控代码、离线自动化、签名候选与审查材料按此节奏推进；真实会员节点/撤权回执、签名 Environment、staging、商户沙箱契约和合规书面意见仍是独立放行门，必须并行落实，不能由离线测试替代。若这些外部门未按期满足，12-01 只能交付候选或内部技术预览，不得称为受控试点已上线；不据此承诺公开付费上线日期。

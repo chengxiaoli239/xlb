@@ -35,7 +35,8 @@ func run() error {
 	if nodeID == "" || runtimeConfigPath == "" || statePath == "" || certificatePath == "" || privateKeyPath == "" || clientCAPath == "" {
 		return errors.New("node agent identity, state, and mTLS files are required")
 	}
-	if err := validateRuntimeConfig(runtimeConfigPath, nodeID); err != nil {
+	runtimeConfig, err := readRuntimeConfig(runtimeConfigPath, nodeID)
+	if err != nil {
 		return err
 	}
 
@@ -83,7 +84,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	probeServer, err := newDataPlaneProbeServer(probeAddress, nodeID, certificatePath, privateKeyPath, clientCAPath)
+	probeServer, err := newDataPlaneProbeServer(
+		probeAddress, nodeID, certificatePath, privateKeyPath, clientCAPath, runtimeConfig.DataPlaneProbe,
+	)
 	if err != nil {
 		return err
 	}
@@ -115,15 +118,27 @@ func run() error {
 	}
 }
 
-func newDataPlaneProbeServer(address, nodeID, certificatePath, privateKeyPath, clientCAPath string) (*http.Server, error) {
+func newDataPlaneProbeServer(address, nodeID, certificatePath, privateKeyPath, clientCAPath string,
+	probeConfig agent.DataPlaneProbeRuntimeConfig) (*http.Server, error) {
 	if strings.TrimSpace(address) == "" {
+		if probeConfig.Status == agent.RuntimeProbeHTTPSCanary {
+			return nil, errors.New("data-plane canary requires NODE_AGENT_PROBE_LISTEN")
+		}
 		return nil, nil
 	}
 	if strings.TrimSpace(nodeID) == "" {
 		return nil, errors.New("probe listener requires a node identity")
 	}
+	var executor agent.DataPlaneProbeExecutor
+	if probeConfig.Status == agent.RuntimeProbeHTTPSCanary {
+		var err error
+		executor, err = agent.NewHTTPSCanaryProbeExecutor(probeConfig, agent.NewPublicTargetDialer())
+		if err != nil {
+			return nil, errors.New("configure node data-plane HTTPS canary")
+		}
+	}
 	return agent.NewMTLSServer(address, certificatePath, privateKeyPath, clientCAPath,
-		agent.NewDataPlaneProbeHandler(nodeID, nil))
+		agent.NewDataPlaneProbeHandler(nodeID, executor))
 }
 
 func validateProbeListenerAddress(address, managementAddress, dataAddress string) error {
@@ -166,22 +181,27 @@ func shutdownServers(servers []*http.Server) error {
 }
 
 func validateRuntimeConfig(path, nodeID string) error {
+	_, err := readRuntimeConfig(path, nodeID)
+	return err
+}
+
+func readRuntimeConfig(path, nodeID string) (agent.TrustedNodeRuntimeConfig, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return errors.New("NODE_AGENT_RUNTIME_CONFIG could not be opened")
+		return agent.TrustedNodeRuntimeConfig{}, errors.New("NODE_AGENT_RUNTIME_CONFIG could not be opened")
 	}
 	defer file.Close()
 
 	config, err := agent.DecodeTrustedNodeRuntimeConfig(file)
 	if err != nil {
-		return err
+		return agent.TrustedNodeRuntimeConfig{}, err
 	}
 	if config.Environment != agent.RuntimeEnvironmentTest || config.Node.ID != nodeID ||
 		config.ProfileRenderer.Status != agent.RuntimeProfileUnavailable {
-		return agent.ErrInvalidNodeRuntimeConfig
+		return agent.TrustedNodeRuntimeConfig{}, agent.ErrInvalidNodeRuntimeConfig
 	}
 
-	return nil
+	return config, nil
 }
 
 func acquireProcessLock(path string) (*os.File, error) {

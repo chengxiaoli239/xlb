@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -61,4 +62,50 @@ func TestDecodeTrustedNodeRuntimeConfigRejectsOversizedInput(t *testing.T) {
 	if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(input)); !errors.Is(err, ErrInvalidNodeRuntimeConfig) {
 		t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v; want ErrInvalidNodeRuntimeConfig", err)
 	}
+}
+
+func TestDecodeTrustedNodeRuntimeConfigAcceptsExplicitIsolatedHTTPSCanary(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	config := canaryRuntimeConfigJSON("isolated-test", "https://canary.example.invalid"+nodeProbeCanaryPath, string(caPEM))
+	decoded, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(config))
+	if err != nil {
+		t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v", err)
+	}
+	if decoded.DataPlaneProbe.Status != RuntimeProbeHTTPSCanary {
+		t.Fatalf("probe status = %q; want %q", decoded.DataPlaneProbe.Status, RuntimeProbeHTTPSCanary)
+	}
+}
+
+func TestDecodeTrustedNodeRuntimeConfigRejectsUnsafeCanaryDeclarations(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	tests := []struct {
+		name        string
+		environment string
+		endpoint    string
+		caPEM       string
+	}{
+		{name: "private HTTP endpoint", environment: "isolated-test", endpoint: "http://canary.example.invalid" + nodeProbeCanaryPath, caPEM: string(caPEM)},
+		{name: "custom destination port", environment: "isolated-test", endpoint: "https://canary.example.invalid:8443" + nodeProbeCanaryPath, caPEM: string(caPEM)},
+		{name: "URL query", environment: "isolated-test", endpoint: "https://canary.example.invalid" + nodeProbeCanaryPath + "?target=private", caPEM: string(caPEM)},
+		{name: "production canary remains unavailable", environment: "production", endpoint: "https://canary.example.invalid" + nodeProbeCanaryPath, caPEM: string(caPEM)},
+		{name: "missing trust bundle", environment: "isolated-test", endpoint: "https://canary.example.invalid" + nodeProbeCanaryPath},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := canaryRuntimeConfigJSON(test.environment, test.endpoint, test.caPEM)
+			if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(input)); !errors.Is(err, ErrInvalidNodeRuntimeConfig) {
+				t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v; want ErrInvalidNodeRuntimeConfig", err)
+			}
+		})
+	}
+}
+
+func canaryRuntimeConfigJSON(environment, endpoint, caPEM string) string {
+	endpointJSON, _ := json.Marshal(endpoint)
+	caPEMJSON, _ := json.Marshal(caPEM)
+	credentialSource := RuntimeCredentialTestFile
+	if environment == RuntimeEnvironmentProd {
+		credentialSource = RuntimeCredentialSecure
+	}
+	return `{"schema_version":"xlb-node-runtime/v1","environment":"` + environment + `","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"` + credentialSource + `"},"profile_renderer":{"status":"unavailable"},"data_plane_probe":{"status":"https-canary","canary_endpoint":` + string(endpointJSON) + `,"server_ca_pem":` + string(caPEMJSON) + `}}`
 }

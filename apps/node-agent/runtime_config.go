@@ -17,6 +17,8 @@ const (
 	RuntimeCredentialTestFile  = "test-file-only"
 	RuntimeCredentialSecure    = "platform-secure-store"
 	RuntimeProfileUnavailable  = "unavailable"
+	RuntimeProbeUnavailable    = "unavailable"
+	RuntimeProbeHTTPSCanary    = "https-canary"
 	maxNodeRuntimeConfigBytes  = 64 * 1024
 )
 
@@ -28,6 +30,7 @@ type TrustedNodeRuntimeConfig struct {
 	Node            NodeRuntimeIdentity          `json:"node"`
 	ProofBridge     ProofBridgeRuntimeConfig     `json:"proof_bridge"`
 	ProfileRenderer ProfileRendererRuntimeConfig `json:"profile_renderer"`
+	DataPlaneProbe  DataPlaneProbeRuntimeConfig  `json:"data_plane_probe,omitempty"`
 }
 
 type NodeRuntimeIdentity struct {
@@ -45,6 +48,14 @@ type ProofBridgeRuntimeConfig struct {
 
 type ProfileRendererRuntimeConfig struct {
 	Status string `json:"status"`
+}
+
+// DataPlaneProbeRuntimeConfig selects an explicit isolated-test probe target.
+// Empty or unavailable status keeps the probe listener fail closed.
+type DataPlaneProbeRuntimeConfig struct {
+	Status         string `json:"status"`
+	CanaryEndpoint string `json:"canary_endpoint,omitempty"`
+	ServerCAPEM    string `json:"server_ca_pem,omitempty"`
 }
 
 func DecodeTrustedNodeRuntimeConfig(reader io.Reader) (TrustedNodeRuntimeConfig, error) {
@@ -69,7 +80,8 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 		!validRuntimeToken(config.Node.ID, 64) || !validRuntimeToken(config.Node.Provider, 32) ||
 		!validRuntimeToken(config.Node.Region, 64) || config.ProofBridge.Protocol != "xlb-proof-v1" ||
 		!config.ProofBridge.DeviceProofRequired || !isLoopbackListener(config.ProofBridge.ListenAddress) ||
-		config.ProfileRenderer.Status != RuntimeProfileUnavailable {
+		config.ProfileRenderer.Status != RuntimeProfileUnavailable ||
+		validateDataPlaneProbeRuntimeConfig(config.Environment, config.DataPlaneProbe) != nil {
 		return ErrInvalidNodeRuntimeConfig
 	}
 

@@ -100,11 +100,19 @@ func TestProbeListenerMustBeDistinctLoopback(t *testing.T) {
 }
 
 func TestProbeServerIsNotConstructedWhenDisabled(t *testing.T) {
-	server, err := newDataPlaneProbeServer("", "node-a", "", "", "")
+	server, err := newDataPlaneProbeServer("", "node-a", "", "", "", agent.DataPlaneProbeRuntimeConfig{})
 	if err != nil {
 		t.Fatalf("disabled probe listener returned error: %v", err)
 	}
 	if server != nil {
 		t.Fatal("disabled probe listener unexpectedly constructed a server")
+	}
+}
+
+func TestConfiguredCanaryRequiresExplicitProbeListener(t *testing.T) {
+	config := agent.DataPlaneProbeRuntimeConfig{Status: agent.RuntimeProbeHTTPSCanary}
+	if _, err := newDataPlaneProbeServer("", "node-a", "", "", "", config); err == nil ||
+		!strings.Contains(err.Error(), "requires NODE_AGENT_PROBE_LISTEN") {
+		t.Fatalf("newDataPlaneProbeServer error = %v; want explicit probe-listener requirement", err)
 	}
 }
