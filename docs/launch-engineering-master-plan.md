@@ -138,6 +138,8 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 
 **worktree / 分支只读复核（2026-11-24）**：当前 34 个 worktree（main + 32 个 Codex feature branch + 1 个 detached checkout），`main` 与 `origin/main` 同为 `5288be7`。除主 worktree 原有未跟踪 `.playwright-cli/`、`output/` 外，只有 `android-native-ci` 有未提交 Gradle/AndroidTest 文件，`android-revoked-permission` 有未提交会员授权 instrumentation 与 `.hprof`；这些文件/目录均保留，未暂存、移动或清理。3 个旧分支仍有 patch-ID 与主线不同的提交：`aws-inventory-status-refresh` 的 grant handoff/stale foreground 改动已由主线 `d718d90`、`b283316`、`5a98828` 的后续实现覆盖；`android-node-auth-status` 仅剩过时进度文档；`fleet-recovery-preview` 的估期文档已被当前 12-01 冲刺与四象限放行清单替代。未发现需要再倒合的独立功能；不对这些旧分支执行删除/归档，避免丢失历史或用户工作。
 
+**worktree 用户改动与主线测试语义复核（2026-11-24，基于 `3174559`）**：逐项只读比较 `android-native-ci` 的 Gradle/AndroidTest 文件与 `android-revoked-permission` 的会员授权 instrumentation。Gradle runner 与 AndroidX test 依赖已在主线；主线 `SecureSessionStoreInstrumentedTest` 有 5 个测试方法，旧 worktree 文件有其中 4 个。旧分支新增的“Activity 重建后拒绝系统 VPN 权限”情形已由主线 `deniedPermissionCallbackDoesNotReauthorizeOrStartMemberService` 覆盖，主线还断言无 `CONNECTED` 广播。没有发现待补的独立行为断言；保留两处原始用户改动和 `.hprof`，不重复移植、不暂存或清理。
+
 近期按“共用契约先锁定、平台实现并行、真实节点串行验收”推进：
 
 1. **Android M8 离线证明阶段（2026-11-22 已完成）**：专用隔离 AVD instrumentation 已验证同 installation ID 稳定复用 P-256 公钥、不同 installation ID 得到不同公钥、challenge 签名可由对应公钥验证、私钥不可导出；完整 instrumentation 6/6 通过。此阶段不证明硬件 backed provenance，也未接入会员隧道。
