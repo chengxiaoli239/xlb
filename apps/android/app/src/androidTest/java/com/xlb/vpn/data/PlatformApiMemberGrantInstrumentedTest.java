@@ -10,6 +10,7 @@ import static org.junit.Assert.assertTrue;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
@@ -29,6 +30,7 @@ import androidx.test.uiautomator.UiDevice;
 import androidx.test.uiautomator.Until;
 
 import com.xlb.vpn.data.DeviceProofJni;
+import com.xlb.vpn.data.DeviceProofCertificate;
 import com.xlb.vpn.data.MemberTunnelGrant;
 import com.xlb.vpn.data.MemberTunnelGrantAvdFixture;
 import com.xlb.vpn.data.PlatformApi;
@@ -74,11 +76,16 @@ public final class PlatformApiMemberGrantInstrumentedTest {
         requireDisposableEmulator();
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         SharedPreferences preferences = context.getSharedPreferences("secure_client_state", Context.MODE_PRIVATE);
+        SharedPreferences copiedPreferences = context.getSharedPreferences(
+                "secure_client_state_copy_fixture", Context.MODE_PRIVATE);
         assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+        assertTrue("could not clear copied-installation fixture state",
+                copiedPreferences.edit().clear().commit());
         SecureSessionStore sessionStore = new SecureSessionStore(context);
         sessionStore.updateCookie("xlb_session", "isolated-member-session", false);
         String installationId = sessionStore.installationId();
         String publicKey = MemberTunnelGrantAvdFixture.publicKey(installationId);
+        String copiedInstallationId = null;
         File stateDirectory = new File(context.getCacheDir(), "isolated-node-agent-" + UUID.randomUUID());
         assertTrue(stateDirectory.mkdirs());
 
@@ -131,6 +138,51 @@ public final class PlatformApiMemberGrantInstrumentedTest {
                     server.challengeSignatureVerified());
             assertFalse("fake API observed an invalid request: " + server.failureMessage(), server.hasFailure());
 
+            Context copiedContext = new ContextWrapper(context) {
+                @Override
+                public SharedPreferences getSharedPreferences(String name, int mode) {
+                    return context.getSharedPreferences("secure_client_state_copy_fixture", mode);
+                }
+            };
+            SecureSessionStore copiedSessionStore = new SecureSessionStore(copiedContext);
+            copiedSessionStore.updateCookie("xlb_session", "isolated-member-session", false);
+            copiedInstallationId = copiedSessionStore.installationId();
+            String copiedPublicKey = MemberTunnelGrantAvdFixture.publicKey(copiedInstallationId);
+            assertFalse("copied installation reused the authorized device public key",
+                    publicKey.equals(copiedPublicKey));
+            PlatformApi copiedApi = new PlatformApi("http://127.0.0.1:" + server.port(), copiedSessionStore);
+            PlatformApi.ClientSnapshot copiedSnapshot = copiedApi.synchronize(account);
+            MemberTunnelGrant copiedGrant = copiedApi.verifiedMemberTunnelGrant();
+            assertEquals(PlatformApi.NodeAuthorizationStatus.READY, copiedSnapshot.nodeAuthorizationStatus);
+            assertNotNull("second installation did not obtain its own signed test grant", copiedGrant);
+            assertTrue("fake API did not verify the second installation challenge signature",
+                    server.challengeSignatureVerified());
+
+            DeviceProofCertificate copiedCertificate = DeviceProofCertificate.create(copiedGrant.deviceProof());
+            try {
+                DeviceProofCertificate.BridgeCredentials copiedCredentials = copiedCertificate.startProofBridge(
+                        copiedGrant.bridgeEndpoint(), copiedGrant.trustedServerCaPem());
+                try (Socket copiedConnection = new Socket("127.0.0.1", 17890)) {
+                    copiedConnection.setSoTimeout(5_000);
+                    negotiateSocksUserPassword(copiedConnection, copiedCredentials);
+                    byte[] host = "bridge.test".getBytes(StandardCharsets.US_ASCII);
+                    copiedConnection.getOutputStream().write(new byte[]{5, 1, 0, 3, (byte) host.length});
+                    copiedConnection.getOutputStream().write(host);
+                    copiedConnection.getOutputStream().write(new byte[]{1, (byte) 187});
+                    byte[] response = new byte[10];
+                    readFully(copiedConnection.getInputStream(), response);
+                    assertEquals("Node Agent accepted a second installation key for the first device peer",
+                            5, response[1]);
+                    JSONObject rejection = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus());
+                    assertEquals(403, rejection.getInt("status"));
+                    assertTrue(rejection.getString("body").contains("unauthorized"));
+                }
+            } finally {
+                copiedCertificate.close();
+                assertTrue("copied peer connection did not release its Agent session",
+                        awaitNoActiveFixtureSessions(TimeUnit.SECONDS.toMillis(5)));
+            }
+
             requestVpnPermission(context);
             long handoffId = MemberTunnelGrantStore.publish(grant);
             Intent startIntent = new Intent(context, XlbVpnService.class)
@@ -182,8 +234,13 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             sessionStore.clearSession();
             if (server != null) server.close();
             DeviceProofJni.stopNodeAgentFixture();
+            if (copiedInstallationId != null) {
+                MemberTunnelGrantAvdFixture.deleteInstallationKey(copiedInstallationId);
+            }
             MemberTunnelGrantAvdFixture.deleteInstallationKey(installationId);
             deleteRecursively(stateDirectory);
+            assertTrue("could not clear copied-installation fixture state",
+                    copiedPreferences.edit().clear().commit());
             assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
         }
     }
@@ -734,6 +791,42 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             socket.close();
             throw exception;
         }
+    }
+
+    private static void negotiateSocksUserPassword(Socket connection,
+            DeviceProofCertificate.BridgeCredentials credentials) throws IOException {
+        InputStream input = connection.getInputStream();
+        OutputStream output = connection.getOutputStream();
+        output.write(new byte[]{5, 1, 2});
+        assertEquals(5, input.read());
+        assertEquals(2, input.read());
+        byte[] username = credentials.usernameForProfile().getBytes(StandardCharsets.US_ASCII);
+        byte[] password = credentials.passwordForProfile().getBytes(StandardCharsets.US_ASCII);
+        output.write(new byte[]{1, (byte) username.length});
+        output.write(username);
+        output.write((byte) password.length);
+        output.write(password);
+        assertEquals(1, input.read());
+        assertEquals(0, input.read());
+    }
+
+    private static void readFully(InputStream input, byte[] output) throws IOException {
+        int offset = 0;
+        while (offset < output.length) {
+            int read = input.read(output, offset, output.length - offset);
+            if (read < 0) throw new IOException("SOCKS response ended early");
+            offset += read;
+        }
+    }
+
+    private static boolean awaitNoActiveFixtureSessions(long timeoutMillis) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            int activeSessions = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus()).getInt("active_sessions");
+            if (activeSessions == 0) return true;
+            Thread.sleep(25);
+        }
+        return new JSONObject(DeviceProofJni.nodeAgentFixtureStatus()).getInt("active_sessions") == 0;
     }
 
     private static boolean awaitActivitySnapshot(ActivityScenario<MainActivity> scenario)
