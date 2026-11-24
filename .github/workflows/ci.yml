@@ -208,6 +208,7 @@ jobs:
         working-directory: apps/php-api
         run: >-
           php artisan test --compact
+          tests/Feature/NodeAutomationTest.php
           tests/Feature/OrderLifecycleTest.php
           tests/Feature/SandboxPaymentTest.php
           tests/Feature/SandboxRefundTest.php
