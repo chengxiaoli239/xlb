@@ -56,6 +56,7 @@ class NodeAutomation
                     'provider_resource_key' => $providerResourceKey, 'stack_name' => $providerResourceKey,
                     'region' => $profile['region'],
                     'instance_type' => $input['instance_type'], 'phase' => 'queued',
+                    'resources' => '{}',
                     'expires_at' => now()->addMinutes($input['lifetime_minutes'])->toIso8601String(),
                     'created_at' => $now, 'updated_at' => $now,
                 ]);

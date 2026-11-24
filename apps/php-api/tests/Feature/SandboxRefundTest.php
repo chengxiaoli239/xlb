@@ -102,6 +102,10 @@ class SandboxRefundTest extends TestCase
             'upload_bytes' => 1000,
             'download_bytes' => 2780,
         ]);
+        $this->assertDatabaseHas('nodes', [
+            'id' => DB::table('node_access_peers')->where('id', $peerId)->value('node_id'),
+            'active_sessions' => 0,
+        ]);
         $this->assertSame(0, app(NodeAccessRevocationProcessor::class)->processDue());
 
         $this->getJson('/api/v1/admin/orders/'.$orderId)
@@ -284,7 +288,7 @@ class SandboxRefundTest extends TestCase
             'device_key_fingerprint' => str_repeat('c', 64), 'generation' => 1,
             'expires_at' => now()->addYear()->utc()->toIso8601String(),
             'credential_ciphertext' => encrypt('sandbox-peer-credential'), 'profile_ciphertext' => null,
-            'provision_request_id' => 'provision-'.$peerId,
+            'provision_request_id' => (string) Str::uuid(),
             'status' => 'active', 'upload_bytes' => 1000, 'download_bytes' => 2000,
             'last_observed_at' => $now, 'revoked_at' => null, 'created_at' => $now, 'updated_at' => $now,
         ]);

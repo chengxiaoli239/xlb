@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **Q2 目标数据库兼容性验证基线（2026-11-25，本机临时 MySQL 8.4 / PostgreSQL 16）**：为 PRD 明确本地 SQLite 不证明生产数据库迁移、支付和撤权回归，CI 新增 MySQL 8.4 与 PostgreSQL 16 的关键订单/支付/退款 suites 矩阵。首次 MySQL 8.4 运行揭示迁移在 `node_deployments.resources TEXT DEFAULT '{}'` 失败、订阅绑定 outbox 自动索引名超过 MySQL 64 字符限制，以及撤权成功路径的 `MAX()` 标量 SQL 仅兼容 SQLite；已将 JSON 初值移到应用写入、为三个索引指定短名、将会话扣减改为跨库 `CASE`，并修正退款测试夹具使用非法长度的非 UUID provisioning request ID。修复后 MySQL 8.4 **38/38、418 assertions**，PostgreSQL 16 **38/38、418 assertions**，SQLite 全套 **267 passed、1 skipped、2,404 assertions**，Pint 与 diff check 通过。两台数据库只在本机自动分配临时端口的 Docker 容器中运行，任务结束即移除；这验证迁移/驱动和指定 Feature 行为，不等于确定生产数据库、生产数据迁移演练或真实并发负载验收。CI 矩阵尚待 hosted run。
+
 - **M4/Q2 沙箱直连付款与 provider-session 互斥（2026-11-25，本机 Laravel Feature 与 hosted CI）**：新增两条跨入口回归，覆盖“provider session → 直连沙箱付款”及“直连沙箱付款 → provider session”。修复前第一种顺序会先发放沙箱权益而将 provider ledger 留在 `pending`；现在已创建 provider order 的订单由直连沙箱处理器返回 `409 invalid_transition`，反向顺序由已付款订单状态拒绝创建 provider session。正常 provider webhook/fulfillment 路径仍可单次完成授权，正常直连付款路径保留既有行为。`ProviderPaymentEventLedgerTest` 16/16、164 assertions；Laravel 全套 267 passed、1 skipped、2,402 assertions；Pint 通过。提交 `798d6d9` 已推送，主线 CI `45482136527` 六个 jobs 全绿。只验证 local/testing SQLite 互斥状态机，不代表真实商户渠道或生产数据库锁竞争。
 
 - **项目并行 worktree 交付复核（2026-11-25，只读 Git 审计）**：核对 34 个 checkout。默认 Android 诊断 worktree 比 `origin/main` 落后 77 个提交、领先 5 个，五个提交的 patch 已等效存在于主线，不重复开发。三个旧分支的非等效 patch 分别复核为主线已有的 Android grant/foreground 失败处理、节点授权状态显示和 review-only fleet recovery CLI；没有遗留独立功能需倒合。保留 `android-native-ci` 中未提交的 Gradle/AndroidTest 文件、detached `android-revoked-permission` 中未提交 instrumentation 和 `.hprof`，以及主 checkout 预存 `.playwright-cli/`、`output/`，未修改或暂存。后续开发以最新 `main` 创建 worktree；完整审计见 [上线工程总体规划 §0.2](launch-engineering-master-plan.md)。

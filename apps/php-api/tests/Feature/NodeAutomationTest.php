@@ -111,6 +111,7 @@ class NodeAutomationTest extends TestCase
         $this->assertSame('aws', $row->provider);
         $this->assertSame('aws-us-west-2-lab-v1', $row->provider_profile);
         $this->assertSame(1, $row->provider_profile_version);
+        $this->assertSame('{}', $row->resources);
         $this->assertSame($deploymentKey, $row->deployment_key);
         $this->assertSame('xlb-auto-'.substr($deploymentKey, strlen('xlb-node-')), $row->provider_resource_key);
         $this->assertDatabaseHas('node_deployments', [

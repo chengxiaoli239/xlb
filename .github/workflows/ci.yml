@@ -152,6 +152,77 @@ jobs:
           # Deterministic test-only encryption key; never used by an app runtime.
           APP_KEY: base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 
+  database-compatibility:
+    name: PHP database compatibility (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - database: MySQL 8.4
+            image: mysql:8.4
+            port: 3306
+            connection: mysql
+            username: root
+            password: xlb-test-password
+            health-command: mysqladmin ping -h 127.0.0.1 -uroot -pxlb-test-password --silent
+          - database: PostgreSQL 16
+            image: postgres:16
+            port: 5432
+            connection: pgsql
+            username: postgres
+            password: xlb-test-password
+            health-command: pg_isready -U postgres
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ matrix.password }}
+          MYSQL_DATABASE: xlb_test
+          POSTGRES_PASSWORD: ${{ matrix.password }}
+          POSTGRES_DB: xlb_test
+        ports:
+          - ${{ matrix.port }}:${{ matrix.port }}
+        options: >-
+          --health-cmd "${{ matrix.health-command }}"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo_mysql, pdo_pgsql, pdo_sqlite, sqlite3
+          coverage: none
+
+      - name: Install Composer dependencies
+        working-directory: apps/php-api
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run order, payment, and refund Feature tests
+        working-directory: apps/php-api
+        run: >-
+          php artisan test --compact
+          tests/Feature/OrderLifecycleTest.php
+          tests/Feature/SandboxPaymentTest.php
+          tests/Feature/SandboxRefundTest.php
+          tests/Feature/Payments/ProviderPaymentEventLedgerTest.php
+        env:
+          APP_ENV: testing
+          APP_KEY: base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+          DB_CONNECTION: ${{ matrix.connection }}
+          DB_DATABASE: xlb_test
+          DB_HOST: 127.0.0.1
+          DB_PASSWORD: ${{ matrix.password }}
+          DB_PORT: ${{ matrix.port }}
+          DB_URL: ''
+          DB_USERNAME: ${{ matrix.username }}
+
   node-agent:
     name: Isolated node agent tests and build
     runs-on: ubuntu-latest

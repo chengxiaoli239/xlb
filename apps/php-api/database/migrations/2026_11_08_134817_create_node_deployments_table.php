@@ -20,7 +20,7 @@ return new class extends Migration
             $table->string('region');
             $table->string('instance_type');
             $table->string('phase');
-            $table->text('resources')->default('{}');
+            $table->text('resources');
             $table->string('expires_at');
             $table->string('release_requested_at')->nullable();
             $table->string('release_not_before')->nullable();

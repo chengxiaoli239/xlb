@@ -30,9 +30,9 @@ return new class extends Migration
             $table->string('confirmed_at')->nullable();
             $table->string('created_at');
             $table->string('updated_at');
-            $table->unique(['subscription_id', 'generation']);
-            $table->index(['status', 'next_attempt_at']);
-            $table->index(['status', 'lease_expires_at']);
+            $table->unique(['subscription_id', 'generation'], 'node_sub_binding_sub_gen_unique');
+            $table->index(['status', 'next_attempt_at'], 'node_sub_binding_status_next_index');
+            $table->index(['status', 'lease_expires_at'], 'node_sub_binding_status_lease_index');
             $table->foreign('subscription_id')->references('id')->on('subscriptions');
             $table->foreign('peer_id')->references('id')->on('node_access_peers');
         });

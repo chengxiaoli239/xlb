@@ -119,7 +119,8 @@ class NodeAccessRevocationProcessor
                 'revoked_at' => $at, 'updated_at' => $at,
             ]);
             DB::table('nodes')->where('id', $peer->node_id)->update([
-                'active_sessions' => DB::raw('MAX(0, active_sessions - 1)'), 'updated_at' => $at,
+                'active_sessions' => DB::raw('CASE WHEN active_sessions > 0 THEN active_sessions - 1 ELSE 0 END'),
+                'updated_at' => $at,
             ]);
             DB::table('node_access_revocation_outbox')->where('id', $job->id)->where('lock_token', $job->lock_token)->update([
                 'status' => $confirmationStatus, 'acknowledgement_id' => $acknowledgementId,
