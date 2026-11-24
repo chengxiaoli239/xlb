@@ -61,6 +61,19 @@
 
 **重新排序规则**：将可离线推进的 M10 深度补测设为当前停止扩张的 Q2 工作包；每轮先列出一个 Q1 外部行动及一个 AI 可交付工作，外部阻塞期间继续不依赖该材料的首发代码/候选检查。每个子任务目标控制在约 2 小时内可验收，超出时拆成明确检查点；外部等待和 CI/设备运行单独计时。不得通过降低设备限制、关闭安全门或跳过真实回执压缩日历。
 
+### 0.2.2 Q1 放行门外部行动清单（2026-11-24 复核）
+
+以下工作不能由 AI 离线代码替代。负责人按职责角色列出，具体姓名/日期未由用户或责任人确认，因此记录为待落实，不假设已经有人承接。每个行动项需要在本周首发 go/no-go 前更新状态。
+
+| Q1 门 | 当前证据/状态 | 需要的负责人动作 | 可核对退出证据 | 截止检查点 |
+| --- | --- | --- | --- | --- |
+| 会员节点与撤权回执 | AWS `xlb-ops` STS 在 11-24 记录有效，实验资源只读盘点为空；尚无会员专属线路/节点材料 | 节点/运维负责人提供隔离节点 endpoint、节点身份、CA 与生产用途 mTLS 注入路径、获批 canary 地址；指定窗口让两台绑定设备跑连接/复制拒绝/退款撤权 | 节点 `node/peer/request/generation` 匹配的回执、最终累计流量与重连拒绝；两台设备各自输出脱敏版本/时间证据 | 11-25 前确认材料与窗口；11-27 前执行，否则 12-01 不能称受控试点上线 |
+| Android 受保护签名候选 | 候选 workflow 和签名配置离线验证通过；签名 Environment 只读 API 当前返回 0 项 | 仓库管理员创建 `android-release-candidate` protected environment，限定 main、设置审核者；凭据负责人按批准通道注入 keystore/password 与 approved API origin，不在仓库/聊天传递 | 获批者手动运行 workflow，保存 APK、BOM、manifest、provenance 与审核结果；不自动建 GitHub Release 或上架 | 11-25 确认管理员/凭据负责人；11-27 前产候选，否则不能称候选可审核 |
+| staging 与回滚 | CI 容器构建/HTTP smoke 通过；无 staging 部署记录 | staging 负责人确认隔离 URL、数据库/数据保留、部署权限、回滚责任人与维护窗口；任何新增费用/云资源先单独审批 | 按同一源 commit 部署、健康检查、登录/权益/支付沙箱 smoke、回滚演练记录 | 11-25 确认窗口；11-28 前验收，否则不开放付费试点 |
+| 商户沙箱与首发合规 | provider-neutral 支付及退款状态机只有 local/testing 证据；真实商户与首发市场书面意见未登记 | 支付负责人提供单一商户 sandbox、回调契约、签名/重试规则和对账字段；合规负责人确认首发地区、退款/隐私/服务条款并给书面意见 | 商户 sandbox 下单→回调→权益→退款→对账记录，以及可审计合规结论 | 11-25 确认资料/责任人；11-28 前验收，否则只保留本地沙箱演示，不宣称可收真实款或可上线 |
+
+**当前判断**：负责人及日期都没有本轮确认，核心节点材料和签名 Environment 明确缺失；因此 12-01 是内部冲刺检查点，不是可信的上线承诺。外部泳道应与离线代码并行，但等待责任人不能由 AI 通过重复增加本机测试替代。下一 AI 工作限于首发 Android/Web/API 测试缺口、候选 workflow 检查和不依赖真实凭据的恢复验证；M10 同类全链探测测试暂时冻结，直到出现新故障证据或真实 canary 材料。
+
 **2026-11-24 Android service 销毁清理未消费 grant**：专用 `xlb-m9-recovery` AVD instrumentation 先复现 service 销毁后单次 member handoff 仍留在进程级 grant store；`XlbVpnService.onDestroy()` 现在同步清除 pending grant。修复后定向 instrumentation 1/1、service admission instrumentation 整组 4/4 与 Android 全量 JVM、lint、AndroidTest 编译、Debug APK build 通过，主线 CI `45278603034` 全绿。仅验证 AVD service 生命周期，不开启生产 member gate，不建立真实 VPN/TUN 或节点连接。
 
 **2026-11-24 Android member grant 并发单次消费**：新增 8 个并发消费者竞争同一 `MemberTunnelGrantStore` handoff ID 的 JVM 回归测试，唯一消费者取得 grant，其余均为空；Android JVM 全套、lint 与 AndroidTest 编译通过，主线 CI `45276068548` 六个 jobs 全绿。生产 gate 保持关闭，未连接真机、建立 TUN 或接入真实节点。
