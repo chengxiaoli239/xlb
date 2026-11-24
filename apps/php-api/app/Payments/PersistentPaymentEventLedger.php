@@ -119,8 +119,8 @@ final class PersistentPaymentEventLedger
     public function recordFulfillmentAttempt(string $merchantOrderId, bool $succeeded, ?string $errorCode = null): void
     {
         DB::transaction(function () use ($merchantOrderId, $succeeded, $errorCode): void {
-            $fulfillment = DB::table('provider_payment_fulfillments')->where('merchant_order_id', $merchantOrderId)->lockForUpdate()->first();
             $order = DB::table('provider_payment_orders')->where('merchant_order_id', $merchantOrderId)->lockForUpdate()->first();
+            $fulfillment = DB::table('provider_payment_fulfillments')->where('merchant_order_id', $merchantOrderId)->lockForUpdate()->first();
             if (! $fulfillment || ! $order) {
                 throw new LogicException('Payment fulfillment does not exist.');
             }
@@ -150,8 +150,8 @@ final class PersistentPaymentEventLedger
     public function recordCompensationAttempt(string $merchantOrderId, bool $succeeded, ?string $errorCode = null): void
     {
         DB::transaction(function () use ($merchantOrderId, $succeeded, $errorCode): void {
-            $compensation = DB::table('provider_payment_compensations')->where('merchant_order_id', $merchantOrderId)->lockForUpdate()->first();
             $order = DB::table('provider_payment_orders')->where('merchant_order_id', $merchantOrderId)->lockForUpdate()->first();
+            $compensation = DB::table('provider_payment_compensations')->where('merchant_order_id', $merchantOrderId)->lockForUpdate()->first();
             if (! $compensation || ! $order) {
                 throw new LogicException('Payment compensation does not exist.');
             }

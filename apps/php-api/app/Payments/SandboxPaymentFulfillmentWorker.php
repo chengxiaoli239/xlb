@@ -24,9 +24,9 @@ final class SandboxPaymentFulfillmentWorker
 
         try {
             return DB::transaction(function () use ($merchantOrderId): bool {
+                $order = DB::table('orders')->where('id', $merchantOrderId)->where('is_test', true)->lockForUpdate()->first();
                 $paymentOrder = DB::table('provider_payment_orders')->where('merchant_order_id', $merchantOrderId)->lockForUpdate()->first();
                 $fulfillment = DB::table('provider_payment_fulfillments')->where('merchant_order_id', $merchantOrderId)->lockForUpdate()->first();
-                $order = DB::table('orders')->where('id', $merchantOrderId)->where('is_test', true)->lockForUpdate()->first();
                 if (! $paymentOrder || ! $fulfillment || ! $order) {
                     throw new LogicException('Sandbox payment fulfillment is not registered.');
                 }
