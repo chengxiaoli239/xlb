@@ -63,7 +63,7 @@
 
 **关键路径**：节点/撤权材料 → Android 真实会员 profile 与双身份回执 → 受保护签名候选 → staging 登录/支付沙箱/回滚 → go/no-go。商户 sandbox 与合规可和节点开发、签名准备并行，但都必须在开放付费试点前通过。Android 离线失败处理、Web/API 沙箱回归、候选 workflow 检查可按目录边界并行，集成时统一以最新 main 运行全套 CI。AI 当前主要耗时应投到 Android 会员路径缺口与候选/测试的可重复性，不再继续深挖已经覆盖较多的 M10 合成探测状态边界。
 
-**2026-11-24 Android callback 失败关闭增量**：专用 AVD 现覆盖系统 VPN permission 返回 approved 后，fresh API authorization 被撤销的路径。Activity 重建后重新挑战签名，收到 revoked 状态后不保留 pending grant、不发 service handoff，结果前后没有新的 VPN service state 广播；定向 1/1，完整 disposable AVD 主套 25/25 及 6 项专项 instrumentation 通过。此次仍是 loopback fake API/模拟 permission result；Android OS 真实进程终止恢复、生产 PHP authorization、真实节点和 member tunnel 仍未验。下一项离线缺口是把“进程死亡后重新创建 Activity/service”与已持久化 permission marker、one-shot grant 及 service attempt 状态做可重复验收；不应把 ActivityScenario.recreate 等同进程死亡。
+**2026-11-24 Android callback 失败关闭增量**：专用 AVD 现覆盖系统 VPN permission 返回 approved 后，fresh API authorization 被撤销的路径。Activity 重建后重新挑战签名，收到 revoked 状态后不保留 pending grant、不发 service handoff，结果前后没有新的 VPN service state 广播；定向 1/1，完整 disposable AVD 主套 25/25 及 6 项专项 instrumentation 通过。提交 `9beca4d` 对应 CI `45423725347` 六个 jobs 全绿。此次仍是 loopback fake API/模拟 permission result；Android OS 真实进程终止恢复、生产 PHP authorization、真实节点和 member tunnel 仍未验。下一项离线缺口是把“进程死亡后重新创建 Activity/service”与已持久化 permission marker、one-shot grant 及 service attempt 状态做可重复验收；不应把 ActivityScenario.recreate 等同进程死亡。
 
 **当前可并行泳道**：
 
