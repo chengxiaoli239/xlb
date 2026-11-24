@@ -19,6 +19,26 @@ Status: the Laravel control plane has a shared entitlement byte ledger with atom
 - Agent endpoints must be administrator-controlled node records; never accept an endpoint from a member request. Production must use a private, controlled endpoint and a dedicated client certificate whose issuer and scope are limited to the member-node Agent service.
 - A transport timeout is an unknown outcome, not a failed operation. Retry the same operation with the same request ID and generation. Do not release a peer slot, expose a profile, or report revocation until a matching Agent acknowledgement is durably recorded.
 
+## Node Data-plane Probe
+
+The optional `POST /v1/node/probe` endpoint is a node-to-canary reachability contract used by the health probe driver. It is separate from `/healthz`, which reports process liveness only.
+
+The PHP control plane calls the Agent listener over TLS 1.3 mTLS with a random 32-byte challenge encoded as 64 lowercase hexadecimal characters:
+
+```json
+{"challenge":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
+```
+
+When the configured executor succeeds, the Agent responds with its trusted runtime node identity and the same challenge:
+
+```json
+{"data":{"node_id":"node UUID","challenge":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}}
+```
+
+The isolated-test HTTPS canary executor sends the same challenge to an administrator-configured `https://<host>/.well-known/xlb-node-probe/v1` endpoint. The canary responds with `{"data":{"challenge":"<same 64 lowercase hexadecimal characters>"}}`. Runtime configuration supplies the endpoint and a PEM CA bundle. The executor uses TLS 1.3 with that CA, disables proxy use and redirects, restricts the target to TCP port 443 and rejects DNS answers that include non-public addresses, bounds response size, rejects unknown JSON fields, and requires an exact challenge echo. The endpoint and trust bundle are trusted node configuration; they are never accepted from a member API request.
+
+The HTTPS canary option is accepted only in `isolated-test` runtime and the probe listener must be separately enabled on a distinct loopback address. Runtime config without the explicit canary declaration keeps the listener at `503 probe_unavailable`; the executable still rejects production mode. An accepted echo proves the configured node process completed its outbound HTTPS canary exchange during that probe. It does not prove a member's TUN, provider/operator path, end-to-end customer connectivity, sustained availability, or revocation delivery. Only the PHP health coordinator may persist a successful probe result after matching the TLS-authenticated node ID and challenge; `/healthz`, listener readiness, and synthetic fixtures must never update node health.
+
 ## Provisioning
 
 `POST /v1/member-peers/ensure`

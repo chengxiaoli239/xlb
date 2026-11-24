@@ -149,12 +149,8 @@ func (executor *httpsCanaryProbeExecutor) Exchange(ctx context.Context, challeng
 		decoder.Decode(new(any)) != io.EOF {
 		return nil, errInvalidProbeCanary
 	}
-	if len(payload.Data.Challenge) != hex.EncodedLen(nodeProbeChallengeBytes) {
+	if payload.Data.Challenge != encodedChallenge {
 		return nil, errInvalidProbeCanary
 	}
-	echoedChallenge, err := hex.DecodeString(payload.Data.Challenge)
-	if err != nil || !equalProbeChallenge(challenge, echoedChallenge) {
-		return nil, errInvalidProbeCanary
-	}
-	return echoedChallenge, nil
+	return append([]byte(nil), challenge...), nil
 }

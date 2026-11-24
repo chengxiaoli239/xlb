@@ -110,6 +110,13 @@ func TestHTTPSCanaryProbeExecutorRejectsChallengeMismatchAndRedirect(t *testing.
 			}),
 		},
 		{
+			name: "challenge encoding mismatch",
+			handler: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writer.Header().Set("Content-Type", "application/json")
+				_, _ = writer.Write([]byte(`{"data":{"challenge":"` + strings.Repeat("5A", nodeProbeChallengeBytes) + `"}}`))
+			}),
+		},
+		{
 			name: "redirect",
 			handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				http.Redirect(writer, request, "https://canary.example.invalid/other", http.StatusFound)
