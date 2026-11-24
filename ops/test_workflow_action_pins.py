@@ -98,6 +98,7 @@ class WorkflowActionPinsTest(unittest.TestCase):
                 "Verify package identity and APK signature",
                 "Generate release runtime SBOM",
                 "Create source-bound APK manifest",
+                "Verify candidate artifact manifest",
                 "Attest signed candidate APK",
                 "Attest release runtime SBOM",
                 "Upload signed candidate for review",
@@ -134,6 +135,15 @@ class WorkflowActionPinsTest(unittest.TestCase):
             "apps/android/app/build/reports/cyclonedx-direct/bom.json",
         ]:
             self.assertIn(artifact_path, upload_step.group("body"))
+        manifest_verification_step = re.search(
+            r"(?ms)^      - name: Verify candidate artifact manifest\n(?P<body>.*?)(?=^      - name: |\Z)",
+            candidate_job,
+        )
+        self.assertIsNotNone(manifest_verification_step)
+        self.assertIn(
+            "ops/verify_artifact_manifest.py apps/android/app/build/outputs/apk/release/build-manifest.json",
+            manifest_verification_step.group("body"),
+        )
         self.assertNotIn("gh release create", workflow)
         self.assertNotIn("softprops/action-gh-release@", workflow)
         self.assertNotIn("r0adkll/upload-google-play@", workflow)

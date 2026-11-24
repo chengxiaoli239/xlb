@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M11 候选 APK/SBOM 摘要清单离线验签前校验器（2026-11-24）**：新增只读 `ops/verify_artifact_manifest.py`，校验受限 schema、源 commit 格式、repo 内相对路径、artifact 唯一性、regular file、大小与 SHA-256；对路径先解析并限制在 checkout 内，再验证文件存在，拒绝目录穿越和逃出仓库的符号链接。Android signed-candidate workflow 在生成包含 APK+BOM 的联合清单后、attest 前调用该校验器。新增正向多文件验证及 digest 改动、路径越界、重复条目、未知 schema 负例。ops 全套 62/62、py_compile、workflow YAML 解析与 diff check 通过。该命令只验证下载/候选文件与清单的一致性，不校验签名信任链、provenance 内容、源码安全或发布权限，也不部署/发布候选。主线 CI 尚待提交触发。
+
 - **M11 signed candidate Environment 保护状态核对（2026-11-24，只读 GitHub 元数据）**：通过 GitHub 环境只读 API 查询 `android-release-candidate` 返回 404，环境列表为空；该受保护环境目前尚未创建或对当前身份不可见，因此正式签名候选 workflow 不能运行，且本轮没有读取 secrets、创建环境、写入凭据或发起候选构建。离线签名脚本验证、SBOM/摘要工作流与 CI 已完成；后续需 repo 管理员建立 Environment，设置 main-only deployment branch policy 与审核者，再由凭据负责人注入 keystore/password/API origin secrets/variables，经审批后手动运行。此为发布候选的外部配置前置，不阻断离线开发。
 
 - **M11 签名 Android 候选附带 release runtime SBOM（2026-11-24，本地与 hosted CI）**：受保护环境的手动候选 workflow 现在在 release APK 签名和包名检查后生成 CycloneDX release runtime BOM；来源清单同时记录 APK 与 BOM 的 SHA-256；分别对 APK 和 BOM 建立 provenance attest，并把三份文件一并上传供审核。扩展 workflow 回归检查每个具体 step 的 manifest 输入、SBOM attest subject 和审核 artifact 内容，保持 main-only、protected environment、无 Release/Play Store 发布。Gradle 在本机 JDK 21 + Android SDK 35 下成功生成 CycloneDX BOM；临时密钥完整 APK 签名配置验证通过并核对 signer 与临时证书匹配，脚本已清理临时 keystore/APK；ops 全套 55/55、Python 编译和 diff check 通过。主线 CI `45307881535` 六个 jobs 全绿，涵盖 workflow 回归、Android build/signing config、release runtime SBOM 与 provenance。此次没有注入受保护签名凭据或运行 manual signed-candidate workflow，不能称为受保护候选构建或可发布。下一步需完成 protected environment、审核者、正式签名凭据与 approved API origin 配置，再由获批者手动运行候选工作流。
