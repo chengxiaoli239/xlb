@@ -43,7 +43,7 @@ class WorkflowActionPinsTest(unittest.TestCase):
 
         self.assertEqual(
             {
-                "actions/checkout": 7,
+                "actions/checkout": 8,
                 "actions/setup-node": 3,
                 "pnpm/action-setup": 3,
                 "actions/setup-go": 4,
