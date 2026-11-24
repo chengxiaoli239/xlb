@@ -72,6 +72,21 @@
 
 每个工作项开工前登记四象限、范围/文件所有权、可验收证据和估时。若一个单元超过两小时仍无边界，拆成检查点。只有存在真实上线阻塞的 Q1 才可打断已开始的工作；Q3 状态同步集中处理，Q4 不进入一周首发排期。知识库通用规则见 `10-全局/规范/AI项目四象限与持续推进.md`。
 
+### 0.2.3 Android 候选阶段 Go/No-Go 检查清单（2026-11-24）
+
+这是候选构建与后续受控试点的检查单，不授权创建 GitHub Environment、写入 secrets、部署或发布。
+
+| 阶段 | Go 条件 | 当前结论/动作 |
+| --- | --- | --- |
+| 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | `579b971` 已推送；对应 hosted CI `45391159683` 尚待结束，本轮不能提前标绿 |
+| 签名权限 | `android-release-candidate` Environment 存在、仅允许 main、设置人工审核者；签名 secrets 和 approved API origin 由负责人经受控通道配置 | PRD 最近一次只读核查记为 Environment 查询 404、环境列表为空。未重查外部设置前维持“未确认/不可运行”，由管理员处理 |
+| 候选构建 | 获批者手动运行 workflow；Release unit tests、lint、APK signature/package identity 检查、runtime SBOM、APK+SBOM source-bound manifest、manifest 校验及两项 provenance attest 全部成功 | workflow 只响应 `workflow_dispatch`，job 限 `refs/heads/main`，以 protected Environment 取凭据，仅 `contents: read` 加 attest 所需权限；失败即不进入 staging |
+| 候选审查 | 下载 APK/BOM/manifest；核对 manifest source commit 等于审阅 commit、摘要一致；验证 APK signer/package 与来源证明；记录审阅结果 | 当前只有脚本/CI 规则覆盖，无正式签名候选制品，因此该阶段未通过 |
+| staging 放行 | 负责人提供已批准 staging、数据保留与回滚窗口；候选摘要固定后部署；登录/权益、商户沙箱、Android 安装/线路和撤权回执 smoke 通过；回滚演练有记录 | 未有 staging 窗口与回滚责任人记录，不部署、不产生云费用 |
+| 付费试点 Go/No-Go | Android 双身份复制拒绝和匹配节点撤权最终流量回执、商户 sandbox 对账、目标市场合规意见、签名/制品审查、staging 和支持/回滚责任均有证据 | 任一缺项都为 No-Go；离线 CI、AVD、合成 peer、local/testing 不能代替放行证据 |
+
+**本轮离线检查**：`python3 -m unittest ops.test_workflow_action_pins ops.test_verify_artifact_manifest`，10 项通过。该检查验证 workflow 权限/步骤和 artifact manifest 正负例，不实际运行签名 workflow、不访问 secrets、不产生候选 APK，也不代表 protected Environment 或发布放行已验收。
+
 四象限按对 12-01 Android + 网站/API 受控试点的影响与实际截止时间排序。两天半以上的项目运行时长不能直接当作 AI 编码工时；PRD/提交记录显示近期高投入集中在 Android service/grant 并发与生命周期失败关闭、M10 探测到路由过滤的多层测试与 hosted CI。它们是重要的安全/稳定性建设，但本机 canary 与合成状态不能交付真实会员线路；额外离线细节的边际价值已经低于外部放行材料。
 
 | 象限 | 当前事项 | 下一步、负责人和退出证据 |
