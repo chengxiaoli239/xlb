@@ -11,6 +11,7 @@ use App\Services\NodeDataPlaneProbeTransportException;
 use App\Services\NodeHealthCircuitBreaker;
 use App\Services\NodeHealthProbeCoordinator;
 use App\Services\NodeHealthProbeDriver;
+use App\Services\NodeHealthState;
 use App\Services\NodeRoutingPolicy;
 use GuzzleHttp\Exception\NetworkTimeoutException;
 use GuzzleHttp\Psr7\Request as GuzzleRequest;
@@ -240,19 +241,21 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
             $this->assertSame('healthy', $persistedState?->status);
             $this->assertSame(0, $persistedState?->failureStreak);
             $this->assertNotNull($persistedState?->lastProbeAt);
-            $candidates = (new NodeRoutingPolicy)->rankCandidates(
-                [[
-                    'id' => $nodeId,
-                    'status' => 'available',
-                    'health_status' => 'verified_test',
-                    'last_health_check_at' => $persistedState->lastProbeAt->format(DATE_ATOM),
-                    'max_sessions' => 10,
-                    'active_sessions' => 1,
-                    'weight' => 100,
-                    'latency_ms' => 25,
-                    'packet_loss_pct' => 0.0,
-                    'cpu_pct' => 10.0,
-                ]],
+            $routeNode = [
+                'id' => $nodeId,
+                'status' => 'available',
+                'health_status' => 'verified_test',
+                'last_health_check_at' => $persistedState->lastProbeAt->format(DATE_ATOM),
+                'max_sessions' => 10,
+                'active_sessions' => 1,
+                'weight' => 100,
+                'latency_ms' => 25,
+                'packet_loss_pct' => 0.0,
+                'cpu_pct' => 10.0,
+            ];
+            $routingPolicy = new NodeRoutingPolicy;
+            $candidates = $routingPolicy->rankCandidates(
+                [$routeNode],
                 'installation-test',
                 $persistedState->lastProbeAt,
                 ['verified_test'],
@@ -261,6 +264,31 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
                 [$nodeId => $persistedState],
             );
             $this->assertSame([$nodeId], array_map(static fn ($candidate): string => $candidate->nodeId, $candidates));
+            $this->assertSame([], $routingPolicy->rankCandidates(
+                [$routeNode],
+                'installation-test',
+                $persistedState->lastProbeAt->modify('+31 seconds'),
+                ['verified_test'],
+                30,
+                0.7,
+                [$nodeId => $persistedState],
+            ));
+            $unhealthyState = new NodeHealthState(
+                'unhealthy',
+                3,
+                0,
+                $persistedState->lastProbeAt->modify('+1 second'),
+            );
+            $stateStore->put($nodeId, $unhealthyState);
+            $this->assertSame([], $routingPolicy->rankCandidates(
+                [$routeNode],
+                'installation-test',
+                $unhealthyState->lastProbeAt,
+                ['verified_test'],
+                30,
+                0.7,
+                [$nodeId => $stateStore->get($nodeId)],
+            ));
         } finally {
             $status = proc_get_status($server);
             $shutdownDeadline = microtime(true) + 1.0;
