@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **一周首版冲刺目标（2026-11-24）**：按用户已确认的 Android + 网站/API 单服务商受控试点范围，以 2026-12-01 为冲刺检查点。AI 可控代码、离线自动化、签名候选与审查材料按此节奏推进；真实会员节点/撤权回执、签名 Environment、staging、商户沙箱契约和合规书面意见仍是独立放行门，必须并行落实，不能由离线测试替代。若这些外部门未按期满足，12-01 只能交付候选或内部技术预览，不得称为受控试点已上线；不据此承诺公开付费上线日期。
+
 - **Android API 授权失败安全诊断编号（2026-11-24，本机离线验收）**：PHP JSON error code/HTTP status 现在通过 allowlist 映射为稳定编号，覆盖设备满额、会员权益失效、设备已撤销、身份不匹配、challenge/proof 拒绝、会话过期、权限拒绝、限流、服务不可用与网络不可达；未知服务端错误只显示 `api_request_failed`，不回显服务器内部 code。编号经 `ClientSnapshot` 保留并显示在会员线路状态卡，没有新遥测或写日志。新增纯 JVM 映射测试 2 项；Android 全套 JVM、AndroidTest 编译、lint、Debug APK build 通过。仅验证客户端如何分类 server response，不证明生产 API 会产生对应状态、真实授权拒绝或节点端状态。
 
 - **Android 连接失败安全诊断编号（2026-11-24，本机与 hosted CI）**：`XlbVpnService` 现在根据安全用户文案附带稳定失败编号，覆盖系统 VPN 权限、空线路候选、配置不兼容、启动超时、连接验证未通过、资源清理待完成、系统隧道不可用、会员线路门关闭及内核不可用；未知错误统一为 `startup_failed`。编号随内部状态广播到 UI，原错误文案仍由白名单映射生成，异常原文、URL、凭据和 TLS 细节不会展示；错误解除/状态变化后编号清除。新增单元测试验证已知分类与含假凭据的未知错误不回显。Android 全套 JVM tests、AndroidTest 编译、lint、Debug APK build 通过；主线 CI `45316986228` 六个 jobs 全绿。未运行 AVD/实体设备或真实节点。编号描述客户端观察到的失败边界，不诊断封锁原因、不宣称节点故障或断流。
@@ -30,7 +32,7 @@
 
 - **M10 路线配置自动测速/故障切换/手动选择组（2026-11-24，本地与 hosted CI）**：local/testing 账号级兼容订阅现生成 Mihomo `url-test`、`fallback` 与手动 `select` 组，候选严格来自已解析的 route version 节点；不健康或 health timestamp 超过 TTL 的节点不会进入组；每设备 proof peer 的服务端 profile 原样返回，不经此生成器。profile 定向测试与设备订阅回归 32 passed、1 个既有 skip；Laravel 全套 251 passed、1 个既有 skip、2,217 assertions，Pint 通过。主线 CI `45287506548` 验证 pinned Mihomo v1.19.34 `-t` 解析，CI `45289769190` 六个 jobs 全绿并覆盖新增健康候选过滤回归。Hosted PHPUnit 汇总为 32 passed、220 warning-classified tests、2,237 assertions；前一 run `45284036959` 为 32 passed、219 warning-classified tests，warning 分类原因尚未定位。此结果不等于真实线路故障注入或生产 failover 验收；配置仅限 local/testing，也不改变严格逐设备 peer 路径。
 
-- **M6 / 运维文档 AWS 会话状态对齐（2026-11-24，只读事实核对）**：复核确认 `xlb-ops` 当前 STS 已过期，本轮无法取得 AWS 身份或当前资源清单；未执行 AWS 资源读取/写入。同步修正文档中把历史成功登录或历史资源快照写成当前状态的条目；真实节点、会员 profile、mTLS 与撤权回执仍缺。重新登录后必须先只读盘点和复核获批 plan，离线开发继续推进。
+- **M6 / AWS 会话与隔离资源只读复核（2026-11-24）**：项目 `ops/aws-cli` 包装器返回 `arn:aws:iam::289069331089:root`，会话有效。us-west-2 当前唯一活动 XLB CloudFormation 栈为既有 `xlb-node-manager-access-usw2`；`xlb-lab-*` 栈均为 `DELETE_COMPLETE`，按 `ManagedBy=xlb-node-lab` 查询的 EC2、EBS、ENI、安全组、公网地址和 Scheduler 均无结果，SSM 托管实例查询为空。只读，无资源写入。真实会员 profile、endpoint/CA/mTLS 与匹配撤权回执仍缺，不能因此宣称 M6 完成或会员流量已断。
 
 - **M8 Android VPN service 销毁时清理未消费 grant（2026-11-24，本机与 hosted CI 验收）**：先在 `xlb-m9-recovery` AVD 复现未知 service action 触发服务销毁后，旧 `MemberTunnelGrantStore` handoff 仍可被消费；随后让 `XlbVpnService.onDestroy()` 同步清除 process-local pending grant。修后新增用例 1/1、service admission instrumentation 整组 4/4、Android 全套 JVM、lint、AndroidTest 编译和 Debug APK build 通过；主线 CI `45278603034` 六个 jobs 全绿。仅为专用 AVD 生命周期验证，不连接实体手机、系统 TUN、真实节点；生产 member admission gate 仍关闭。
 
@@ -48,7 +50,7 @@
 
 - **M11 Docker 忽略规则自动回归（2026-11-24，本机与 hosted CI）**：新增 `ops/test_docker_context.py`，在临时根构建上下文逐项尝试将 10 种合成环境凭据/运行数据 `COPY` 到 `scratch`，确认 Docker 因 `.dockerignore` 排除而拒绝；测试只使用非秘密 sentinel。ops 全套 54/54、Python 编译与 `git diff --check` 通过；主线 CI `45261821374` 中 Docker 忽略规则回归、PHP/Web 镜像构建及全套其他 jobs 均成功。
 
-- **M6/AWS 外部会话状态复核（2026-11-24，只读）**：使用项目固化的 `ops/aws-cli` 包装调用 `sts get-caller-identity --profile xlb-ops`，返回 session expired；本轮没有 AWS 读写资源操作。最近一次成功盘点是历史状态，不能当作当前资源证明。继续 M6 云端验收前需用户本人重新 `aws login`，随后先只读盘点并重新审查 TTL/费用 plan；缺失的真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供。AWS 会话过期不阻断沙箱、Android、M10 或 M11 离线工作。
+- **M6/AWS 外部会话状态复核（2026-11-24，只读，后续状态已更新）**：较早调用项目 `ops/aws-cli` 包装器返回 session expired；本轮后续复查 STS 已有效，并完成 us-west-2 实验资源只读盘点，当前结果见本节较新的“M6 / AWS 会话与隔离资源只读复核”。此前过期结果仅保留为同日历史观察，不再作为当前阻塞。真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供；AWS 资源未写入。
 
 - **M11 Docker 构建上下文与 PHP/Web 镜像 CI 验收（2026-11-24，hosted run 通过）**：仓库根 `.dockerignore` 排除根级/嵌套 `.env`、Composer/npm/netrc 凭据、AWS/SSH 私有配置、私钥/密钥库、SQLite、依赖/build、Laravel runtime storage/cache 与 `ops/.state`；10 个本地 Docker 隔离构建夹具确认这些输入不可被 `COPY`。PHP Composer 阶段增加仅供构建使用的 `unzip` 后，hosted CI `45259345222` 的 PHP 与 Web 镜像构建、Android build/signing-config、Laravel/API/Web/扩展、Go、ops、SBOM provenance 全部通过。该 CI 只构建镜像，不部署 staging/production、不发布制品；本机 Docker Hub 仍返回 OCI config descriptor 错误。没有读取或提交任何真实凭据。
 
