@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-25）
 
-- **M8 Windows logout API failure still clears local proof and cookie（2026-11-25，等待 hosted Windows CI）**：新增 AccountClient loopback integration，预置有效内存 `VerifiedMemberDeviceProof` 与 session cookie，在 CSRF 请求成功后让 `/auth/logout` 返回 HTTP 500；验证 logout 报错时仍先清除 verified proof 和本地持久 cookie。使用仅本机 loopback fixture，不发真实 API、sidecar、VPN/TUN 或节点请求，不打开 proof bridge gate。Windows native test/build 需由 push 后 MSVC hosted CI 验证。
+- **M8 Windows logout API failure still clears local proof and cookie（2026-11-25，hosted CI 通过）**：新增 AccountClient loopback integration，预置有效内存 `VerifiedMemberDeviceProof` 与 session cookie，在 CSRF 请求成功后让 `/auth/logout` 返回 HTTP 500；验证 logout 报错时仍先清除 verified proof 和本地持久 cookie。使用仅本机 loopback fixture，不发真实 API、sidecar、VPN/TUN 或节点请求，不打开 proof bridge gate。Windows MSVC `cargo test`/build CI `45472488726` 和一般 CI `45472488853` 全绿。该项只验证本地 logout API 失败时的清理，不证明真实服务端撤权、Windows 数据面或会员线路可用。
 
 - **M8 Windows CNG key → server-authorized proof capability 验证（2026-11-25，hosted Windows CI 通过）**：增加 Windows-only native test，使用真实 Microsoft Software Key Storage Provider 创建本次测试专属 current-user P-256 key，将它的 installation ID、公钥与 ready peer/device/node/generation 授权响应组成 `VerifiedMemberDeviceProof`，再通过该 capability 的 signer 签署 challenge，并用同一 CNG key 导出的公钥验证签名。临时 key 由 test fixture Drop 清理；没有把私钥导出、没有启动 bridge/sidecar、没有连接 VPN/TUN/节点，也没有修改默认关闭的 proof bridge gate。Windows 前端 Vitest 6/6 和 production build 通过；首次 Windows hosted run `45462631776` 揭示测试模块缺少 `base64::Engine` trait 导入并以 `E0599` 失败，修复后 Windows MSVC `cargo test` 和 build 在 CI `45463883844` 全绿；同提交一般 CI `45463883966` 全绿。该项只证明 Windows device proof 能力与已验证 peer capability 的 key binding 接通，不证明真实 PHP 授权、Windows 数据面或会员线路可用。
 
