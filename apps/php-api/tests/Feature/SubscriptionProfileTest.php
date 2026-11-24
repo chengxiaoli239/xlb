@@ -167,6 +167,48 @@ class SubscriptionProfileTest extends TestCase
         $this->assertStringNotContainsString('演示节点 02', $updatedResponse->getContent());
     }
 
+    public function test_publishing_and_rolling_back_a_route_version_updates_profile_candidates(): void
+    {
+        $url = $this->profileUrl();
+        $initialResponse = $this->get($url)->assertOk()->assertHeader('X-XLB-Route-Version', '1');
+        $initialConfig = Yaml::parse($initialResponse->getContent());
+        $this->assertSame(['演示节点 01'], array_column($initialConfig['proxies'], 'name'));
+
+        $now = now()->utc()->toIso8601String();
+        DB::table('nodes')->insert([
+            'id' => 'node-test-2', 'name' => '演示节点 02', 'region' => '测试区域', 'protocol' => 'SOCKS5',
+            'endpoint_host' => '198.51.100.11', 'endpoint_port' => 1081, 'status' => 'available',
+            'is_test' => true, 'max_sessions' => 100, 'active_sessions' => 0, 'latency_ms' => 55,
+            'health_status' => 'verified_test', 'last_health_check_at' => $now, 'config_version' => 1, 'updated_at' => $now,
+        ]);
+
+        $this->actingAs(User::findOrFail('user-admin'));
+        $routeId = $this->postJson('/api/v1/admin/subscription-routes', [
+            'scope' => 'test', 'node_ids' => ['node-test-2'], 'note' => 'profile version integration test',
+        ])->assertCreated()->assertJsonPath('data.version', 2)->json('data.id');
+        $this->postJson('/api/v1/admin/subscription-routes/'.$routeId.'/publish')
+            ->assertOk()->assertJsonPath('data.status', 'published');
+
+        $publishedResponse = $this->get($url)->assertOk()->assertHeader('X-XLB-Route-Version', '2');
+        $publishedConfig = Yaml::parse($publishedResponse->getContent());
+        $this->assertSame(['演示节点 02'], array_column($publishedConfig['proxies'], 'name'));
+        $this->assertNotSame(
+            $initialResponse->headers->get('X-XLB-Config-Version'),
+            $publishedResponse->headers->get('X-XLB-Config-Version'),
+        );
+
+        $this->postJson('/api/v1/admin/subscription-routes/'.$routeId.'/rollback')
+            ->assertOk()->assertJsonPath('data.status', 'rolled_back');
+
+        $rolledBackResponse = $this->get($url)->assertOk()->assertHeader('X-XLB-Route-Version', '1');
+        $rolledBackConfig = Yaml::parse($rolledBackResponse->getContent());
+        $this->assertSame(['演示节点 01'], array_column($rolledBackConfig['proxies'], 'name'));
+        $this->assertNotSame(
+            $publishedResponse->headers->get('X-XLB-Config-Version'),
+            $rolledBackResponse->headers->get('X-XLB-Config-Version'),
+        );
+    }
+
     public function test_user_agent_negotiation_and_explicit_format_precedence(): void
     {
         $url = $this->profileUrl();
