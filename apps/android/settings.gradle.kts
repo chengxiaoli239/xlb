@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "XlbAndroid"
 include(":app")
+include(":process-death-host")

@@ -44,7 +44,7 @@
 
 一周目标是压缩 AI 可控开发与审查周期。以当前已核实状态，正式受控试点能否在 12-01 上线取决于节点/撤权材料、签名 Environment、staging、商户沙箱与合规书面意见能否在前半周落实；这些事项有明确负责人并行完成前，试点日期置信度低。
 
-### 0.2.1 四象限复盘与本周工作重排（2026-11-24）
+### 0.2.1 四象限复盘与本周工作重排（2026-11-25）
 
 #### 项目全景与工作量排序（2026-11-24 更新）
 
@@ -60,6 +60,8 @@
 | **Q2 发布可追溯性** | 候选 artifact 校验与 SBOM/provenance CI 已覆盖；缺 protected Environment 和正式签名运行证据 | 离线 checklist 复核约 1–2 小时，正式候选时间取决于外部配置 | 与 Web/API 回归并行；不得创建环境或注入秘密，除非用户授权且相应负责人执行 | 对照 workflow、权限、制品摘要和审批门形成短 go/no-go 清单 |
 | **Q3 外部协调** | 节点、仓库 Environment、staging、商户、合规负责人及日期尚未确认；用户已表示稍后提供外部放行责任人 | AI 汇总缺项约 30–60 分钟/轮；等待时长未知 | 用户提供负责人后再登记姓名和承诺日期；未经授权不代发消息 | 把负责人和下一动作映射到上方 Q1 表，按真实日期重排 |
 | **Q4 后续范围** | Windows 数据面、macOS/iOS、规模化并发、多云/CDN、非首发细节不影响 Android + Web/API 单服务商受控试点的近期最短路径 | 当前冲刺不分配 | 放入后续路线图；只有 Q1 发布门和首发链路稳定后再重估 | 暂无，本周不启动 |
+
+**2026-11-25 Android 进程死亡冷启动恢复阶段**：四象限为 Q2（重要的客户端生命周期失败恢复，不解除真实会员节点 Q1 上线门）。新增独立 Android process-death host instrumentation，专用 AVD 上由 host 精确杀掉 debug app，之后经 VPN consent 批准与显式重新 launch 恢复 pending member request；local/testing Cookie 会话仍有效，客户端重新提交 P-256 proof 并进入生产关闭 gate。独立命令 `PROCESS_DEATH_ONLY=true apps/android/scripts/test-anonymous-recovery-emulator.sh` 退出码 0；调整 full-harness 的执行顺序，使需无既存 VPN consent 的 denied 回归先运行，之后其余 instrumentation 与 process-death 恢复测试全套退出码 0，主 instrumentation 25/25、6 项专项测试通过；Debug/AndroidTest JVM/编译/lint 通过。该测试明确覆盖冷启动恢复，不声称 OS 自动重建 Activity。下一步更新后检查 CI 对 host target 的构建覆盖，并转入下一个 Android/API 首发离线缺口。文件所有权限于 Android app、process-death-host 与 AVD harness；未碰 AWS/云、生产环境或真实节点。
 
 **关键路径**：节点/撤权材料 → Android 真实会员 profile 与双身份回执 → 受保护签名候选 → staging 登录/支付沙箱/回滚 → go/no-go。商户 sandbox 与合规可和节点开发、签名准备并行，但都必须在开放付费试点前通过。Android 离线失败处理、Web/API 沙箱回归、候选 workflow 检查可按目录边界并行，集成时统一以最新 main 运行全套 CI。AI 当前主要耗时应投到 Android 会员路径缺口与候选/测试的可重复性，不再继续深挖已经覆盖较多的 M10 合成探测状态边界。
 

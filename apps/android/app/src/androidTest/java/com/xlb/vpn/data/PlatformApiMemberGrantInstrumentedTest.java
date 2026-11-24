@@ -12,7 +12,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.net.VpnService;
 import android.os.Build;
+import android.os.SystemClock;
 import android.app.Activity;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -29,6 +31,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.junit.Assume;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -131,6 +134,8 @@ public final class PlatformApiMemberGrantInstrumentedTest {
     public void deniedPermissionCallbackDoesNotReauthorizeOrStartMemberService() throws Exception {
         requireDisposableEmulator();
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Assume.assumeTrue("this regression requires an AVD without existing VPN consent",
+                VpnService.prepare(context) != null);
         SharedPreferences preferences = context.getSharedPreferences("secure_client_state", Context.MODE_PRIVATE);
         assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
         FakeMemberApi server = new FakeMemberApi(MemberTunnelGrantAvdFixture.trustedSystemCaPem(), 4175);

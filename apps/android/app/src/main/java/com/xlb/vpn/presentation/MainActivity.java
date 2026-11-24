@@ -76,6 +76,7 @@ public final class MainActivity extends Activity {
     private static final String PREF_DARK_MODE = "dark_mode";
     private static final String PREF_AUTO_CONNECT_ON_START = "auto_connect_on_start";
     private static final String STATE_PENDING_MEMBER_VPN_PERMISSION = "pending_member_vpn_permission";
+    private static final String PREF_PENDING_MEMBER_VPN_PERMISSION = "pending_member_vpn_permission";
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -91,6 +92,7 @@ public final class MainActivity extends Activity {
     private String pendingRouteName;
     private MemberTunnelGrant pendingMemberGrant;
     private boolean pendingMemberVpnPermission;
+    private boolean memberPermissionRecoveryInProgress;
     private String loadedProfile;
     private boolean testRoute;
     private boolean routeSyncing;
@@ -117,8 +119,10 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         darkMode = getPreferences(MODE_PRIVATE).getBoolean(PREF_DARK_MODE, false);
         autoConnectOnStart = getPreferences(MODE_PRIVATE).getBoolean(PREF_AUTO_CONNECT_ON_START, false);
-        pendingMemberVpnPermission = savedInstanceState != null
-                && savedInstanceState.getBoolean(STATE_PENDING_MEMBER_VPN_PERMISSION, false);
+        pendingMemberVpnPermission = (savedInstanceState != null
+                && savedInstanceState.getBoolean(STATE_PENDING_MEMBER_VPN_PERMISSION, false))
+                || getSharedPreferences("secure_client_state", MODE_PRIVATE)
+                        .getBoolean(PREF_PENDING_MEMBER_VPN_PERMISSION, false);
         applyTheme();
         api = new PlatformApi(BuildConfig.API_BASE_URL, new SecureSessionStore(this));
         if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -147,6 +151,10 @@ public final class MainActivity extends Activity {
             mainHandler.post(() -> {
                 if (!isFinishing() && !isDestroyed()) {
                     applySyncedSnapshot(finalResult, syncedRoute);
+                    if ((pendingMemberVpnPermission || hasPendingMemberVpnPermission())
+                            && VpnService.prepare(MainActivity.this) == null) {
+                        startMemberPermissionRecovery();
+                    }
                 }
             });
         });
@@ -188,26 +196,36 @@ public final class MainActivity extends Activity {
         String profile = pendingProfile;
         String selectedRoute = pendingRouteName;
         MemberTunnelGrant memberGrant = pendingMemberGrant;
-        boolean memberRequest = pendingMemberVpnPermission;
+        boolean memberRequest = pendingMemberVpnPermission || hasPendingMemberVpnPermission();
         pendingProfile = null;
         pendingRouteName = null;
         pendingMemberGrant = null;
-        pendingMemberVpnPermission = false;
-        if (resultCode != RESULT_OK || (profile == null && memberGrant == null && !memberRequest)) {
-            showMessage("VPN 授权未完成", true);
-            return;
-        }
-        if (MemberVpnPermissionRecoveryPolicy.shouldResynchronize(memberRequest,
-                resultCode == RESULT_OK, memberGrant != null)) {
-            refreshMemberGrantAfterPermission();
-            return;
-        }
         if (resultCode != RESULT_OK) {
+            clearPendingMemberVpnPermission();
+            pendingMemberVpnPermission = false;
             showMessage("VPN 授权未完成", true);
             return;
         }
-        if (memberGrant != null) startMemberVpn(memberGrant);
-        else startVpn(profile, selectedRoute);
+        if (!memberRequest && memberPermissionRecoveryInProgress
+                && profile == null && memberGrant == null) {
+            return;
+        }
+        if (MemberVpnPermissionRecoveryPolicy.shouldResynchronize(memberRequest, true, memberGrant != null)) {
+            startMemberPermissionRecovery();
+            return;
+        }
+        if (profile == null && memberGrant == null) {
+            clearPendingMemberVpnPermission();
+            showMessage("VPN 授权未完成", true);
+            return;
+        }
+        if (memberGrant != null) {
+            clearPendingMemberVpnPermission();
+            pendingMemberVpnPermission = false;
+            startMemberVpn(memberGrant);
+        } else {
+            startVpn(profile, selectedRoute);
+        }
     }
 
     private void refreshMemberGrantAfterPermission() {
@@ -229,6 +247,13 @@ public final class MainActivity extends Activity {
             String syncedRoute = accountRouteName(result);
             mainHandler.post(() -> {
                 if (isFinishing() || isDestroyed()) return;
+                memberPermissionRecoveryInProgress = false;
+                if (error != null && refreshed == null) {
+                    showMessage(error, true);
+                    return;
+                }
+                clearPendingMemberVpnPermission();
+                pendingMemberVpnPermission = false;
                 if (refreshed == null || refreshedGrant == null
                         || !hasActiveEntitlement(refreshed)
                         || refreshed.nodeAuthorizationStatus != PlatformApi.NodeAuthorizationStatus.READY) {
@@ -241,6 +266,13 @@ public final class MainActivity extends Activity {
                 startMemberVpn(refreshedGrant);
             });
         });
+    }
+
+    private void startMemberPermissionRecovery() {
+        if (memberPermissionRecoveryInProgress) return;
+        memberPermissionRecoveryInProgress = true;
+        pendingMemberVpnPermission = true;
+        refreshMemberGrantAfterPermission();
     }
 
     private void renderLoading() {
@@ -475,7 +507,8 @@ public final class MainActivity extends Activity {
         connect.setMinHeight(dp(44));
         connect.setPadding(dp(12), 0, dp(12), 0);
         connect.setEnabled(!busy && !routeSyncing && !XlbVpnService.STATE_CONNECTING.equals(tunnelState)
-                && (loadedProfile != null || XlbVpnService.STATE_CONNECTED.equals(tunnelState)));
+                && (loadedProfile != null || api.verifiedMemberTunnelGrant() != null
+                || XlbVpnService.STATE_CONNECTED.equals(tunnelState)));
         FrameLayout.LayoutParams connectParams = new FrameLayout.LayoutParams(dp(170), dp(44), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         connectParams.topMargin = dp(158);
         hero.addView(connect, connectParams);
@@ -846,14 +879,16 @@ public final class MainActivity extends Activity {
         }
         MemberTunnelGrant memberGrant = api.verifiedMemberTunnelGrant();
         if (memberGrant != null) {
-            pendingMemberGrant = memberGrant;
-            pendingMemberVpnPermission = true;
             Intent approval = VpnService.prepare(this);
             if (approval == null) {
-                pendingMemberGrant = null;
-                pendingMemberVpnPermission = false;
                 startMemberVpn(memberGrant);
             } else {
+                if (!persistPendingMemberVpnPermission()) {
+                    showMessage("无法保存授权请求，请重试。", true);
+                    return;
+                }
+                pendingMemberGrant = memberGrant;
+                pendingMemberVpnPermission = true;
                 startActivityForResult(approval, VPN_PERMISSION_REQUEST);
             }
             return;
@@ -872,6 +907,21 @@ public final class MainActivity extends Activity {
         } else {
             startActivityForResult(approval, VPN_PERMISSION_REQUEST);
         }
+    }
+
+    private boolean persistPendingMemberVpnPermission() {
+        return getSharedPreferences("secure_client_state", MODE_PRIVATE)
+                .edit().putBoolean(PREF_PENDING_MEMBER_VPN_PERMISSION, true).commit();
+    }
+
+    private boolean hasPendingMemberVpnPermission() {
+        return getSharedPreferences("secure_client_state", MODE_PRIVATE)
+                .getBoolean(PREF_PENDING_MEMBER_VPN_PERMISSION, false);
+    }
+
+    private void clearPendingMemberVpnPermission() {
+        getSharedPreferences("secure_client_state", MODE_PRIVATE)
+                .edit().remove(PREF_PENDING_MEMBER_VPN_PERMISSION).commit();
     }
 
     private void startSubscriptionScan() {

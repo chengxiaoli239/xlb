@@ -231,7 +231,7 @@ jobs:
 
       - name: Build debug APK, compile instrumentation tests, run JVM tests and lint
         working-directory: apps/android
-        run: ./gradlew assembleDebug testDebugUnitTest compileDebugAndroidTestJavaWithJavac lintDebug --no-daemon
+        run: ./gradlew assembleDebug testDebugUnitTest compileDebugAndroidTestJavaWithJavac lintDebug :process-death-host:assembleDebug :process-death-host:assembleDebugAndroidTest --no-daemon
 
       - name: Verify release signing configuration with ephemeral test key
         run: apps/android/scripts/verify-release-signing-config.sh
