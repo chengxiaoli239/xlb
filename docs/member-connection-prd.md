@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **Android 用户拒绝系统 VPN 授权时停止会员启动（2026-11-24，专用 AVD）**：新增 `PlatformApiMemberGrantInstrumentedTest#deniedPermissionCallbackDoesNotReauthorizeOrStartMemberService`。在 fake API 返回 READY grant、Activity 恢复待授权状态后注入 `RESULT_CANCELED`，断言 pending permission/grant 被清除，不再次请求服务端授权、不发布进程 handoff、不启动/标记 member tunnel、没有 CONNECTED 广播。该用例单项通过，所在 member-grant instrumentation 整组 4/4 通过；Android JVM、lint、AndroidTest APK 编译通过。只证明系统权限拒绝分支的客户端行为，不证明真实会员节点或撤权断流；使用 disposable `xlb-m9-recovery` AVD，未触及会员真机。
+
 - **一周首版四象限重排（2026-11-24）**：近期高投入集中在 Android grant/service 并发生命周期门控、M10 探测器到路由过滤的深层本机测试、M11 APK/SBOM 证据链；它们提高工程安全/可追溯性，但不能解除真实会员线路、签名 Environment、staging、商户沙箱及合规外部门。M10 本机全链、SQLite 路由候选、过期与 unhealthy fail-closed 及正常 `nodes:probe-health` 命令入口均已验证，最新命令阶段 CI `45342618787` 六个 jobs 全绿；同类 M10 离线深测现冻结扩张，除非出现新故障证据或真实 canary 材料。下一优先级转为 Q1 外部放行行动（节点/运维、仓库管理员与凭据负责人、staging 负责人、支付与合规负责人），并并行推进首发 Android/Web/API 关键路径。具体材料、退出证据与检查点见 `docs/launch-engineering-master-plan.md` §0.2.2；人员姓名/承诺日期尚未核实，不能视为已认领。该重排不放宽设备限制、安全门或真实回执要求。
 
 - **Android 会员 gate 关闭时不发布连接成功（2026-11-24，专用 AVD 与 hosted CI）**：扩展 `XlbVpnServiceAdmissionInstrumentedTest`，有效形状的 member grant 经单次 handoff 被 service 消费后，断言生产 bridge gate 关闭时返回拒绝、没有 `CONNECTED` 状态广播、service 当前态不为 connected，且设备身份/线路名不残留。专用 `xlb-m9-recovery` AVD admission instrumentation 整组 4/4 通过；Android JVM、lint、Debug/AndroidTest APK 构建通过；主线 CI `45346177543` 六个 jobs 全绿。只验证客户端 gate 与 UI 状态不会误报成功，不证明真实节点/会员隧道或撤权断流；gate 保持关闭，未接触两台会员真机。

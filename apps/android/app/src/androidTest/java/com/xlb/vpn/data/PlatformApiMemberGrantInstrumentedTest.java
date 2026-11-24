@@ -128,6 +128,83 @@ public final class PlatformApiMemberGrantInstrumentedTest {
     }
 
     @Test
+    public void deniedPermissionCallbackDoesNotReauthorizeOrStartMemberService() throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SharedPreferences preferences = context.getSharedPreferences("secure_client_state", Context.MODE_PRIVATE);
+        assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+        FakeMemberApi server = new FakeMemberApi(MemberTunnelGrantAvdFixture.trustedSystemCaPem(), 4175);
+        SecureSessionStore sessionStore = new SecureSessionStore(context);
+        sessionStore.updateCookie("xlb_session", "isolated-member-session", false);
+        PlatformApi api = new PlatformApi("http://127.0.0.1:4175", sessionStore);
+        PlatformApi.MemberAccount account = new PlatformApi.MemberAccount(
+                "member-avd", "Disposable member", "member@example.invalid", "member");
+        AtomicInteger connectedStates = new AtomicInteger();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context receiverContext, Intent intent) {
+                if (XlbVpnService.STATE_CONNECTED.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                    connectedStates.incrementAndGet();
+                }
+            }
+        };
+        registerReceiver(context, receiver);
+        MemberTunnelGrantStore.clear();
+        String installationId = null;
+
+        try {
+            PlatformApi.ClientSnapshot initialSnapshot = api.synchronize(account);
+            MemberTunnelGrant grant = api.verifiedMemberTunnelGrant();
+            installationId = sessionStore.installationId();
+            assertEquals(PlatformApi.NodeAuthorizationStatus.READY, initialSnapshot.nodeAuthorizationStatus);
+            assertNotNull("test setup did not produce a verified member grant", grant);
+
+            try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
+                assertTrue("MainActivity did not synchronize the fake member API",
+                        awaitApiAuthorizationCount(server, 2));
+                scenario.onActivity(activity -> {
+                    setActivityField(activity, "pendingMemberVpnPermission", true);
+                    setActivityField(activity, "pendingMemberGrant", grant);
+                });
+
+                scenario.recreate();
+
+                assertTrue("recreated MainActivity did not finish its initial authorization sync",
+                        awaitActivitySnapshot(scenario));
+                int authorizationsBeforeCallback = server.authorizationRequestCount();
+                scenario.onActivity(activity -> {
+                    assertTrue("permission request marker was not restored",
+                            readBooleanField(activity, "pendingMemberVpnPermission"));
+                    assertNull("process-local grant was incorrectly restored", readField(activity, "pendingMemberGrant"));
+                    invokePermissionResult(activity, Activity.RESULT_CANCELED);
+                    assertFalse("denied permission callback retained its pending marker",
+                            readBooleanField(activity, "pendingMemberVpnPermission"));
+                    assertNull("denied permission callback retained its process-local grant",
+                            readField(activity, "pendingMemberGrant"));
+                });
+
+                Thread.sleep(250);
+                assertEquals("denied permission callback triggered another authorization request",
+                        authorizationsBeforeCallback, server.authorizationRequestCount());
+                assertFalse("denied permission callback published a service grant",
+                        MemberTunnelGrantStore.hasPendingHandoff());
+                assertFalse("denied permission callback marked the service as a member tunnel",
+                        XlbVpnService.currentTunnelIsMember());
+                assertEquals("denied permission callback reported a connected tunnel", 0, connectedStates.get());
+                assertFalse("fake API server observed an invalid request", server.hasFailure());
+            }
+        } finally {
+            MemberTunnelGrantStore.clear();
+            sessionStore.clearSession();
+            context.unregisterReceiver(receiver);
+            context.stopService(new Intent(context, XlbVpnService.class));
+            if (installationId != null) MemberTunnelGrantAvdFixture.deleteInstallationKey(installationId);
+            assertTrue("could not clear disposable emulator session state", preferences.edit().clear().commit());
+            server.close();
+        }
+    }
+
+    @Test
     public void profileDigestMismatchNeverPublishesReadyGrant() throws Exception {
         requireDisposableEmulator();
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
