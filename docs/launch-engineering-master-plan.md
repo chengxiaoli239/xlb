@@ -57,7 +57,7 @@
 | **Q1 商户沙箱与首发合规** | provider-neutral 契约和 local/testing 付款退款账本已经存在；真实商户 sandbox、首发地区合规意见未验收 | 商户契约到位后约 0.5–1.5 日接入/验收，审查时间由外部负责人决定 | 支付负责人提供回调、签名、重试、对账字段；合规负责人确认地区和书面意见。不得以本地假渠道宣称真实支付已验收 | 测试下单→回调→权益→退款→对账可追溯，并取得书面放行意见 |
 | **Q2 Android 离线失败处理** | 连接与 API 失败的安全诊断编号已有实现；首页连接失败有“重试连接”、账户节点线路不可用卡有“重试同步”。本轮为 attempt-bound monitor 补上“probe 进行中旧 attempt 被替换”回归；JVM 全量、AndroidTest compile、lint、Debug APK 本机通过，主线 `f07465d` CI `45406085919` 六个 jobs 全绿。未发现还需重复建设诊断 UI 的离线缺口 | 本阶段已完成；后续由新的复现问题驱动 | 真实节点材料缺失期间可继续其它工作，但不把客户端 probe 说成节点撤权事件/线路稳定证明 | 将 Android 诊断入口从本周 AI 待办移出；真实 member profile、节点证书和回执到位后转入 Q1 真机验收 |
 | **Q2 Web/API 沙箱首发回归** | 2026-11-24 本机订单、沙箱付款/退款和 provider ledger 测试通过；直接付款和 provider fulfillment 两条续费路径均锁会员行后计算新权益，相关 CI 全绿。本机浏览器联验会员网站→Laravel：建单与 sandbox payment 均 HTTP 201，退款后测试订单/grant 已清理。2026-11-25 新增会员取消 pending test order 的 Web UI 回归，断言 cancel API、列表刷新与状态/操作更新；Web Vitest 2 files / 9 tests 与 production build 通过。未完成真实商户/staging 流程或 MySQL/PostgreSQL 并发锁竞争 | 本地沙箱入口已验收；真实商户/staging 依赖外部环境 | 可与 Android 离线验证并行，文件所有权分离；真实商户接入仍等 Q1 资料 | 不重复本地支付成功路径；后续仅补新暴露的订单状态/恢复缺陷；真实渠道到位后验收商户回调/对账和目标数据库锁语义，当前仍无真实收款 |
-| **Q2 发布可追溯性** | 候选 artifact 校验与 SBOM/provenance CI 已覆盖；缺 protected Environment 和正式签名运行证据 | 离线 checklist 复核约 1–2 小时，正式候选时间取决于外部配置 | 与 Web/API 回归并行；不得创建环境或注入秘密，除非用户授权且相应负责人执行 | 对照 workflow、权限、制品摘要和审批门形成短 go/no-go 清单 |
+| **Q2 发布可追溯性** | 候选 artifact 校验、SBOM/provenance CI 和 §0.2.3 go/no-go 清单复核已完成；`main@f507db0` 的 CI `45456754780` 六个 jobs 全绿 | 离线清单复核关闭；正式候选时间取决于外部 Environment、审批人和签名凭据配置 | 正式 Environment 尚不存在；不得创建环境或注入秘密，须由仓库管理员/凭据负责人经授权处理 | 等外部签名配置就绪后，由获批者构建并审查 APK/BOM/manifest/provenance；当前不放行 |
 | **Q3 外部协调** | 节点、仓库 Environment、staging、商户、合规负责人及日期尚未确认；用户已表示稍后提供外部放行责任人 | AI 汇总缺项约 30–60 分钟/轮；等待时长未知 | 用户提供负责人后再登记姓名和承诺日期；未经授权不代发消息 | 把负责人和下一动作映射到上方 Q1 表，按真实日期重排 |
 | **Q4 后续范围** | Windows 数据面、macOS/iOS、规模化并发、多云/CDN、非首发细节不影响 Android + Web/API 单服务商受控试点的近期最短路径 | 当前冲刺不分配 | 放入后续路线图；只有 Q1 发布门和首发链路稳定后再重估 | 暂无，本周不启动 |
 
@@ -100,7 +100,7 @@
 
 | 阶段 | Go 条件 | 当前结论/动作 |
 | --- | --- | --- |
-| 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | `main@2fc0312` 已推送，CI `45455644892` 六个 jobs 全绿；当前代码/CI 证据满足构建基线，正式候选冻结仍须绑定审核/审批记录 |
+| 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | `main@f507db0` 已推送，CI `45456754780` 六个 jobs 全绿；当前代码/CI 证据满足构建基线，正式候选冻结仍须绑定审核/审批记录 |
 | 签名权限 | `android-release-candidate` Environment 存在、仅允许 main、设置人工审核者；签名 secrets 和 approved API origin 由负责人经受控通道配置 | 2026-11-25 GitHub 只读 API 返回 Environment 数量为 0；未查询 secrets、未创建或修改 Environment，签名候选不可运行 |
 | 候选构建 | 获批者手动运行 workflow；Release unit tests、lint、APK signature/package identity 检查、runtime SBOM、APK+SBOM source-bound manifest、manifest 校验及两项 provenance attest 全部成功 | 常规 CI 仅以临时测试密钥检查签名配置并产出 Debug APK/SBOM；正式 workflow 仍受 `workflow_dispatch`、`main` 与 protected Environment 限制。没有正式凭据，未构建签名候选 |
 | 候选审查 | 下载 APK/BOM/manifest；核对 manifest source commit 等于审阅 commit、摘要一致；验证 APK signer/package 与来源证明；记录审阅结果 | 当前无正式签名候选制品；脚本和 CI 规则已覆盖校验路径，但该阶段未通过 |
