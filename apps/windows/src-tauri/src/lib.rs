@@ -971,6 +971,76 @@ mod tests {
         assert!(paths[14].contains("api/v1/auth/session"));
     }
 
+    #[tokio::test]
+    async fn logout_clears_verified_proof_and_cookie_when_api_logout_fails() {
+        use std::{io::{Read, Write}, net::TcpListener, thread};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let mut paths = Vec::new();
+            for status in ["200 OK", "500 Internal Server Error"] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 4096];
+                let count = stream.read(&mut request).unwrap();
+                let text = String::from_utf8_lossy(&request[..count]);
+                let path = text.lines().next().unwrap_or_default().to_owned();
+                paths.push(path.clone());
+                assert!(text.to_ascii_lowercase().contains("cookie: laravel_session=test"));
+                let body = if status == "200 OK" {
+                    "{\"data\":{\"token\":\"csrf\"}}"
+                } else {
+                    "{\"message\":\"logout unavailable\"}"
+                };
+                let response = format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+            paths
+        });
+
+        let store = Arc::new(MemoryStore::default());
+        store.save("laravel_session=test").unwrap();
+        let mut client = AccountClient::new(&format!("http://{address}/"), store.clone()).unwrap()
+            .with_device_proof(Arc::new(FakeDeviceProof {
+                installation_id: "fd3ae0f1-1234-4234-9234-000000000002".into(),
+            }));
+        client.load_persisted_session().unwrap();
+        let device = BoundDevice {
+            id: "fd3ae0f1-1234-4234-9234-000000000010".into(),
+            status: "registered".into(),
+            bound: true,
+        };
+        let authorization = DeviceAuthorization {
+            status: "ready".into(),
+            peer_id: Some("fd3ae0f1-1234-4234-9234-000000000011".into()),
+            node_id: Some("fd3ae0f1-1234-4234-9234-000000000012".into()),
+            peer_generation: Some(1),
+            device_binding_generation: Some(1),
+            peer_credential: Some(URL_SAFE_NO_PAD.encode([7u8; 32])),
+            profile: Some("mixed-port: 0\nproxies: []\n".into()),
+        };
+        client.verified_member_device_proof = Some(
+            proof_bridge::VerifiedMemberDeviceProof::from_authorized_response(
+                "member-1",
+                "fd3ae0f1-1234-4234-9234-000000000002",
+                &device,
+                &authorization,
+                "test-public-key",
+                Arc::new(FakeDeviceProof {
+                    installation_id: "fd3ae0f1-1234-4234-9234-000000000002".into(),
+                }),
+            )
+            .unwrap(),
+        );
+
+        assert!(client.logout().await.is_err());
+        assert!(client.verified_member_device_proof.is_none());
+        assert!(store.load().unwrap().is_none());
+        let paths = server.join().unwrap();
+        assert!(paths[0].contains("api/v1/auth/csrf"));
+        assert!(paths[1].contains("api/v1/auth/logout"));
+    }
+
     #[test]
     fn scopes_credential_entries_to_the_api_origin() {
         let first = Url::parse("https://api.example.test/").unwrap();
