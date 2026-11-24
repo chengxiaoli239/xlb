@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\NodeHealthProbeDriver;
+use App\Services\NodeHealthProbeResult;
+use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
@@ -207,6 +210,51 @@ class SubscriptionProfileTest extends TestCase
             $publishedResponse->headers->get('X-XLB-Config-Version'),
             $rolledBackResponse->headers->get('X-XLB-Config-Version'),
         );
+    }
+
+    public function test_open_probe_circuit_removes_the_candidate_from_member_profiles(): void
+    {
+        config([
+            'node_health_probe.enabled' => true,
+            'node_health_probe.route_filter_enabled' => false,
+            'node_health_probe.route_state_ttl_seconds' => 30,
+        ]);
+        $driver = new class(now()->subSeconds(10)->toDateTimeImmutable()) implements NodeHealthProbeDriver
+        {
+            public int $calls = 0;
+
+            public function __construct(private readonly DateTimeImmutable $start) {}
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                $observedAt = $this->start->modify('+'.($this->calls * 2).' seconds');
+                $this->calls++;
+
+                return new NodeHealthProbeResult(false, $observedAt, failureCode: 'synthetic_timeout');
+            }
+        };
+        $this->app->instance(NodeHealthProbeDriver::class, $driver);
+
+        $url = $this->profileUrl();
+        $existingNodeHealthCheck = DB::table('nodes')->where('id', 'node-test-1')->value('last_health_check_at');
+        $this->get($url)->assertOk()->assertSee('演示节点 01');
+        config(['node_health_probe.route_filter_enabled' => true]);
+
+        foreach ([1, 2, 3] as $_) {
+            $this->artisan('nodes:probe-health')
+                ->expectsOutputToContain('不构成节点连接或会员隧道验收')
+                ->assertExitCode(0);
+        }
+
+        $this->assertSame(3, $driver->calls);
+        $this->assertDatabaseHas('node_health_probe_states', [
+            'node_id' => 'node-test-1',
+            'status' => 'unhealthy',
+            'failure_streak' => 3,
+        ]);
+        $this->assertDatabaseHas('nodes', ['id' => 'node-test-1', 'health_status' => 'verified_test']);
+        $this->assertSame($existingNodeHealthCheck, DB::table('nodes')->where('id', 'node-test-1')->value('last_health_check_at'));
+        $this->get($url)->assertNotFound()->assertDontSee('演示节点 01');
     }
 
     public function test_user_agent_negotiation_and_explicit_format_precedence(): void

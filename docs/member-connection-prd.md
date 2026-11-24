@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-24）
 
+- **M10 熔断状态到订阅路由 fail-closed 联验（2026-11-24，本地 SQLite + 合成 driver）**：增加端到端 Feature 回归，在 route filter 关闭时读取 local/test 节点 profile；启用过滤后以合成 driver 连续产生三次 timeout，确认持久 probe 状态开路，profile 不再包含该节点并返回线路不可用，节点既有 `health_status` 和 `last_health_check_at` 保持不变。定向 1/1、15 assertions；Laravel 全套 255 项中 254 passed、1 个既有 skip、2,264 assertions，Pint 与 PHP syntax 通过。此测试没有发起网络探测，合成失败不会写入节点验收健康字段；配置默认关闭，因此不证明真实节点故障、稳定性或生产 failover。下一步仍需为真实 executor、受控 scheduler 和目标 canary 准备隔离环境，代码侧继续完善可离线验证的恢复/过期边界。
+
 - **M10 路线版本发布/回滚到订阅响应联验（2026-11-24，本地 SQLite）**：新增 Feature 验收，通过管理 API 发布 test scope 的新 route version，确认会员订阅返回版本 2 且只含新版本候选；再调用回滚 API，确认订阅恢复版本 1 和原候选，并在两次转换中更新 `X-XLB-Config-Version`。定向用例 1/1、21 assertions；Laravel 全套 254 项中 253 passed、1 个既有 skip、2,249 assertions，Pint、PHP syntax 与 diff check 通过。此前同阶段的健康状态变化重渲染回归也在全套中通过。证据仅覆盖 local/testing 管理 API 到账号级 profile 的版本转换，不证明 Mihomo 实时故障切换、隔离节点流量恢复、生产发布或逐设备 peer 线路切换。下一步继续覆盖离线路线转换边界；真实故障注入、切换时延与 peer 撤权回执仍需获批隔离节点。
 
 - **M10 路由健康变化后的订阅重渲染回归（2026-11-24，本地 SQLite）**：新增 feature 回归，先确认已发布 route version 中两个健康候选都进入 local/testing 账号级 profile，再把一个候选状态改为 unhealthy 并重新拉取，确认自动/故障切换/手动组都剔除它，剩余候选不变且 `X-XLB-Config-Version` 更新。Laravel 全套 253 项中 252 passed、1 个既有 skip、2,228 assertions；Pint、PHP syntax 与 diff check 通过。该测试只证明服务端在下一次订阅拉取时重新渲染健康候选，不证明 Mihomo 实际检测、客户端拉取时延、节点故障注入、真实线路切换或会员 peer 自动切换。下一步继续离线补齐 M10 的候选与线路版本转换边界；真实故障注入仍需至少两台获批隔离节点。
