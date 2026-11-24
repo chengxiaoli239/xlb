@@ -117,6 +117,25 @@ class SandboxPaymentTest extends TestCase
         $this->assertDatabaseCount('commission_entries', 1);
     }
 
+    public function test_cancelled_order_cannot_be_paid_or_grant_entitlement(): void
+    {
+        $orderId = $this->createOrder();
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/cancel')
+            ->assertOk()
+            ->assertJsonPath('data.status', 'cancelled_test');
+
+        $this->postJson('/api/v1/me/orders/'.$orderId.'/sandbox-payment')
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'invalid_transition');
+
+        $this->assertDatabaseHas('orders', ['id' => $orderId, 'status' => 'cancelled_test']);
+        $this->assertDatabaseCount('order_events', 2);
+        $this->assertDatabaseCount('sandbox_payment_events', 0);
+        $this->assertDatabaseCount('entitlement_grants', 0);
+        $this->assertDatabaseCount('entitlements', 1);
+        $this->assertDatabaseCount('commission_entries', 1);
+    }
+
     public function test_only_the_order_owner_can_simulate_payment_and_paid_sample_is_immutable(): void
     {
         $orderId = $this->createOrder();
