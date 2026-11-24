@@ -136,6 +136,8 @@ M9 的 D2（邮件/手机/扫码跨端方式）、M10 的 D3（智能路由适�
 
 **worktree / 依赖审计（历史快照：2026-11-22，审计基线 main=`84217ce`，记录提交 `6e64777`）**：当时只读 Git 图审计 28 个 worktree（main + 27 个 codex 功能分支）；功能分支补丁均已在主线或等效，不应重复倒合。该快照曾发现 `android-native-ci` 用户改动以及主 worktree `.playwright-cli/`、`output/` 未跟踪产物，均要求保留。2026-11-23 最新 M6 与 AWS 状态以 §0.1、§0.3 为准；此处历史 STS 结论不代表当前会话有效。
 
+**worktree / 分支只读复核（2026-11-24）**：当前 34 个 worktree（main + 32 个 Codex feature branch + 1 个 detached checkout），`main` 与 `origin/main` 同为 `5288be7`。除主 worktree 原有未跟踪 `.playwright-cli/`、`output/` 外，只有 `android-native-ci` 有未提交 Gradle/AndroidTest 文件，`android-revoked-permission` 有未提交会员授权 instrumentation 与 `.hprof`；这些文件/目录均保留，未暂存、移动或清理。3 个旧分支仍有 patch-ID 与主线不同的提交：`aws-inventory-status-refresh` 的 grant handoff/stale foreground 改动已由主线 `d718d90`、`b283316`、`5a98828` 的后续实现覆盖；`android-node-auth-status` 仅剩过时进度文档；`fleet-recovery-preview` 的估期文档已被当前 12-01 冲刺与四象限放行清单替代。未发现需要再倒合的独立功能；不对这些旧分支执行删除/归档，避免丢失历史或用户工作。
+
 近期按“共用契约先锁定、平台实现并行、真实节点串行验收”推进：
 
 1. **Android M8 离线证明阶段（2026-11-22 已完成）**：专用隔离 AVD instrumentation 已验证同 installation ID 稳定复用 P-256 公钥、不同 installation ID 得到不同公钥、challenge 签名可由对应公钥验证、私钥不可导出；完整 instrumentation 6/6 通过。此阶段不证明硬件 backed provenance，也未接入会员隧道。
