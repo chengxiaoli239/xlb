@@ -408,6 +408,7 @@ fn status(code: i32, action: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
     use crate::DeviceProofProvider;
     use std::sync::atomic::{AtomicU64, Ordering};
 
