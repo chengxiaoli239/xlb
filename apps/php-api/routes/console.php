@@ -18,6 +18,8 @@ Artisan::command('inspire', function () {
 
 if (app()->environment(['local', 'testing'])) {
     Schedule::command('orders:expire-test')->everyMinute()->withoutOverlapping();
+    Schedule::command('payments:process-sandbox-fulfillments')->everyMinute()->withoutOverlapping();
+    Schedule::command('payments:process-sandbox-refunds')->everyMinute()->withoutOverlapping();
 }
 
 $nodeRevocationDriver = app(NodePeerRevocationDriver::class);
