@@ -254,7 +254,8 @@ public final class DeviceProofCertificateInstrumentedTest {
                 revocationConnection.getOutputStream().write(new byte[]{1, (byte) 187});
                 byte[] connectReply = new byte[10];
                 readFully(revocationConnection, connectReply);
-                assertEquals("Node Agent did not authorize the peer before revocation", 0, connectReply[1]);
+                assertEquals("Node Agent did not authorize the peer before revocation: "
+                        + DeviceProofJni.nodeAgentFixtureStatus(), 0, connectReply[1]);
                 byte[] payload = "final measured bytes".getBytes(StandardCharsets.UTF_8);
                 revocationConnection.getOutputStream().write(payload);
                 byte[] response = new byte[payload.length];

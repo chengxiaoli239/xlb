@@ -37,10 +37,12 @@ import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.io.IOException;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -110,8 +112,20 @@ public final class MemberTunnelTunInstrumentedTest {
             assertEquals("isolated fixture must not publish a connected state", 0, connectedStates.get());
 
             byte[] payload = "xlb-isolated-tun-echo".getBytes(StandardCharsets.US_ASCII);
-            assertArrayEquals("TCP bytes did not return through system TUN, Mihomo, proof bridge, and fixture peer",
-                    payload, echoThroughVpn(vpnNetwork, payload));
+            try (Socket activeFlow = openEchoThroughVpn(vpnNetwork, payload)) {
+                JSONObject receipt = new JSONObject(DeviceProofJni.revokeNodeAgentFixturePeer());
+                assertFalse("isolated Node Agent did not return a revocation receipt", receipt.has("error"));
+                assertEquals("confirmed_test", receipt.getString("confirmation_status"));
+                assertTrue(receipt.getLong("upload_bytes") > 0);
+                assertTrue(receipt.getLong("download_bytes") > 0);
+                assertEquals("active TUN TCP flow remained open after peer revocation", -1,
+                        activeFlow.getInputStream().read());
+            }
+            assertNoEchoThroughRevokedPeer(vpnNetwork, payload);
+            JSONObject rejection = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus());
+            assertEquals("revoked peer request did not reach the isolated Node Agent", 403,
+                    rejection.getInt("status"));
+            assertTrue(rejection.getString("body").contains("unauthorized"));
             assertEquals("isolated fixture must not publish a connected state", 0, connectedStates.get());
         } finally {
             if (serviceStarted) {
@@ -169,8 +183,9 @@ public final class MemberTunnelTunInstrumentedTest {
         return null;
     }
 
-    private static byte[] echoThroughVpn(Network network, byte[] payload) throws Exception {
-        try (Socket socket = network.getSocketFactory().createSocket()) {
+    private static Socket openEchoThroughVpn(Network network, byte[] payload) throws Exception {
+        Socket socket = network.getSocketFactory().createSocket();
+        try {
             socket.connect(new InetSocketAddress(TEST_TARGET, TEST_TARGET_PORT), 3_000);
             socket.setSoTimeout(3_000);
             OutputStream output = socket.getOutputStream();
@@ -184,7 +199,32 @@ public final class MemberTunnelTunInstrumentedTest {
                 if (count < 0) break;
                 offset += count;
             }
-            return offset == response.length ? response : new byte[0];
+            assertEquals("TCP echo through the isolated peer was incomplete", payload.length, offset);
+            assertArrayEquals("TCP bytes did not return through system TUN, Mihomo, proof bridge, and fixture peer",
+                    payload, response);
+            return socket;
+        } catch (Exception exception) {
+            socket.close();
+            throw exception;
+        }
+    }
+
+    private static void assertNoEchoThroughRevokedPeer(Network network, byte[] payload) throws Exception {
+        try (Socket socket = network.getSocketFactory().createSocket()) {
+            socket.connect(new InetSocketAddress(TEST_TARGET, TEST_TARGET_PORT), 3_000);
+            socket.setSoTimeout(3_000);
+            socket.getOutputStream().write(payload);
+            socket.getOutputStream().flush();
+            byte[] response = new byte[payload.length];
+            int offset = 0;
+            while (offset < response.length) {
+                int count = socket.getInputStream().read(response, offset, response.length - offset);
+                if (count < 0) break;
+                offset += count;
+            }
+            assertFalse("revoked peer echoed a new TCP flow", offset == payload.length && Arrays.equals(payload, response));
+        } catch (IOException expected) {
+            // The isolated Agent should reject this new peer-proof request.
         }
     }
 
