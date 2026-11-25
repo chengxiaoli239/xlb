@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **PHP PostgreSQL 16 设备移除回归稳定性（2026-11-25，主线与 hosted CI）**：修正 `MemberDeviceApiTest` 将数据库时间与测试执行时的当前时间按 ISO 字符串精确比较导致的跨秒误报，改为分别断言设备仍为 `registered` 且移除请求时间已持久化。定向设备 API 19/19、250 assertions，Pint 与 diff check 通过；提交 `b99e8e4` 的主线 CI `45557900909` 全部 jobs success，含 PostgreSQL 16、MySQL 8.4、Android、Web/API、Node Agent、容器构建与 SBOM provenance。此为测试健壮性修复，没有改变设备移除或撤权状态机，也不构成真实节点撤权回执。
+
 - **Android 节点操作编号可见化（2026-11-25，本机 PHP + Android AVD）**：设备 challenge 授权响应在存在 peer 时返回 `node_operation_id`，复用持久 outbox/Node Agent 的稳定操作 `request_id`；Android 仅接受 UUIDv4 并在连接中心显示，不把编号当作设备凭证或 grant 能力。ProvisioningService 定向与会员设备 API 测试共 27/27、358 assertions，Laravel 全套 274 passed、1 skipped、2,441 assertions，Pint 通过；Android JVM/lint/AndroidTest 编译/Debug APK 构建通过，专用 `xlb-m9-recovery` AVD 的 API grant→TUN→撤权主测试 1/1 通过，完整相关 7 项 instrumentation class 6 passed、1 项因 AVD 已有 VPN consent 跳过。此操作 ID 可对照现有 Agent 回执，但仍未把入口 HTTP `X-Request-Id` 映射到异步 outbox、没有持久故障事件或生产 telemetry；未证明真实节点稳定或撤权断流。
 
 - **Android/Web/API 请求关联标识（2026-11-25，本机及 hosted CI）**：PHP API middleware 为 `/api/*` 与节点配额接口生成服务端 UUIDv4，写入请求属性及请求作用域日志上下文，并以 `X-Request-Id` 返回；客户端传入的同名 header 不被信任，日志上下文在请求结束时清理。成功、认证错误、节点客户端证书拒绝和日志上下文回收 Feature 4/4 通过；Laravel 全套 274 passed、1 skipped、2,437 assertions，Pint 与 diff check 通过。Web 错误提示及 Android `PlatformApiException` 仅展示经 UUIDv4 格式校验的请求编号；Web 回归 10/10、TypeScript/Vite build 通过，Android JVM/lint/AndroidTest 编译/Debug APK 构建通过，专用 AVD 上新增 API 登录错误关联用例 1/1 通过，所属 7 项 instrumentation class 共 6 passed、1 因 AVD 已有 VPN consent 而跳过。Android commit `da9d2b6` 的 CI `45553204296` 全绿，PHP/Web commits `0aa1f10`、`4f3de03` 的 CI `45551133373`、`45552121951` 全绿。Node Agent 操作已有各自稳定的 `request_id` 并在回执中校验，但尚未与入口 HTTP `X-Request-Id` 建立映射；事件未持久化且 telemetry 未接入，因此不是完整跨服务追踪或节点稳定性验收。
