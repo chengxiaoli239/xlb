@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **首发全局进度与模块分母复核（2026-11-25，主线与外部只读状态）**：上线总计划 §0.1.1 将首发锁定为 12 项等权交付门，已有 5 项退出证据、7 项未通过，进度 42%（只表示门项计数，不是工时/排期/上线概率）。模块子门：Android 2/3（67%，真实 member profile/双机节点回执未完成）、Web/API 与支付 1/2（50%，真实商户 sandbox/对账未完成）、Node Agent 1/2（50%，生产 runtime/真实回执未完成）、发布运维 1/3（33%，protected Environment/签名候选/staging 未完成）；Windows/macOS/iOS 不在当前首发分母。主线 `24dd1b9` 与 `origin/main` 同步，CI `45571571648` 全绿；GitHub Environment 数量为 0。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回账号身份，但后续 CloudFormation 只读列表报 `session expired`；资源现状未核实且没有云写入。12 项逐条证据与外部责任动作见[上线工程总体规划 §0.1.1–0.2.2](launch-engineering-master-plan.md)。
+
 - **M9/Q2 Android 会话持久化回归断言 Base64 明文反例（2026-11-25，专用 AVD + 主线 CI）**：发现上次明文隔离断言只搜索 SharedPreferences 原始 Base64 字符串，无法拒绝“明文 JSON 再 Base64 编码”的错误实现。现增加解码后检查恢复秘密及 session Cookie 的断言。新用例在 `xlb-m9-recovery` 定向 1/1 通过，完整 `test-anonymous-recovery-emulator.sh` 退出码 0；主线 CI `45570424762` 全部 jobs success，含 Android 构建/JVM/lint、API/Web、Node Agent、MySQL/PostgreSQL、容器和 SBOM provenance。仅验证测试 AVD 上当前 Android Keystore 加密存储契约，不证明设备硬件安全等级、生产账号或真实节点。总体首发放行门量尺和各模块计数见[上线工程总体规划 §0.1.1](launch-engineering-master-plan.md)。
 
 - **M9/Q2 Android 恢复凭据与会话 Cookie 持久化明文隔离回归（2026-11-25，专用 AVD）**：为 `SecureSessionStore` 增加 instrumentation，实际生成匿名恢复秘密和 session Cookie 后检查 SharedPreferences 只含 `encrypted_state`，且原始存储及 Base64 解码后的内容都不出现秘密或 Cookie 明文，以防仅 Base64 编码明文 JSON 的实现通过。新用例在专用 `xlb-m9-recovery` AVD 定向 1/1 通过；完整 `test-anonymous-recovery-emulator.sh` 包含该 instrumentation、隔离 API opt-in 用例和相关隧道回归，退出码 0。一次不带本地 API opt-in 的整类直接调用因其中 API 用例按设计要求显式授权隔离 API 而失败；支持的完整 harness 随后通过。该测试只证明 Android SharedPreferences 明文隔离与本地恢复状态行为，不证明设备安全硬件等级、真实 API、生产账号或真实节点连接。
