@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-25）
 
-- **M10 健康探测批次公平性修复（2026-11-25，本地 Laravel）**：核查发现受限批次始终按节点 ID 取前 N 项，超过批次上限的节点会持续得不到新鲜探测状态。现按单独持久化且规范为 UTC 的最近尝试时间轮转；陈旧观测不会覆盖健康状态，也不会反复占据批次。显式 `--node` 列表超过单批上限时在访问驱动前失败，避免静默部分执行。新增批次轮转、持续陈旧观测轮转与超限拒绝回归；健康探测命令、数据库 CAS、线路过滤定向测试 29/29、141 assertions，Laravel 全套 270 passed、1 skipped、2,425 assertions，Pint 通过。该验证只覆盖本地数据库和测试驱动；探测仍默认关闭，没有真实节点/Canary 观测，不代表稳定性或线路故障切换验收；主线 CI 待本次提交触发后核验。
+- **M10 健康探测批次公平性修复（2026-11-25，主线与 hosted CI）**：核查发现受限批次始终按节点 ID 取前 N 项，超过批次上限的节点会持续得不到新鲜探测状态。现按单独持久化且规范为 UTC 的最近尝试时间轮转；陈旧观测不会覆盖健康状态，也不会反复占据批次。显式 `--node` 列表超过单批上限时在访问驱动前失败，避免静默部分执行。新增批次轮转、持续陈旧观测轮转与超限拒绝回归；健康探测命令、数据库 CAS、线路过滤定向测试 29/29、141 assertions，Laravel 全套 270 passed、1 skipped、2,425 assertions，Pint 通过。提交 `5802a79` 已推送，主线 CI `45548542173` 全部 jobs success，覆盖 Android、PHP/MySQL/PostgreSQL、Web/API、Node Agent、容器和 SBOM provenance。该验证仍只覆盖本地数据库和测试驱动；探测默认关闭，没有真实节点/Canary 观测，不代表稳定性或线路故障切换验收。
 
 - **Node Agent 非导出 TLS signer 注入接口（2026-11-25，本机 Go tests）**：新增 `NodeTLSIdentitySource`，允许平台 secure-store adapter 按 node ID 提供 TLS `crypto.Signer`、server certificate 与 client CA pool；TLS server 构造器校验证书公钥和 signer 相符、证书有效期/用途与受信 client CA。回归以 opaque signer 实际完成 TLS 1.3 mTLS 请求，并验证 signer 错配及 parsed leaf 错配均 fail closed。`go test -race ./...` 154 passed，`go vet ./...` 与 `go build ./...` 通过。`cmd/node-agent` 尚未接入该 provider，生产模式继续拒绝启动；未选择或实现 AWS/KMS/其他具体 key backend，也未做云操作。后续由节点/安全负责人确认安全后端与部署注入，再接入生产启动路径。
 
