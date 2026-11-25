@@ -1,6 +1,6 @@
 # Windows account shell
 
-This Tauri + React stage provides member login, persisted session recovery, account entitlement and registered-device summaries. It does not include a VPN engine, TUN/system proxy integration, device authorization, or node connection controls.
+This Tauri + React stage provides member login, persisted session recovery, account entitlement and registered-device summaries. Windows uses a CNG-backed installation key for device challenge/authorization and validates the returned server-authorized tunnel grant. It does not include a bridge process, VPN engine, TUN/system proxy integration, node data path, or connection controls. `PROOF_BRIDGE_ENABLED` remains false, so this account/proof capability is not a usable VPN connection.
 
 ## Local development
 
