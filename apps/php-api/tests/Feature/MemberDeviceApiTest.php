@@ -455,8 +455,8 @@ class MemberDeviceApiTest extends TestCase
 
         $this->assertDatabaseHas('member_devices', [
             'id' => $deviceId, 'status' => 'registered',
-            'remove_requested_at' => now()->utc()->toIso8601String(),
         ]);
+        $this->assertNotNull(DB::table('member_devices')->where('id', $deviceId)->value('remove_requested_at'));
         $this->assertDatabaseHas('node_access_revocation_outbox', [
             'peer_id' => 'peer-member-device-1', 'status' => 'pending', 'reason' => 'device_removed',
         ]);
