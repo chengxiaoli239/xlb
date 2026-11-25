@@ -217,6 +217,16 @@ func openPeerStoreForRuntimeConfig(path, nodeID string, capacity int, config age
 			return nil, agent.ErrInvalidNodeRuntimeConfig
 		}
 		return agent.OpenPeerStoreWithTestProfileRenderer(path, nodeID, capacity, renderer)
+	case agent.RuntimeProfileMihomoBridge:
+		renderer, err := agent.NewMihomoBridgeProfileRenderer(
+			config.ProofBridge.ListenAddress,
+			config.ProfileRenderer.BridgeEndpoint,
+			config.ProfileRenderer.BridgeServerCAPEM,
+		)
+		if err != nil {
+			return nil, agent.ErrInvalidNodeRuntimeConfig
+		}
+		return agent.OpenPeerStoreWithProfileRenderer(path, nodeID, capacity, renderer)
 	default:
 		return nil, agent.ErrInvalidNodeRuntimeConfig
 	}

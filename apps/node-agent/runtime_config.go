@@ -12,12 +12,14 @@ import (
 
 const (
 	TrustedNodeRuntimeSchemaV1     = "xlb-node-runtime/v1"
+	TrustedNodeRuntimeSchemaV2     = "xlb-node-runtime/v2"
 	RuntimeEnvironmentTest         = "isolated-test"
 	RuntimeEnvironmentProd         = "production"
 	RuntimeCredentialTestFile      = "test-file-only"
 	RuntimeCredentialSecure        = "platform-secure-store"
 	RuntimeProfileUnavailable      = "unavailable"
 	RuntimeProfileMihomoBridgeTest = "mihomo-bridge-isolated-test"
+	RuntimeProfileMihomoBridge     = "mihomo-bridge-v1"
 	RuntimeProbeUnavailable        = "unavailable"
 	RuntimeProbeHTTPSCanary        = "https-canary"
 	maxNodeRuntimeConfigBytes      = 64 * 1024
@@ -78,12 +80,14 @@ func DecodeTrustedNodeRuntimeConfig(reader io.Reader) (TrustedNodeRuntimeConfig,
 }
 
 func (config TrustedNodeRuntimeConfig) Validate() error {
-	if config.SchemaVersion != TrustedNodeRuntimeSchemaV1 ||
-		(config.Environment != RuntimeEnvironmentTest && config.Environment != RuntimeEnvironmentProd) ||
+	validSchemaEnvironment := (config.SchemaVersion == TrustedNodeRuntimeSchemaV1 &&
+		(config.Environment == RuntimeEnvironmentTest || config.Environment == RuntimeEnvironmentProd)) ||
+		(config.SchemaVersion == TrustedNodeRuntimeSchemaV2 && config.Environment == RuntimeEnvironmentProd)
+	if !validSchemaEnvironment ||
 		!validRuntimeToken(config.Node.ID, 64) || !validRuntimeToken(config.Node.Provider, 32) ||
 		!validRuntimeToken(config.Node.Region, 64) || config.ProofBridge.Protocol != "xlb-proof-v1" ||
 		!config.ProofBridge.DeviceProofRequired || !isLoopbackListener(config.ProofBridge.ListenAddress) ||
-		validateProfileRendererRuntimeConfig(config.Environment, config.ProofBridge, config.ProfileRenderer) != nil ||
+		validateProfileRendererRuntimeConfig(config.SchemaVersion, config.Environment, config.ProofBridge, config.ProfileRenderer) != nil ||
 		validateDataPlaneProbeRuntimeConfig(config.Environment, config.DataPlaneProbe) != nil {
 		return ErrInvalidNodeRuntimeConfig
 	}
@@ -99,14 +103,22 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 	return nil
 }
 
-func validateProfileRendererRuntimeConfig(environment string, bridge ProofBridgeRuntimeConfig, renderer ProfileRendererRuntimeConfig) error {
+func validateProfileRendererRuntimeConfig(schemaVersion, environment string, bridge ProofBridgeRuntimeConfig,
+	renderer ProfileRendererRuntimeConfig) error {
 	switch renderer.Status {
 	case RuntimeProfileUnavailable:
 		if renderer.BridgeEndpoint != "" || renderer.BridgeServerCAPEM != "" {
 			return ErrInvalidNodeRuntimeConfig
 		}
 	case RuntimeProfileMihomoBridgeTest:
-		if environment != RuntimeEnvironmentTest {
+		if schemaVersion != TrustedNodeRuntimeSchemaV1 || environment != RuntimeEnvironmentTest {
+			return ErrInvalidNodeRuntimeConfig
+		}
+		if _, err := NewMihomoBridgeProfileRenderer(bridge.ListenAddress, renderer.BridgeEndpoint, renderer.BridgeServerCAPEM); err != nil {
+			return ErrInvalidNodeRuntimeConfig
+		}
+	case RuntimeProfileMihomoBridge:
+		if schemaVersion != TrustedNodeRuntimeSchemaV2 || environment != RuntimeEnvironmentProd {
 			return ErrInvalidNodeRuntimeConfig
 		}
 		if _, err := NewMihomoBridgeProfileRenderer(bridge.ListenAddress, renderer.BridgeEndpoint, renderer.BridgeServerCAPEM); err != nil {

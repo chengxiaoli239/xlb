@@ -32,6 +32,22 @@ func TestProductionModeRemainsUnavailable(t *testing.T) {
 }
 
 func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
+	productionConfig, err := json.Marshal(agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV2,
+		Environment:   agent.RuntimeEnvironmentProd,
+		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+		ProofBridge: agent.ProofBridgeRuntimeConfig{
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialSecure,
+		},
+		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
+			Status: agent.RuntimeProfileMihomoBridge, BridgeEndpoint: "https://bridge.example.invalid:9444",
+			BridgeServerCAPEM: testRuntimeRendererCA(t),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name   string
 		config string
@@ -44,6 +60,11 @@ func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
 		{
 			name:   "production runtime is not enabled",
 			config: `{"schema_version":"xlb-node-runtime/v1","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"unavailable"}}`,
+			want:   agent.ErrInvalidNodeRuntimeConfig,
+		},
+		{
+			name:   "production-shaped v2 renderer is not runnable",
+			config: string(productionConfig),
 			want:   agent.ErrInvalidNodeRuntimeConfig,
 		},
 		{
@@ -111,6 +132,54 @@ func TestRuntimeConfigCanSelectIsolatedMihomoRenderer(t *testing.T) {
 	if receipt.ConfirmationStatus != "confirmed_test" || receipt.ProfileArtifact == nil {
 		t.Fatalf("renderer receipt status/artifact = %q/%v; want confirmed_test with profile",
 			receipt.ConfirmationStatus, receipt.ProfileArtifact != nil)
+	}
+}
+
+func TestProductionShapedRuntimeSelectsMihomoBridgeRendererAndConfirmedReceipt(t *testing.T) {
+	caPEM := testRuntimeRendererCA(t)
+	configPayload, err := json.Marshal(agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV2,
+		Environment:   agent.RuntimeEnvironmentProd,
+		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+		ProofBridge: agent.ProofBridgeRuntimeConfig{
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialSecure,
+		},
+		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
+			Status: agent.RuntimeProfileMihomoBridge, BridgeEndpoint: "https://bridge.example.invalid:9444",
+			BridgeServerCAPEM: caPEM,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := agent.DecodeTrustedNodeRuntimeConfig(strings.NewReader(string(configPayload)))
+	if err != nil {
+		t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v", err)
+	}
+	store, err := openPeerStoreForRuntimeConfig(filepath.Join(t.TempDir(), "agent.json"), "node-a", 4, config)
+	if err != nil {
+		t.Fatalf("openPeerStoreForRuntimeConfig error = %v", err)
+	}
+
+	ensureRequest := testRuntimeEnsureRequest(t)
+	receipt, err := store.EnsurePeer(ensureRequest)
+	if err != nil {
+		t.Fatalf("EnsurePeer error = %v", err)
+	}
+	if receipt.ConfirmationStatus != "confirmed" || receipt.ProfileArtifact == nil || !receipt.ProfileArtifact.Connectable {
+		t.Fatalf("production-shaped renderer receipt = %q/%v; want confirmed connectable artifact",
+			receipt.ConfirmationStatus, receipt.ProfileArtifact)
+	}
+	profileRequest := agent.ProfileRenderRequest{
+		NodeID: ensureRequest.NodeID, PeerID: ensureRequest.PeerID, EntitlementID: ensureRequest.EntitlementID,
+		RequestID: ensureRequest.RequestID, Generation: ensureRequest.Generation,
+		DeviceID: ensureRequest.DeviceID, DeviceKeyFingerprint: ensureRequest.DeviceKeyFingerprint,
+		DeviceBindingGeneration: ensureRequest.DeviceBindingGeneration, BridgeProtocol: "xlb-proof-v1",
+		BridgeEndpoint: config.ProfileRenderer.BridgeEndpoint, BridgeServerCAPEM: config.ProfileRenderer.BridgeServerCAPEM,
+	}
+	if err := agent.ValidateProfileArtifact(profileRequest, *receipt.ProfileArtifact); err != nil {
+		t.Fatalf("ValidateProfileArtifact error = %v", err)
 	}
 }
 

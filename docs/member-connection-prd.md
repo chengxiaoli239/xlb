@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **Node Agent Mihomo 生产形状 renderer 合同 v2（2026-11-25，本机 Go tests）**：新增仅适用于 `production` 声明的 `xlb-node-runtime/v2` renderer 选择，要求 `platform-secure-store` key-source 声明、强制设备 proof、loopback bridge listener、完整 HTTPS endpoint 与有效 CA bundle，并拒绝 v1 生产 renderer ready、生产 canary 和跨环境状态。运行时 peer-store 选择器可用现有 Mihomo bridge renderer 生成身份/摘要/bridge descriptor 完整的 `confirmed` profile artifact。`go test -race ./...` 151 passed，`go vet ./...` 与 `go build ./...` 通过。该阶段只验证本地 v2 配置与 production-shaped artifact contract；`cmd/node-agent` 仍拒绝 `NODE_AGENT_MODE=production`，未实现平台 secure-store adapter、生产 mTLS 私钥注入或可部署服务，也未连接真实节点。后续需落实安全密钥适配与真实节点材料后再接入执行器。
+
 - **Android 会员隧道启动期间撤权/停止竞态（2026-11-25，专用 AVD + synthetic Node Agent）**：新增 Android instrumentation，在 proof bridge→Mihomo→系统 TUN 的隔离会员启动验证探针进入可控阻塞时，对合成 peer 撤权取得 `confirmed_test`，随后停止 service 并释放探针。验证启动 attempt 未发布 `CONNECTED`，已清除 member session、VPN route 和 route label，等待一个 health interval 后 Agent echo target dial count 仍为 1，证明该失败路径未启动运行期 health monitor。夹具在撤权 cancellation 时退出阻塞，避免测试本身卡住 Agent drain。完整 `test-anonymous-recovery-emulator.sh` 在显式 `emulator-5554` / `xlb-m9-recovery` 上退出码 0，主 instrumentation 报告 `OK (27 tests)`，并通过 Keystore/bridge、session、system TUN、grant/revocation 与 process-death 专项；`testDebugUnitTest lintDebug assembleDebug` 通过。只验证隔离 AVD、fake/local API 和合成 Node Agent 的服务生命周期，不代表真实会员节点、真实撤权回执或生产断流；生产 gate 保持关闭。
 
 - **M4 沙箱续费固定订阅回归主线集成（2026-11-25）**：提交 `80089cf` 已在主线 `main` 与 `origin/main` 同步；CI run `45536649412` 全部 jobs success，覆盖 PHP/Laravel、MySQL、PostgreSQL、Android、Web/API、Node Agent、构建和 SBOM provenance。该结果关闭本次离线续费回归阶段，不改变真实商户支付未接入、生产环境未放行的状态。下一工作仍按四象限选择首发关键路径中可独立验收的离线任务；外部负责人尚未提供期间继续推进离线工作。

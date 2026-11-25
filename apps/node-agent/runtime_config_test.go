@@ -71,6 +71,60 @@ func TestDecodeTrustedNodeRuntimeConfigAcceptsExplicitTestMihomoRenderer(t *test
 	}
 }
 
+func TestDecodeTrustedNodeRuntimeConfigAcceptsProductionRendererContractV2(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	input := productionRendererRuntimeConfigJSON("mihomo-bridge-v1", "https://bridge.example.invalid:9444", string(caPEM))
+
+	config, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v", err)
+	}
+	if config.SchemaVersion != TrustedNodeRuntimeSchemaV2 || config.Environment != RuntimeEnvironmentProd ||
+		config.ProfileRenderer.Status != RuntimeProfileMihomoBridge {
+		t.Fatalf("decoded renderer contract = %q/%q/%q; want production v2 Mihomo bridge",
+			config.SchemaVersion, config.Environment, config.ProfileRenderer.Status)
+	}
+}
+
+func TestDecodeTrustedNodeRuntimeConfigRejectsUnsafeProductionRendererContractV2(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	valid := productionRendererRuntimeConfigJSON(RuntimeProfileMihomoBridge,
+		"https://bridge.example.invalid:9444", string(caPEM))
+	var config map[string]any
+	if err := json.Unmarshal([]byte(valid), &config); err != nil {
+		t.Fatal(err)
+	}
+	config["data_plane_probe"] = map[string]any{
+		"status":          RuntimeProbeHTTPSCanary,
+		"canary_endpoint": "https://canary.example.invalid" + nodeProbeCanaryPath,
+		"server_ca_pem":   string(caPEM),
+	}
+	productionCanary, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "missing endpoint", input: productionRendererRuntimeConfigJSON(RuntimeProfileMihomoBridge, "", string(caPEM))},
+		{name: "invalid CA", input: productionRendererRuntimeConfigJSON(RuntimeProfileMihomoBridge,
+			"https://bridge.example.invalid:9444", "not-a-certificate")},
+		{name: "test renderer is not production renderer", input: strings.Replace(valid,
+			RuntimeProfileMihomoBridge, RuntimeProfileMihomoBridgeTest, 1)},
+		{name: "secure-store declaration required", input: strings.Replace(valid,
+			RuntimeCredentialSecure, RuntimeCredentialTestFile, 1)},
+		{name: "test-only canary is not in production contract", input: string(productionCanary)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(test.input)); !errors.Is(err, ErrInvalidNodeRuntimeConfig) {
+				t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v; want ErrInvalidNodeRuntimeConfig", err)
+			}
+		})
+	}
+}
+
 func TestDecodeTrustedNodeRuntimeConfigRejectsUnsafeMihomoRendererDeclarations(t *testing.T) {
 	_, _, caPEM := createTestCertificates(t)
 	tests := []struct {
@@ -159,4 +213,10 @@ func rendererRuntimeConfigJSON(environment, status, endpoint, caPEM string) stri
 	return `{"schema_version":"xlb-node-runtime/v1","environment":"` + environment +
 		`","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"` + credentialSource +
 		`"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `}}`
+}
+
+func productionRendererRuntimeConfigJSON(status, endpoint, caPEM string) string {
+	endpointJSON, _ := json.Marshal(endpoint)
+	caPEMJSON, _ := json.Marshal(caPEM)
+	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `}}`
 }
