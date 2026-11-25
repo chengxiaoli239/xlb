@@ -372,7 +372,13 @@ public final class XlbVpnService extends VpnService {
 
             @Override
             public void verifyTunnel() throws Exception {
-                if (isolatedMemberTest) return;
+                if (isolatedMemberTest) {
+                    if (!TunnelVerifier.verify(XlbVpnService.this::probeIsolatedMemberEcho,
+                            () -> !tunnelAttempts.isCurrent(attempt), Thread::sleep, 5)) {
+                        throw new IOException("隔离会员数据路径验证失败");
+                    }
+                    return;
+                }
                 if (!TunnelVerifier.verify(XlbVpnService.this::probeVpnRoute,
                         () -> !tunnelAttempts.isCurrent(attempt), Thread::sleep, 5)) {
                     throw new IOException("线路连接或网络验证失败");
