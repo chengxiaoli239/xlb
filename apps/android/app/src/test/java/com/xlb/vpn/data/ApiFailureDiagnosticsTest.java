@@ -25,6 +25,17 @@ public final class ApiFailureDiagnosticsTest {
     }
 
     @Test
+    public void exposesOnlyCanonicalServerRequestIdsAsSupportReferences() {
+        assertEquals("a12b3456-7890-4abc-8def-0123456789ab",
+                ApiFailureDiagnostics.serverRequestReference("a12b3456-7890-4abc-8def-0123456789ab"));
+        assertEquals("A12B3456-7890-4ABC-8DEF-0123456789AB",
+                ApiFailureDiagnostics.serverRequestReference("A12B3456-7890-4ABC-8DEF-0123456789AB"));
+        assertEquals(null, ApiFailureDiagnostics.serverRequestReference("client-controlled-id"));
+        assertEquals(null, ApiFailureDiagnostics.serverRequestReference("\r\nX-Evil: injected"));
+        assertEquals(null, ApiFailureDiagnostics.serverRequestReference(null));
+    }
+
+    @Test
     public void mapsMemberAuthorizationStatesToClientObservedCodes() {
         assertEquals("member_authorization_pending",
                 ApiFailureDiagnostics.codeForAuthorizationStatus(PlatformApi.NodeAuthorizationStatus.PROVISIONING));

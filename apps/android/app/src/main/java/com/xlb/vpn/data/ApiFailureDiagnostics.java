@@ -25,6 +25,15 @@ final class ApiFailureDiagnostics {
         return "api_request_failed";
     }
 
+    static String serverRequestReference(String value) {
+        if (value == null || !value.matches(
+                "\\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\\z")) {
+            return null;
+        }
+
+        return value;
+    }
+
     static String codeForAuthorizationStatus(PlatformApi.NodeAuthorizationStatus status) {
         if (status == PlatformApi.NodeAuthorizationStatus.PROVISIONING) return "member_authorization_pending";
         if (status == PlatformApi.NodeAuthorizationStatus.UNAVAILABLE) return "member_authorization_unavailable";

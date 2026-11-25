@@ -392,8 +392,13 @@ public final class PlatformApi {
                 JSONObject error = response.optJSONObject("error");
                 String message = error == null ? "服务暂时不可用（" + statusCode + "）" : error.optString("message");
                 String apiErrorCode = error == null ? null : error.optString("code", null);
-                throw new PlatformApiException(message.isEmpty() ? "请求失败" : message,
-                        ApiFailureDiagnostics.codeFor(apiErrorCode, statusCode));
+                String requestId = ApiFailureDiagnostics.serverRequestReference(
+                        connection.getHeaderField("X-Request-Id"));
+                String userMessage = message.isEmpty() ? "请求失败" : message;
+                if (requestId != null) {
+                    userMessage += "（服务请求编号 " + requestId + "）";
+                }
+                throw new PlatformApiException(userMessage, ApiFailureDiagnostics.codeFor(apiErrorCode, statusCode));
             }
             return response;
         } catch (PlatformApiException exception) {

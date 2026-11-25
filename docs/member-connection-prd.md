@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-25）
 
-- **Web/API 请求关联标识（2026-11-25，本地 Laravel + Web）**：PHP API middleware 为 `/api/*` 与节点配额接口生成服务端 UUIDv4，写入请求属性及请求作用域日志上下文，并以 `X-Request-Id` 返回；客户端传入的同名 header 不被信任，日志上下文在请求结束时清理。成功、认证错误、节点客户端证书拒绝和日志上下文回收 Feature 4/4 通过；Laravel 全套 274 passed、1 skipped、2,437 assertions，Pint 与 diff check 通过。Web API 错误现在只展示格式合法的 UUIDv4 请求编号，新增会员登录失败回归；`platform.test.tsx` 10/10、TypeScript/Vite build 通过，同时修复登录页未渲染既有错误通知的问题。Android 尚未显示该标识，Node Agent 未接收，事件未持久化且 telemetry 未接入；这不是完成跨服务追踪或节点稳定性验收。
+- **Android/Web/API 请求关联标识（2026-11-25，本机及 hosted CI）**：PHP API middleware 为 `/api/*` 与节点配额接口生成服务端 UUIDv4，写入请求属性及请求作用域日志上下文，并以 `X-Request-Id` 返回；客户端传入的同名 header 不被信任，日志上下文在请求结束时清理。成功、认证错误、节点客户端证书拒绝和日志上下文回收 Feature 4/4 通过；Laravel 全套 274 passed、1 skipped、2,437 assertions，Pint 与 diff check 通过。Web 错误提示及 Android `PlatformApiException` 仅展示经 UUIDv4 格式校验的请求编号；Web 回归 10/10、TypeScript/Vite build 通过，Android JVM/lint/AndroidTest 编译/Debug APK 构建通过，专用 AVD 上新增 API 登录错误关联用例 1/1 通过，所属 7 项 instrumentation class 共 6 passed、1 因 AVD 已有 VPN consent 而跳过。提交 `0aa1f10`（PHP）与 `4f3de03`（Web）对应 CI `45551133373`、`45552121951` 全绿。Node Agent 尚未接收该 ID，事件未持久化且 telemetry 未接入；这不是完成跨服务追踪或节点稳定性验收。
 
 - **M10 健康探测批次公平性修复（2026-11-25，主线与 hosted CI）**：核查发现受限批次始终按节点 ID 取前 N 项，超过批次上限的节点会持续得不到新鲜探测状态。现按单独持久化且规范为 UTC 的最近尝试时间轮转；陈旧观测不会覆盖健康状态，也不会反复占据批次。显式 `--node` 列表超过单批上限时在访问驱动前失败，避免静默部分执行。新增批次轮转、持续陈旧观测轮转与超限拒绝回归；健康探测命令、数据库 CAS、线路过滤定向测试 29/29、141 assertions，Laravel 全套 270 passed、1 skipped、2,425 assertions，Pint 通过。提交 `5802a79` 已推送，主线 CI `45548542173` 全部 jobs success，覆盖 Android、PHP/MySQL/PostgreSQL、Web/API、Node Agent、容器和 SBOM provenance。该验证仍只覆盖本地数据库和测试驱动；探测默认关闭，没有真实节点/Canary 观测，不代表稳定性或线路故障切换验收。
 

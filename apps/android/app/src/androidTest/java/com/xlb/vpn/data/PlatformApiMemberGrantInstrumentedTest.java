@@ -70,6 +70,28 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class PlatformApiMemberGrantInstrumentedTest {
     private static final String TEST_TARGET = "192.0.2.1";
     private static final int TEST_TARGET_PORT = 443;
+    private static final String SERVER_REQUEST_ID = "a12b3456-7890-4abc-8def-0123456789ab";
+
+    @Test
+    public void apiLoginFailureShowsOnlyAValidServerRequestReference() throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        SecureSessionStore sessionStore = new SecureSessionStore(context);
+        FakeMemberApi server = new FakeMemberApi(MemberTunnelGrantAvdFixture.trustedSystemCaPem());
+        try {
+            PlatformApi api = new PlatformApi("http://127.0.0.1:" + server.port(), sessionStore);
+
+            try {
+                api.login("member@example.invalid", "test-only-password");
+                throw new AssertionError("fake API login should fail");
+            } catch (PlatformApi.PlatformApiException exception) {
+                assertEquals("session_expired", exception.diagnosticCode);
+                assertTrue(exception.getMessage().contains("服务请求编号 " + SERVER_REQUEST_ID));
+            }
+        } finally {
+            server.close();
+        }
+    }
 
     @Test
     public void synchronizedServerGrantCarriesTunTrafficAndRevocationReceipt() throws Exception {
@@ -1014,6 +1036,9 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             if ("GET".equals(method) && "/api/v1/auth/csrf".equals(path)) {
                 return data(new JSONObject().put("token", "isolated-csrf-token"));
             }
+            if ("POST".equals(method) && "/api/v1/auth/login".equals(path)) {
+                return error(401, "登录失败").put("request_id_header", SERVER_REQUEST_ID);
+            }
             if ("GET".equals(method) && "/api/v1/me/overview".equals(path)) {
                 return data(new JSONObject().put("activeSubscriptions", 1)
                         .put("entitlement", new JSONObject()
@@ -1150,11 +1175,16 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             return result;
         }
 
-        private static void writeResponse(OutputStream output, JSONObject response) throws IOException {
-            byte[] body = response.toString().getBytes(StandardCharsets.UTF_8);
-            int status = response.has("error") ? 404 : 200;
+        private static void writeResponse(OutputStream output, JSONObject response) throws Exception {
+            String requestId = response.optString("request_id_header", null);
+            JSONObject responseBody = new JSONObject(response.toString());
+            responseBody.remove("request_id_header");
+            byte[] body = responseBody.toString().getBytes(StandardCharsets.UTF_8);
+            JSONObject error = responseBody.optJSONObject("error");
+            int status = error == null ? 200 : error.optInt("status", 404);
             String headers = "HTTP/1.1 " + status + (status == 200 ? " OK\r\n" : " Not Found\r\n")
                     + "Content-Type: application/json; charset=utf-8\r\n"
+                    + (requestId == null ? "" : "X-Request-Id: " + requestId + "\r\n")
                     + "Set-Cookie: " + SESSION_COOKIE + "=isolated-session; Path=/\r\n"
                     + "Content-Length: " + body.length + "\r\n"
                     + "Connection: close\r\n\r\n";
