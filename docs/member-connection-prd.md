@@ -2,12 +2,15 @@
 
 确认：2026-11-18 09:44。范围：自有 Android / Windows / macOS 客户端、会员网站、浏览器扩展，以及 Clash Verge 等兼容客户端。本文区分产品目标、开发期验证和正式上线门槛；不表示当前代码或正式节点已实现。阶段进度见下文。
 
-## 开发进度（2026-11-25）
+## 开发进度（2026-11-26）
+
+- **M5/M6 隔离节点 live acceptance 复测与回收（2026-11-26，us-west-2）**：按用户已批准的 `$1` 人工预算上限与单台 `t3.small`、最长 60 分钟、无入站、TCP 443 出站方案，经 `ops/aws-cli` 创建专用实验 IAM/实例栈；节点从公开仓库固定 commit `ccb3f2e` 编译隔离 Node Agent，在节点本机使用临时 CA 和管理证书运行 `TestLiveNodeProtocolAcceptance`，结果 PASS。12 个独立进程争 3 个槽位，恰好 3 个成功；两把独立 P-256 私钥对应的复制身份在同时与错峰场景均于容量空闲时返回 403，独立第二 peer 可连接；撤权回执匹配 node/peer/request，含非零最终双向流量，撤权后重连 403。Node Agent `go test -race ./...` 154 passed/5 packages，`go vet ./...` 与 `go build ./...` 通过。测试只证明指定隔离 Agent/harness 的合成 peer 协议行为，不是会员购买链路、真实 Android 会员隧道、生产节点或生产撤权断流，不覆盖计量历史值的单调性比较。测试后节点栈与 IAM 栈均删除；实例 terminated，卷/ENI/安全组/Scheduler/SSM/IAM roles/profile 均复核无残留。本轮无生产资源写入；账单尚未最终结算。真实 member profile、PHP 控制面 provisioning/mTLS 接线、双真机会员连接和匹配生产节点回执仍未通过，首发放行门保持 5/12（42%）。该阶段新增了隔离 M5/M6 协议证据，但没有增加首发放行门通过数。
+- **项目协调责任人登记（2026-11-26）**：按用户指定将“穿山甲”记为项目协调责任人；不再要求用户额外提供负责人姓名。节点接入材料、商户沙箱契约、书面合规意见、受保护签名环境与 staging 回滚窗口仍分别是待完成事项，按责任角色推进即可。
 
 - **主仓临时 Playwright 产物忽略规则（2026-11-25）**：根 `.gitignore` 新增 `.playwright-cli/` 与 `/output/` 两条路径规则；`git check-ignore` 确认两处现有目录均由预期规则忽略，目录与文件内容保留在本机，不进入 Git 状态或提交。该仓库状态整理不改变首发放行门计数。
 
 - **M9/Q2 Android Keystore 密钥丢失后的会员状态失败关闭（2026-11-25，专用 `xlb-m9-recovery` AVD）**：新增 instrumentation 回归，先加密保存 installation ID、匿名恢复密钥、恢复同意和会员 Cookie，再模拟恢复 SharedPreferences 但 Android Keystore AES alias 丢失；旧 Cookie/恢复授权不可恢复，安装身份与恢复密钥重新生成。定向测试 1/1 通过；`test-anonymous-recovery-emulator.sh` 完整隔离 harness 退出码 0，Android JVM、lint、Debug/AndroidTest APK build 通过。Android 备份配置同时核实为 `allowBackup=false` 且云备份/设备迁移排除应用 root 数据。本项只验证 AVD 上丢失密钥时本地状态失败关闭，不证明 Android 系统备份实现、真机恢复、生产会员连接或真实节点撤权。
-- **首发全局进度与 AWS 隔离资源盘点（2026-11-25）**：本轮开始前 `main` 与 `origin/main` 同步于 `3a6c6b8`，整仓 CI `45581869634` 全绿；首发放行门仍为 5/12（42%），Android 2/3、Web/API 与支付 1/2、Node Agent 1/2、发布运维 1/3。GitHub protected Environment 仍为 0。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 AWS root principal。随后在 `us-west-2` 完成 XLB 隔离实验资源范围的只读盘点：所有 `xlb-lab-*`/`xlb-auto-*` 历史栈均为 `DELETE_COMPLETE`，只有既有 `xlb-node-manager-access-usw2` 为 `CREATE_COMPLETE`；隔离标签 EC2/EBS/ENI/安全组/EIP、`xlb-lab-*` 调度器、`XlbLab*` IAM roles/profiles 和匹配 SSM 节点均为空。CloudFormation 列表无后续页。本轮没有云写入；结果不是全账号账单盘点。真实 member profile、节点身份/endpoint/mTLS 与匹配回执仍缺，因没有新的协议变更未创建实验节点。下一步继续等节点/商户/合规/签名环境与 staging 责任人，并推进不依赖这些输入的工作。
+- **首发全局进度与 AWS 隔离资源状态（2026-11-26）**：主线起点 `ccb3f2e` CI `45586652685` 全绿。首发放行门仍为 5/12（42%），Android 2/3、Web/API 与支付 1/2、Node Agent 1/2、发布运维 1/3；隔离 M5/M6 live protocol 阶段已重跑并回收，未满足 production profile/runtime 或会员数据面放行门。GitHub protected Environment 仍为 0。AWS 操作为 root principal 下的隔离测试资源创建/回收；结束后 CloudFormation 历史栈为 `DELETE_COMPLETE`，无实验实例、卷、ENI、安全组、Scheduler、SSM 节点、`XlbLab*` IAM role/profile。本轮无云资源残留写入；账单未最终结算。穿山甲为用户指定的项目协调责任人，无须再等额外姓名；仍需节点接入材料、商户沙箱契约、首发市场书面意见、受保护签名环境和 staging/回滚窗口。
 
 - **M4/Q1 轮换与撤权后旧 profile 错误响应不可缓存（2026-11-25，Laravel Feature）**：扩展 `SubscriptionProfileTest::test_rotation_and_revocation_apply_to_every_format_and_mode`，验证 token 轮换及撤权后旧订阅 URL 的 404 响应仍带 `Cache-Control: no-store, private`，防止共享缓存留存失效凭证结果。定向 suite 18 项（17 passed、1 existing skip、278 assertions）通过，Pint 通过；代码提交 `fdaedea`。这是对现有 `SubscriptionProfileService::privateResponse()` 缓存边界的回归保护，没有改变订阅或撤权状态机；也不构成真实节点断流回执。
 
