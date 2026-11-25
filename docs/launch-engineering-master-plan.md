@@ -91,6 +91,8 @@
 
 ### 0.2.4 Worktree 未合并成果复核（2026-11-25）
 
+**主线推进后的 worktree 补审（2026-11-25，`main@82df76b`）**：再次检查 39 个已登记 worktree。`git cherry -v main HEAD` 仍显示 4 个分支有 patch-unique 提交，分别是 `codex/android-node-auth-status` 1 条、`codex/android-start-stop-cleanup` 1 条、`codex/aws-inventory-status-refresh` 3 条、`codex/fleet-recovery-preview` 1 条；与下表逐项核对后，这些都是已被主线实现覆盖的代码或过时进度文字，没有新的可验收功能可合并。主 worktree 的 `.playwright-cli/` 与 `output/` 仍有未跟踪文件；上述两个 Android worktree 各有一项跟踪文件改动和一个未跟踪文件，均未读取、暂存、清理或覆盖。没有发现可直接并入主线的新阶段。
+
 **Web/API 本地浏览器联验（2026-11-24）**：用 Playwright CLI 对本机会员 portal 与 Laravel 完成登录→套餐选择→建单→确认沙箱付款；HTTP 201 创建测试订单和接受模拟付款，UI 展示 `paid_test`、权益延长、固定订阅 QR/link。随后 sandbox refund 清理本次订单，并在 SQLite 核验订单和 entitlement grant 均为 revoked 测试态。浏览器请求没有触达商户 API；不代表真实收款、生产支付、staging 或节点撤权回执。订阅 URL 型凭证只在本机临时浏览器快照显示，本轮快照已删除。
 
 **M11 外部签名配置复查（2026-11-24，只读 GitHub 元数据）**：本轮再次查询 repository environments 与 Actions variables，均为空（Environment `total_count=0`、variables `total_count=0`）；没有读取 secrets、创建 Environment 或发起候选 workflow。`android-release-candidate` 仍需仓库管理员设置 main-only 部署规则与审核者，并由凭据负责人通过受控通道配置正式签名/API origin 后，才可进行审批后的手动候选构建。
