@@ -1103,17 +1103,17 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
             node_id: Some("fd3ae0f1-1234-4234-9234-000000000012".into()),
             peer_generation: Some(1),
             device_binding_generation: Some(1),
-            bridge_endpoint: None,
-            bridge_server_ca_pem: None,
-            profile_sha256: None,
-            profile_renderer_id: None,
-            profile_renderer_version: None,
-            bridge_protocol: None,
-            connectable: None,
+            bridge_endpoint: Some("https://node.example.test:9443".into()),
+            bridge_server_ca_pem: Some(TEST_CA_PEM.into()),
+            profile_sha256: Some(format!("{:x}", Sha256::digest("mixed-port: 0\nproxies: []\n"))),
+            profile_renderer_id: Some("xlb-mihomo-bridge-v1".into()),
+            profile_renderer_version: Some("1.0.0".into()),
+            bridge_protocol: Some("xlb-proof-v1".into()),
+            connectable: Some(true),
             peer_credential: Some(URL_SAFE_NO_PAD.encode([7u8; 32])),
             profile: Some("mixed-port: 0\nproxies: []\n".into()),
         };
-        client.verified_member_device_proof = Some(Arc::new(
+        let proof = Arc::new(
             proof_bridge::VerifiedMemberDeviceProof::from_authorized_response(
                 "member-1",
                 "fd3ae0f1-1234-4234-9234-000000000002",
@@ -1125,10 +1125,17 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
                 }),
             )
             .unwrap(),
-        ));
+        );
+        client.verified_member_device_proof = Some(Arc::clone(&proof));
+        client.authorized_member_tunnel_grant = Some(
+            proof_bridge::AuthorizedMemberTunnelGrant::from_authorized_response(proof, &authorization)
+                .unwrap(),
+        );
 
+        assert!(client.has_authorized_member_tunnel_grant());
         assert!(client.logout().await.is_err());
         assert!(client.verified_member_device_proof.is_none());
+        assert!(!client.has_authorized_member_tunnel_grant());
         assert!(store.load().unwrap().is_none());
         let paths = server.join().unwrap();
         assert!(paths[0].contains("api/v1/auth/csrf"));
