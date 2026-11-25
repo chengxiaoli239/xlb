@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **Android 隔离会员隧道启动前真实路由验证（2026-11-25，专用 AVD 与 hosted CI）**：`XlbVpnService` 的 debug-only isolated member 路径此前在 TUN 建立后跳过启动验证，改为通过 `TunnelVerifier` 对系统 VPN network 上的隔离 echo 执行有界重试，并在 attempt 取消时停止验证；普通会员路径未改变，isolated test action 仍不发布生产 `CONNECTED`，`MEMBER_PROOF_BRIDGE_INTEGRATED=false` 保持关闭。专用 `xlb-m9-recovery` AVD 上 system-TUN echo 用例与 API grant→TUN→撤权回执用例各 1/1 通过；Android `testDebugUnitTest lintDebug assembleDebug` 通过；主线 CI `45522739482` 全部 jobs success。测试仅使用 fake API 与隔离 Node Agent，不能证明真实会员节点、生产授权、真实断流或严格限设备。真实 profile/endpoint/CA/mTLS 与匹配撤权回执仍是 Android 试点关键路径。
+
 - **Windows logout 失败时清理 tunnel grant（2026-11-25，hosted Windows MSVC）**：回归夹具构造完整且内部一致的 `AuthorizedMemberTunnelGrant`，确认登出 API 返回失败时 `VerifiedMemberDeviceProof`、grant 与持久化 cookie 仍全部清除。独立代码审查未发现问题；本机无 Cargo，未声称本地 Rust 测试通过。提交 `21ff9ea` 的 Windows native tests、Credential Manager smoke 与 MSVC build 在 run `45520314969` 全部通过。只验证本地 logout 生命周期，不证明 production bridge/process、TUN 或真实节点连接，`PROOF_BRIDGE_ENABLED=false` 保持不变。Windows `AppState` supervisor 与授权失效 stop/reap 联动仍是后续平台工作，不在 Android + 网站/API 首发放行范围内。
 
 - **四象限项目调度与当前工作量复核（2026-11-25）**：全局四象限规范已存在于知识库，M/L 项目路由与新项目模板已接入；模板补充“最高工作量、AI 主动工时/CI与设备耗时/外部等待、并行边界”字段。本轮用户报告的 2 天 12 小时按日历耗时记录，不能换算为 AI 编码时长。当前首发关键技术工作量最高的是 Android 服务端会员 grant/profile→设备 proof bridge→Mihomo/TUN→节点授权与撤权回执闭环；真实节点材料未到时估时置信度低。Environment、真实节点、商户沙箱、合规与 staging 仍是独立放行门，用户表示稍后提供外部负责人。首发范围保持 Android + 网站/API；Windows grant lifecycle 是后续平台泳道，不能挤占首发关键路径。具体 Q1–Q4、下一阶段及并行边界见[上线工程总体规划](launch-engineering-master-plan.md) §0.4。此计划更新不代表放行门已通过。
