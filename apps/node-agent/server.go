@@ -217,7 +217,18 @@ func NewMTLSServer(address, certificatePath, privateKeyPath, clientCAPath string
 	if !clientCAs.AppendCertsFromPEM(caPEM) {
 		return nil, errors.New("node agent client CA contains no certificates")
 	}
+	return NewMTLSServerWithNodeTLSIdentity(address, NodeTLSIdentity{
+		Certificate: certificate,
+		ClientCAs:   clientCAs,
+	}, handler)
+}
 
+// NewMTLSServerWithNodeTLSIdentity accepts an identity supplied by a platform
+// key source. The certificate private key may be a non-exportable crypto.Signer.
+func NewMTLSServerWithNodeTLSIdentity(address string, identity NodeTLSIdentity, handler http.Handler) (*http.Server, error) {
+	if handler == nil || validateNodeTLSIdentity(identity) != nil {
+		return nil, ErrNodeTLSIdentityUnavailable
+	}
 	return &http.Server{
 		Addr:              address,
 		Handler:           handler,
@@ -228,9 +239,9 @@ func NewMTLSServer(address, certificatePath, privateKeyPath, clientCAPath string
 		MaxHeaderBytes:    16 * 1024,
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS13,
-			Certificates: []tls.Certificate{certificate},
+			Certificates: []tls.Certificate{identity.Certificate},
 			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    clientCAs,
+			ClientCAs:    identity.ClientCAs,
 		},
 	}, nil
 }

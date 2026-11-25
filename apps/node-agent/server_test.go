@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -32,8 +33,98 @@ import (
 
 type probeExecutorFunc func(context.Context, []byte) ([]byte, error)
 
+type testNodeTLSIdentityProvider struct {
+	identity NodeTLSIdentity
+}
+
+func (provider testNodeTLSIdentityProvider) LoadNodeTLSIdentity(_ context.Context, nodeID string) (NodeTLSIdentity, error) {
+	if nodeID != "node-secure-source-test" {
+		return NodeTLSIdentity{}, ErrInvalid
+	}
+	return provider.identity, nil
+}
+
 func (executor probeExecutorFunc) Exchange(ctx context.Context, challenge []byte) ([]byte, error) {
 	return executor(ctx, challenge)
+}
+
+func TestNodeTLSIdentitySourceSupportsOpaqueSignerForMTLSServer(t *testing.T) {
+	serverCertificate, clientTLS, caPEM := createTestCertificates(t)
+	signer, ok := serverCertificate.PrivateKey.(crypto.Signer)
+	if !ok {
+		t.Fatal("test server key does not implement crypto.Signer")
+	}
+	serverCertificate.PrivateKey = opaqueTestSigner{signer: signer}
+	identity := NodeTLSIdentity{Certificate: serverCertificate, ClientCAs: testRootPool(t, caPEM)}
+	loaded, err := LoadNodeTLSIdentity(context.Background(), "node-secure-source-test",
+		testNodeTLSIdentityProvider{identity: identity})
+	if err != nil {
+		t.Fatalf("LoadNodeTLSIdentity error = %v", err)
+	}
+	configured, err := NewMTLSServerWithNodeTLSIdentity("127.0.0.1:0", loaded,
+		http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.WriteHeader(http.StatusNoContent)
+		}))
+	if err != nil {
+		t.Fatalf("NewMTLSServerWithNodeTLSIdentity error = %v", err)
+	}
+	server := httptest.NewUnstartedServer(configured.Handler)
+	server.TLS = configured.TLSConfig
+	server.StartTLS()
+	defer server.Close()
+
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: clientTLS}, Timeout: 5 * time.Second}
+	defer client.CloseIdleConnections()
+	response, err := client.Get(server.URL)
+	if err != nil {
+		t.Fatalf("mTLS request with opaque crypto.Signer failed: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("mTLS response status = %d; want %d", response.StatusCode, http.StatusNoContent)
+	}
+}
+
+type opaqueTestSigner struct {
+	signer crypto.Signer
+}
+
+func (signer opaqueTestSigner) Public() crypto.PublicKey {
+	return signer.signer.Public()
+}
+
+func (signer opaqueTestSigner) Sign(random io.Reader, digest []byte, options crypto.SignerOpts) ([]byte, error) {
+	return signer.signer.Sign(random, digest, options)
+}
+
+func TestNodeTLSIdentitySourceRejectsCertificateSignerMismatch(t *testing.T) {
+	serverCertificate, _, caPEM := createTestCertificates(t)
+	mismatchedKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCertificate.PrivateKey = opaqueTestSigner{signer: mismatchedKey}
+	_, err = LoadNodeTLSIdentity(context.Background(), "node-secure-source-test", testNodeTLSIdentityProvider{
+		identity: NodeTLSIdentity{Certificate: serverCertificate, ClientCAs: testRootPool(t, caPEM)},
+	})
+	if !errors.Is(err, ErrNodeTLSIdentityUnavailable) {
+		t.Fatalf("LoadNodeTLSIdentity error = %v; want ErrNodeTLSIdentityUnavailable", err)
+	}
+}
+
+func TestNodeTLSIdentitySourceRejectsMismatchedParsedLeaf(t *testing.T) {
+	serverCertificate, clientTLS, caPEM := createTestCertificates(t)
+	clientLeaf, err := x509.ParseCertificate(clientTLS.Certificates[0].Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCertificate.Leaf = clientLeaf
+	_, err = LoadNodeTLSIdentity(context.Background(), "node-secure-source-test", testNodeTLSIdentityProvider{
+		identity: NodeTLSIdentity{Certificate: serverCertificate, ClientCAs: testRootPool(t, caPEM)},
+	})
+	if !errors.Is(err, ErrNodeTLSIdentityUnavailable) {
+		t.Fatalf("LoadNodeTLSIdentity error = %v; want ErrNodeTLSIdentityUnavailable", err)
+	}
 }
 
 func TestMTLSHTTPAPIEnforcesCapacityForConcurrentAuthorizations(t *testing.T) {

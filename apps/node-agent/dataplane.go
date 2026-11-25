@@ -566,6 +566,15 @@ func NewDataPlaneServer(address, certificatePath, privateKeyPath string, plane *
 	if err != nil {
 		return nil, fmt.Errorf("load node data plane server certificate: %w", err)
 	}
+	return NewDataPlaneServerWithNodeTLSIdentity(address, certificate, plane)
+}
+
+// NewDataPlaneServerWithNodeTLSIdentity accepts a TLS certificate backed by a
+// platform-provided crypto.Signer without exporting private key bytes.
+func NewDataPlaneServerWithNodeTLSIdentity(address string, certificate tls.Certificate, plane *DataPlane) (*http.Server, error) {
+	if plane == nil || !isLoopbackAddress(address) || validateNodeServerCertificate(certificate) != nil {
+		return nil, ErrInvalid
+	}
 	return &http.Server{
 		Addr:              address,
 		Handler:           plane.Handler(),
