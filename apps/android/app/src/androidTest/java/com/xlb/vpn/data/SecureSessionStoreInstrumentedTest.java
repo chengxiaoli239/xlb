@@ -131,6 +131,33 @@ public final class SecureSessionStoreInstrumentedTest {
     }
 
     @Test
+    public void testTamperedEncryptedStateCannotRestorePriorSession() {
+        SecureSessionStore store = new SecureSessionStore(targetContext());
+        String oldInstallationId = store.installationId();
+        String oldRecoverySecret = store.anonymousRecoverySecret();
+        store.recordAnonymousRecoveryConsent();
+        store.updateCookie("xlb_session", "tamper-test-session-cookie", false);
+
+        SharedPreferences preferences = targetContext()
+                .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
+        byte[] encryptedState = Base64.decode(
+                preferences.getString("encrypted_state", ""),
+                Base64.NO_WRAP
+        );
+        assertTrue(encryptedState.length > 0);
+        encryptedState[encryptedState.length - 1] ^= 1;
+        assertTrue(preferences.edit()
+                .putString("encrypted_state", Base64.encodeToString(encryptedState, Base64.NO_WRAP))
+                .commit());
+
+        SecureSessionStore recoveredStore = new SecureSessionStore(targetContext());
+        assertEquals("", recoveredStore.cookieHeader());
+        assertFalse(recoveredStore.hasAnonymousRecoveryConsent());
+        assertFalse(oldInstallationId.equals(recoveredStore.installationId()));
+        assertFalse(oldRecoverySecret.equals(recoveredStore.anonymousRecoverySecret()));
+    }
+
+    @Test
     public void testAnonymousAccountRegistrationLogoutAndExplicitRecovery() throws Exception {
         requireIsolatedApiOptIn();
 
