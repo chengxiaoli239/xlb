@@ -436,11 +436,13 @@ class SubscriptionProfileTest extends TestCase
         $id = DB::table('subscriptions')->value('id');
         $next = $this->postJson('/api/v1/me/subscriptions/'.$id.'/rotate')->assertOk()->json('data.url');
         foreach (['clash', 'mihomo'] as $format) {
-            $this->get($url.'?format='.$format.'&mode=global')->assertNotFound();
+            $this->get($url.'?format='.$format.'&mode=global')
+                ->assertNotFound()->assertHeader('Cache-Control', 'no-store, private');
             $this->get($next.'?format='.$format.'&mode=direct')->assertOk();
         }
         $this->postJson('/api/v1/me/subscriptions/'.$id.'/revoke')->assertNoContent();
-        $this->get($next.'?format=mihomo')->assertNotFound();
+        $this->get($next.'?format=mihomo')->assertNotFound()
+            ->assertHeader('Cache-Control', 'no-store, private');
     }
 
     public function test_account_wide_credential_is_not_issued_or_served_outside_local_test_scope(): void
