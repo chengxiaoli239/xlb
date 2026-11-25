@@ -3,6 +3,7 @@ use reqwest::{header, Method, Response, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use url::Url;
+use zeroize::Zeroize;
 
 mod proof_bridge;
 #[cfg(windows)]
@@ -217,8 +218,26 @@ struct DeviceAuthorization {
     node_id: Option<String>,
     peer_generation: Option<u64>,
     device_binding_generation: Option<u64>,
+    bridge_endpoint: Option<String>,
+    bridge_server_ca_pem: Option<String>,
+    profile_sha256: Option<String>,
+    profile_renderer_id: Option<String>,
+    profile_renderer_version: Option<String>,
+    bridge_protocol: Option<String>,
+    connectable: Option<bool>,
     peer_credential: Option<String>,
     profile: Option<String>,
+}
+
+impl Drop for DeviceAuthorization {
+    fn drop(&mut self) {
+        if let Some(credential) = self.peer_credential.as_mut() {
+            credential.zeroize();
+        }
+        if let Some(profile) = self.profile.as_mut() {
+            profile.zeroize();
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -308,7 +327,8 @@ pub struct AccountClient {
     credentials: Arc<dyn CredentialStore>,
     session: CookieSession,
     device_proof: Option<Arc<dyn DeviceProofProvider>>,
-    verified_member_device_proof: Option<proof_bridge::VerifiedMemberDeviceProof>,
+    verified_member_device_proof: Option<Arc<proof_bridge::VerifiedMemberDeviceProof>>,
+    authorized_member_tunnel_grant: Option<proof_bridge::AuthorizedMemberTunnelGrant>,
 }
 
 impl AccountClient {
@@ -337,6 +357,7 @@ impl AccountClient {
             session: CookieSession::default(),
             device_proof: None,
             verified_member_device_proof: None,
+            authorized_member_tunnel_grant: None,
         })
     }
 
@@ -351,8 +372,22 @@ impl AccountClient {
         Ok(())
     }
 
-    pub async fn restore(&mut self) -> Result<Option<AccountSnapshot>, String> {
+    fn clear_member_authorization(&mut self) {
         self.verified_member_device_proof = None;
+        self.authorized_member_tunnel_grant = None;
+    }
+
+    #[cfg(test)]
+    fn has_authorized_member_tunnel_grant(&self) -> bool {
+        self.authorized_member_tunnel_grant.is_some()
+    }
+
+    fn authorized_member_tunnel_grant(&self) -> Option<&proof_bridge::AuthorizedMemberTunnelGrant> {
+        self.authorized_member_tunnel_grant.as_ref()
+    }
+
+    pub async fn restore(&mut self) -> Result<Option<AccountSnapshot>, String> {
+        self.clear_member_authorization();
         if self.session.header.is_empty() {
             self.load_persisted_session()?;
         }
@@ -381,7 +416,7 @@ impl AccountClient {
     }
 
     pub async fn login(&mut self, email: &str, password: &str) -> Result<AccountSnapshot, String> {
-        self.verified_member_device_proof = None;
+        self.clear_member_authorization();
         let email = email.trim();
         if email.is_empty() || password.is_empty() {
             return Err("请输入邮箱和密码".to_owned());
@@ -409,7 +444,7 @@ impl AccountClient {
     }
 
     pub async fn logout(&mut self) -> Result<(), String> {
-        self.verified_member_device_proof = None;
+        self.clear_member_authorization();
         let result = async {
             let csrf_response = self.request(Method::GET, "api/v1/auth/csrf").await?;
             let csrf = parse_data::<CsrfToken>(csrf_response).await?.token;
@@ -434,7 +469,7 @@ impl AccountClient {
     }
 
     async fn load_snapshot(&mut self, user: PublicUser) -> Result<AccountSnapshot, String> {
-        self.verified_member_device_proof = None;
+        self.clear_member_authorization();
         let overview_response = self.request(Method::GET, "api/v1/me/overview").await?;
         let overview = parse_data::<Overview>(overview_response).await?;
         if !is_member(&overview.user) || overview.user.id != user.id {
@@ -445,14 +480,14 @@ impl AccountClient {
         let devices_response = match self.request(Method::GET, "api/v1/me/devices").await {
             Ok(response) => response,
             Err(error) => {
-                self.verified_member_device_proof = None;
+                self.clear_member_authorization();
                 return Err(error);
             }
         };
         let devices = match parse_data::<DeviceSummary>(devices_response).await {
             Ok(value) => value,
             Err(error) => {
-                self.verified_member_device_proof = None;
+                self.clear_member_authorization();
                 return Err(error);
             }
         };
@@ -461,7 +496,7 @@ impl AccountClient {
             .as_ref()
             .is_some_and(|proof| proof.matches_device_snapshot(&devices))
         {
-            self.verified_member_device_proof = None;
+            self.clear_member_authorization();
             if node_authorization == NodeAuthorizationStatus::Ready {
                 node_authorization = NodeAuthorizationStatus::Unavailable;
             }
@@ -476,7 +511,7 @@ impl AccountClient {
     }
 
     async fn authorize_device(&mut self, member_id: &str) -> NodeAuthorizationStatus {
-        self.verified_member_device_proof = None;
+        self.clear_member_authorization();
         #[cfg(windows)]
         if self.device_proof.is_none() {
             let installation_id = match self.installation_id() {
@@ -552,8 +587,18 @@ impl AccountClient {
             signer,
         ) {
             Ok(proof) => {
-                self.verified_member_device_proof = Some(proof);
-                NodeAuthorizationStatus::Ready
+                let proof = Arc::new(proof);
+                match proof_bridge::AuthorizedMemberTunnelGrant::from_authorized_response(
+                    Arc::clone(&proof),
+                    authorization,
+                ) {
+                    Ok(grant) => {
+                        self.verified_member_device_proof = Some(proof);
+                        self.authorized_member_tunnel_grant = Some(grant);
+                        NodeAuthorizationStatus::Ready
+                    }
+                    Err(_) => NodeAuthorizationStatus::Unavailable,
+                }
             }
             Err(_) => NodeAuthorizationStatus::Unavailable,
         }
@@ -608,7 +653,7 @@ impl AccountClient {
     }
 
     fn clear_session(&mut self) -> Result<(), String> {
-        self.verified_member_device_proof = None;
+        self.clear_member_authorization();
         self.session.header.clear();
         self.credentials.clear()
     }
@@ -682,9 +727,30 @@ fn windows_device_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
     use std::sync::Mutex;
     #[cfg(target_os = "windows")]
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const TEST_CA_PEM: &str = "-----BEGIN CERTIFICATE-----\n\
+MIIDDDCCAfSgAwIBAgIUO3xVpkTXq2ci+clkcnp4HbQ0gGIwDQYJKoZIhvcNAQEL\n\
+BQAwHjEcMBoGA1UEAwwTWExCIFdpbmRvd3MgVGVzdCBDQTAeFw0yNjExMjQyMzQ2\n\
+MDNaFw0zNjExMjEyMzQ2MDNaMB4xHDAaBgNVBAMME1hMQiBXaW5kb3dzIFRlc3Qg\n\
+Q0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC42K2RIoBKTCjPhUFq\n\
+yxZUB9BialUZFyvFN04IMXqc7WY1J7DzjM6vZ5YSXbisQshUtLZQjXpJAIosS2V/\n\
+YIPKNX+Yrbf7jhBvXrP6YQFbV6TI4ZiyrNNVpNjAOx15NltSgcixUXK9WN2Znap+\n\
+3HqM8y4lwVFqbq84zzvQflALaIlxLiAlXO05JsJnyR5T7Q2ecABTAwW5SU4wTcew\n\
+Ze5Q1jc7W0CbFrqvnTx7me6Ia/UFvyjDYI1+d/cVBfukQbeATSRpkwGGEFSS5kmb\n\
+0GeNtoXkPqN2kPoRkU+bNgJu9LL2tS2pqiZGYmXqp1iKKOoUYz6boGpOWkrKOta/\n\
+pT6zAgMBAAGjQjBAMB0GA1UdDgQWBBSlHzhovNNGImTd4q0pTigME0GyPTAPBgNV\n\
+HRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjANBgkqhkiG9w0BAQsFAAOCAQEA\n\
+U4ieOd9whvuxsPMBoBMV91/K1npkr46Zl64BKYCxu+eiLlrdn1VYHf6vDuz5SVaa\n\
+oUFpC5fnAiB9pIEZIZVExLl7MKkzUfpszzvc+k7abwYNGF0lIDXK/DwSa7SVkbzS\n\
+FerjfAwLioQxLX/rBTtIkvKoJ4Y9Lce0xZRd/wXjiqLmA6byvHC3MkeuGPkI1qvs\n\
+B//SjqGdsnb7ZBM6COIOL0NyLrWoKZrjD9x+5IRpo6E9U1PHqIInTUyh1Zl/m/O9\n\
+d7hVvJRLG4xfs/M1H6xZ0UqTvRYE0eIYF39mzGWL2xfgdFpMVYhQ6g3pkfgV3H/F\n\
+JeIGIezus8B92pF7Fd1XSQ==\n\
+-----END CERTIFICATE-----\n";
 
     #[derive(Default)]
     struct MemoryStore {
@@ -863,6 +929,13 @@ mod tests {
                     "node_id": "fd3ae0f1-1234-4234-9234-000000000004",
                     "peer_generation": 1,
                     "device_binding_generation": 1,
+                    "bridge_endpoint": "https://node.example.test:9443",
+                    "bridge_server_ca_pem": TEST_CA_PEM,
+                    "profile_sha256": format!("{:x}", Sha256::digest(profile.as_bytes())),
+                    "profile_renderer_id": "xlb-mihomo-bridge-v1",
+                    "profile_renderer_version": "1.0.0",
+                    "bridge_protocol": "xlb-proof-v1",
+                    "connectable": true,
                     "peer_credential": peer_credential.clone(),
                     "profile": profile
                 }
@@ -881,6 +954,13 @@ mod tests {
                     "node_id": "fd3ae0f1-1234-4234-9234-000000000004",
                     "peer_generation": 2,
                     "device_binding_generation": 2,
+                    "bridge_endpoint": "https://node.example.test:9443",
+                    "bridge_server_ca_pem": TEST_CA_PEM,
+                    "profile_sha256": format!("{:x}", Sha256::digest(profile.as_bytes())),
+                    "profile_renderer_id": "xlb-mihomo-bridge-v1",
+                    "profile_renderer_version": "1.0.0",
+                    "bridge_protocol": "xlb-proof-v1",
+                    "connectable": true,
                     "peer_credential": peer_credential.clone(),
                     "profile": profile
                 }
@@ -949,6 +1029,10 @@ mod tests {
         let snapshot = client.restore().await.unwrap().unwrap();
         assert_eq!(snapshot.node_authorization, NodeAuthorizationStatus::Ready);
         assert!(client.verified_member_device_proof.is_some());
+        assert!(client.has_authorized_member_tunnel_grant());
+        let grant = client.authorized_member_tunnel_grant().unwrap();
+        assert_eq!(grant.bridge_endpoint().as_str(), "https://node.example.test:9443/");
+        assert_eq!(grant.peer_credential(), peer_credential);
         assert_eq!(snapshot.devices.registered_count, 1);
         let snapshot_json = serde_json::to_string(&snapshot).unwrap();
         assert!(!snapshot_json.contains(&peer_credential));
@@ -957,9 +1041,11 @@ mod tests {
         let refreshed = client.restore().await.unwrap().unwrap();
         assert_eq!(refreshed.node_authorization, NodeAuthorizationStatus::Unavailable);
         assert!(client.verified_member_device_proof.is_none());
+        assert!(!client.has_authorized_member_tunnel_grant());
 
         assert!(client.restore().await.unwrap().is_none());
         assert!(client.verified_member_device_proof.is_none());
+        assert!(!client.has_authorized_member_tunnel_grant());
         assert!(store.load().unwrap().is_none());
         let paths = server.join().unwrap();
         assert!(paths[3].contains("device-bindings/challenge"));
@@ -1016,10 +1102,17 @@ mod tests {
             node_id: Some("fd3ae0f1-1234-4234-9234-000000000012".into()),
             peer_generation: Some(1),
             device_binding_generation: Some(1),
+            bridge_endpoint: None,
+            bridge_server_ca_pem: None,
+            profile_sha256: None,
+            profile_renderer_id: None,
+            profile_renderer_version: None,
+            bridge_protocol: None,
+            connectable: None,
             peer_credential: Some(URL_SAFE_NO_PAD.encode([7u8; 32])),
             profile: Some("mixed-port: 0\nproxies: []\n".into()),
         };
-        client.verified_member_device_proof = Some(
+        client.verified_member_device_proof = Some(Arc::new(
             proof_bridge::VerifiedMemberDeviceProof::from_authorized_response(
                 "member-1",
                 "fd3ae0f1-1234-4234-9234-000000000002",
@@ -1031,7 +1124,7 @@ mod tests {
                 }),
             )
             .unwrap(),
-        );
+        ));
 
         assert!(client.logout().await.is_err());
         assert!(client.verified_member_device_proof.is_none());

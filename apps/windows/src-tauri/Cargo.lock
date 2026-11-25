@@ -4936,12 +4936,14 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tokio",
  "uuid",
  "url",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
