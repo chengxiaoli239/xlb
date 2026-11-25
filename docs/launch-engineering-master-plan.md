@@ -121,6 +121,39 @@
 | staging 放行 | 负责人提供已批准 staging、数据保留与回滚窗口；候选摘要固定后部署；登录/权益、商户沙箱、Android 安装/线路和撤权回执 smoke 通过；回滚演练有记录 | 尚无 staging 环境、窗口与回滚责任人记录；不部署、不产生云费用 |
 | 付费试点 Go/No-Go | Android 双身份复制拒绝和匹配节点撤权最终流量回执、商户 sandbox 对账、目标市场合规意见、签名/制品审查、staging 和支持/回滚责任均有证据 | **No-Go**：真实会员节点/撤权回执、真实商户 sandbox/对账、合规意见、正式签名候选、staging 与责任人日期均未齐。离线 CI、AVD、合成 peer、local/testing 不能代替放行证据 |
 
+**候选下载后复核命令模板**：获批审核者下载 workflow 的 APK、`build-manifest.json` 与 runtime BOM 后，在仓库 checkout 中设置 `candidate_dir`、`expected_commit` 及下载包内三个文件的相对路径。下面的 manifest 检查将 bundle 目录作为根，GitHub attestation 检查同时固定仓库、签名 workflow、main 来源引用和审阅 commit。APK signer 的 SHA-256 指纹还须与通过受控渠道批准并记录的 release signer 指纹一致；不要把 keystore 或密码写入这些记录。
+
+```bash
+set -euo pipefail
+
+candidate_dir="/absolute/path/to/downloaded/candidate"
+expected_commit="replace-with-reviewed-main-commit"
+manifest_rel="path/to/build-manifest.json"
+apk_rel="path/to/app-release.apk"
+sbom_rel="path/to/bom.json"
+
+python3 ops/verify_artifact_manifest.py \
+  --repo-root "$candidate_dir" \
+  --expected-commit "$expected_commit" \
+  "$manifest_rel"
+
+"$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$candidate_dir/$apk_rel"
+"$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$candidate_dir/$apk_rel" | grep -F "package: name='com.xlb.vpn'"
+
+gh attestation verify "$candidate_dir/$apk_rel" \
+  --repo chengxiaoli239/xlb \
+  --signer-workflow github.com/chengxiaoli239/xlb/.github/workflows/android-release-candidate.yml \
+  --source-digest "$expected_commit" \
+  --source-ref refs/heads/main
+gh attestation verify "$candidate_dir/$sbom_rel" \
+  --repo chengxiaoli239/xlb \
+  --signer-workflow github.com/chengxiaoli239/xlb/.github/workflows/android-release-candidate.yml \
+  --source-digest "$expected_commit" \
+  --source-ref refs/heads/main
+```
+
+该模板尚未用于正式签名候选。当前 Environment 仍不存在，正式候选和人工来源证明仍未验收。
+
 **离线检查证据**：ops workflow 权限/步骤和 artifact manifest 正负例测试曾 10 项通过，常规主线 CI `45455644892` 六个 jobs 全绿。它们验证规则和候选构建技术路径，不实际运行正式签名 workflow、不访问 secrets、不产生正式候选 APK，也不代表 protected Environment 或发布放行已验收。
 
 **2026-11-25 主线设备名额复核**：在 `main@158d93f` 运行 `apps/php-api/tests/Feature/MemberDeviceApiTest.php`，19/19、248 assertions 通过。包括名额为 1 时第二个不同安装身份经设备 challenge 签名后仍被 `409 device_limit_reached` 拒绝，登记数保持 1；这是 Laravel Feature 控制面证据，不替代 Android 真机、生产 API、真实节点复制拒绝或撤权回执。此次复核不改变 Go/No-Go：Environment 为 0，签名候选、staging、商户 sandbox、合规意见及真实会员节点回执仍未验收。
