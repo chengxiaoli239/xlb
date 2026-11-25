@@ -5,7 +5,7 @@
 ## 开发进度（2026-11-25）
 
 - **M9/Q2 Android Keystore 密钥丢失后的会员状态失败关闭（2026-11-25，专用 `xlb-m9-recovery` AVD）**：新增 instrumentation 回归，先加密保存 installation ID、匿名恢复密钥、恢复同意和会员 Cookie，再模拟恢复 SharedPreferences 但 Android Keystore AES alias 丢失；旧 Cookie/恢复授权不可恢复，安装身份与恢复密钥重新生成。定向测试 1/1 通过；`test-anonymous-recovery-emulator.sh` 完整隔离 harness 退出码 0，Android JVM、lint、Debug/AndroidTest APK build 通过。Android 备份配置同时核实为 `allowBackup=false` 且云备份/设备迁移排除应用 root 数据。本项只验证 AVD 上丢失密钥时本地状态失败关闭，不证明 Android 系统备份实现、真机恢复、生产会员连接或真实节点撤权。
-- **首发全局进度与外部身份复核（2026-11-25）**：主仓 `main` 与 `origin/main` 同步于 `d50de7b`，整仓 CI `45578428620` 全绿；首发放行门仍为 5/12（42%），Android 2/3、Web/API 与支付 1/2、Node Agent 1/2、发布运维 1/3。GitHub protected Environment 仍为 0。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 AWS root principal；紧接着同包装器的 CloudFormation `list-stacks --max-items 1` 只读请求成功，先前记录的 `session expired` 本轮未复现。该查询只有一页，不构成完整云资源盘点；本轮无云写入。下一阶段优先处理真实节点/会员授权材料到位前可验的 Android/API 离线缺口，并同步等候节点、商户、合规、签名环境与 staging 责任人。
+- **首发全局进度与外部身份复核（2026-11-25）**：主仓 `main` 与 `origin/main` 同步于 `5e5d14b`，整仓 CI `45579207974` 全绿；首发放行门仍为 5/12（42%），Android 2/3、Web/API 与支付 1/2、Node Agent 1/2、发布运维 1/3。GitHub protected Environment 仍为 0。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 AWS root principal；紧接着同包装器的 CloudFormation `list-stacks --max-items 1` 只读请求成功，先前记录的 `session expired` 本轮未复现。该查询只有一页，不构成完整云资源盘点；本轮无云写入。下一阶段优先处理真实节点/会员授权材料到位前可验的 Android/API 离线缺口，并同步等候节点、商户、合规、签名环境与 staging 责任人。
 
 - **M4/Q1 轮换与撤权后旧 profile 错误响应不可缓存（2026-11-25，Laravel Feature）**：扩展 `SubscriptionProfileTest::test_rotation_and_revocation_apply_to_every_format_and_mode`，验证 token 轮换及撤权后旧订阅 URL 的 404 响应仍带 `Cache-Control: no-store, private`，防止共享缓存留存失效凭证结果。定向 suite 18 项（17 passed、1 existing skip、278 assertions）通过，Pint 通过；代码提交 `fdaedea`。这是对现有 `SubscriptionProfileService::privateResponse()` 缓存边界的回归保护，没有改变订阅或撤权状态机；也不构成真实节点断流回执。
 
@@ -46,7 +46,7 @@
 
 - **Windows 模块状态说明校正（2026-11-25，hosted Windows MSVC）**：`apps/windows/README.md` 先前称尚无设备授权，与已实现的 CNG installation-key challenge/authorization 和 server-authorized tunnel grant 校验不符。现已说明这两项能力，同时明确 bridge process、VPN engine、TUN/system proxy 和节点数据路径仍未实现，`PROOF_BRIDGE_ENABLED=false` 未变。文档提交 `278e11e` 的 Windows UI、native credential tests 与 MSVC build 在 run `45529815624` 全部通过；通用 CI `45529815690` 全绿。此项只纠正文档边界，不代表 Windows VPN 连接或生产授权放行。
 
-- **Node Agent 生产模式与 AWS 身份前置复核（2026-11-25）**：源码核实 `apps/node-agent/cmd/node-agent` 仅接受 `NODE_AGENT_MODE=isolated-test`，production 启动会失败；trusted runtime v1 的生产 renderer 仍为 unavailable，尚无生产 key-source adapter。经项目包装器加 5 秒连接/读取超时执行 `sts get-caller-identity --profile xlb-ops`，明确返回 session expired；本轮未查询或改动 AWS 资源。后续云端盘点需用户本人重新 `aws login`，节点验收另需负责人提供获批身份、endpoint/CA/mTLS 与窗口。此状态不把隔离 peer、合成回执或本地 profile renderer 表述为生产节点能力。
+- **Node Agent 生产模式与 AWS 身份前置复核（2026-11-25）**：源码核实 `apps/node-agent/cmd/node-agent` 仅接受 `NODE_AGENT_MODE=isolated-test`，production 启动会失败；trusted runtime v1 的生产 renderer 仍为 unavailable，尚无生产 key-source adapter。较早一次加 5 秒连接/读取超时的 STS 请求返回 session expired；后续复查已得到 root principal，且单页 CloudFormation `list-stacks` 成功。完整 AWS 资源盘点仍未完成，本轮没有云写入。获批节点盘点前需确认使用的运维身份并完成只读核查；节点验收另需负责人提供获批身份、endpoint/CA/mTLS 与窗口。此状态不把隔离 peer、合成回执或本地 profile renderer 表述为生产节点能力。
 
 - **Android + 网站/API 受控试点 runbook 边界校正（2026-11-25）**：总体规划的上线日清单此前混入未经批准的 `5%→20%→50%→100%` 扩量、峰值×1.3 和热备要求，与当前没有 staging 容量数据、试点上限和回滚责任人的事实不符。现改为按获批 cohort 与资源上限受控开放，每次扩展需值守负责人复核；停止阈值、周期、联系人和回滚负责人必须先批准并演练。分级扩量与热备另属规模化发布门。本次只校正文档计划，不代表 staging、回滚或上线门已通过。
 
@@ -92,7 +92,7 @@
 
 - **Android 候选阶段 Go/No-Go 清单复核（2026-11-25）**：刷新 §0.2.3，将源码基线记录为 `main@f507db0` / CI `45456754780` 六个 jobs 全绿；GitHub Environment 查询总数为 0，正式签名候选未运行，staging/回滚、真实会员节点与撤权回执、商户对账和合规意见仍未满足。当前决策为 **No-Go**，不部署、不签发正式候选、不产生云费用。清单已区分常规 CI 临时密钥与正式签名制品；该离线复核没有读取 secrets 或修改 GitHub 环境。Q2 离线候选可追溯性复核已关闭，后续须等外部 Environment/签名配置才能推进正式候选。
 
-- **首发放行外部状态复核（2026-11-25，只读）**：使用 GitHub API 只读查询确认仓库 Environment 数量为 0，`android-release-candidate` 受保护环境当前不存在或不可见，签名候选仍无法运行；未查询 secrets/variables、未创建 Environment、未写配置。用户随后告知已重新 `aws login`；项目包装器的 `sts get-caller-identity --profile xlb-ops` 返回账号身份，但紧接着 CloudFormation/EC2 等资源 API 只读请求报 session expired，当前资源状态仍未查明且无云写操作。待会话可稳定使用后再由获批角色只读盘点与审核 plan；签名环境需仓库管理员创建 main-only Environment、设置审批人，凭据负责人经受控通道配置正式签名材料/API origin。用户已表示稍后提供外部放行负责人姓名；当前仍仅按角色记录，不假设已认领。以上不阻断离线代码与测试，但构成真实会员节点和候选放行的外部前置。
+- **首发放行外部状态复核（2026-11-25，较早只读快照）**：使用 GitHub API 只读查询确认仓库 Environment 数量为 0，`android-release-candidate` 受保护环境当前不存在或不可见，签名候选仍无法运行；未查询 secrets/variables、未创建 Environment、未写配置。用户随后告知已重新 `aws login`；当次 STS 身份查询成功，但紧接着 CloudFormation/EC2 等资源 API 只读请求报 session expired。该条保留为当时的观察记录；同日后续 AWS 复核见本节顶部，错误未复现且完整资源盘点仍未完成。签名环境需仓库管理员创建 main-only Environment、设置审批人，凭据负责人经受控通道配置正式签名材料/API origin。用户已表示稍后提供外部放行负责人姓名；当前仍仅按角色记录，不假设已认领。以上不阻断离线代码与测试，但构成真实会员节点和候选放行的外部前置。
 
 - **Web 会员订单取消 UI 回归（2026-11-25，本机 Vitest 与生产构建）**：新增会员订单页取消待支付测试订单的 UI integration regression，验证显式确认后仅调用 local/testing `/api/v1/me/orders/{id}/cancel`，订单详情与列表均更新为 `cancelled_test`，订单列表在取消后重新请求，已取消订单不再提供模拟付款入口。Web 全套 Vitest 2 files / 9 tests 通过，TypeScript build 与 Vite production build 通过，diff check 通过。该测试使用 mock API，不代表真实商户支付、数据库并发或节点撤权；没有外部资金调用。
 
@@ -195,7 +195,7 @@
 
 - **M11 Docker 忽略规则自动回归（2026-11-24，本机与 hosted CI）**：新增 `ops/test_docker_context.py`，在临时根构建上下文逐项尝试将 10 种合成环境凭据/运行数据 `COPY` 到 `scratch`，确认 Docker 因 `.dockerignore` 排除而拒绝；测试只使用非秘密 sentinel。ops 全套 54/54、Python 编译与 `git diff --check` 通过；主线 CI `45261821374` 中 Docker 忽略规则回归、PHP/Web 镜像构建及全套其他 jobs 均成功。
 
-- **M6/AWS 外部会话状态复核（2026-11-24，历史记录）**：较早调用项目 `ops/aws-cli` 包装器返回 session expired；当日后续复查 STS 曾恢复有效并完成 us-west-2 实验资源只读盘点。该结果只代表 11-24 状态。2026-11-25 最新复核见开发进度顶部：STS 再次过期，当前 AWS 资源状态未复查；用户重新登录后的身份查询成功，但后续资源 API 仍报 session expired；待会话可稳定使用后再运行 AWS 盘点。真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供；全程没有云资源写入。
+- **M6/AWS 外部会话状态复核（2026-11-24，历史记录）**：较早调用项目 `ops/aws-cli` 包装器返回 session expired；当日后续复查 STS 曾恢复有效并完成 us-west-2 实验资源只读盘点。该结果只代表 11-24 状态。11-25 较早复核的报错与稍后成功的 STS/单页 CloudFormation 读取见开发进度顶部；完整 AWS 资源盘点仍未完成，本轮没有云资源写入。真实会员 profile、节点身份/endpoint、mTLS 材料与匹配撤权回执仍须节点/运维侧提供。
 
 - **M11 Docker 构建上下文与 PHP/Web 镜像 CI 验收（2026-11-24，hosted run 通过）**：仓库根 `.dockerignore` 排除根级/嵌套 `.env`、Composer/npm/netrc 凭据、AWS/SSH 私有配置、私钥/密钥库、SQLite、依赖/build、Laravel runtime storage/cache 与 `ops/.state`；10 个本地 Docker 隔离构建夹具确认这些输入不可被 `COPY`。PHP Composer 阶段增加仅供构建使用的 `unzip` 后，hosted CI `45259345222` 的 PHP 与 Web 镜像构建、Android build/signing-config、Laravel/API/Web/扩展、Go、ops、SBOM provenance 全部通过。该 CI 只构建镜像，不部署 staging/production、不发布制品；本机 Docker Hub 仍返回 OCI config descriptor 错误。没有读取或提交任何真实凭据。
 
@@ -278,7 +278,7 @@
 | 其他客户端 | 首发决策不要求 iOS、Windows、macOS、扩展或多云放量 | 这些平台不构成当前 Android + 网站/API 受控试点完成证据 | 作为后续独立阶段排期，不阻塞当前首发范围 |
 | 签名发布、合规与运营 | 未达到正式上线放行 | 本地 Debug/Release build 不是签名发布；地区/用途、服务条款、隐私与日志政策、退款投诉、值班回滚和责任人放行仍需逐项验证 | 可离线准备发布/回滚清单；正式放行需要对应责任人提供签名制品、书面审查与试运行结论 |
 
-**当前顺序与外部依赖（2026-11-25 更新）**：11-25 用户重新登录后 `sts get-caller-identity` 返回账号身份，但随后资源 API 只读请求报 session expired；11-24 的只读盘点确认实验标签资源当日无活动项，是历史快照，不视为当前 AWS 状态。待会话可稳定使用后再进行 AWS 只读资源盘点或计划，期间不影响离线开发。GitHub 环境只读 API 当前返回 Environment 数量 0，`android-release-candidate` 尚不可运行。M5/M6 lab 栈和节点资源最近一次历史盘点未见活动项；2026-11-21 合成 peer live harness 已通过，当前没有需重复部署的协议变更，所以不为重复测试重建资源。节点责任人还需提供真实 DataPlane listener/反向代理路径、每节点 HTTPS origin/CA 与可部署 mTLS runtime，以及匹配的撤权/最终流量回执；或由用户明确批准新的协议复测范围。满足其一后再生成有界计划、复核 TTL/费用并按授权执行，随后安排两台现有真机验证登录、授权、线路、退款撤权及匹配节点回执。支付 fake channel、Web/Android 离线校验、发布清单整理可并行，不以真实商户资料或云会话为由暂停。当前没有可靠受控试点上线日期；此前 2027-02 至 2027-05 是低置信、已撤销为当前预测的历史估计，不承诺单日，也不代表已可发布。
+**当前顺序与外部依赖（2026-11-25 更新）**：较早一次 STS/CloudFormation 资源请求报 `session expired`；本轮后续 STS 与单页 CloudFormation `list-stacks` 均成功，因此旧报错目前未复现。11-24 的只读盘点确认实验标签资源当日无活动项，是历史快照，不视为当前 AWS 全量状态；完整盘点仍待按获批范围执行。GitHub 环境只读 API 当前返回 Environment 数量 0，`android-release-candidate` 尚不可运行。M5/M6 lab 栈和节点资源最近一次完整盘点未见活动项；2026-11-21 合成 peer live harness 已通过，当前没有需重复部署的协议变更，所以不为重复测试重建资源。节点责任人还需提供真实 DataPlane listener/反向代理路径、每节点 HTTPS origin/CA 与可部署 mTLS runtime，以及匹配的撤权/最终流量回执；或由用户明确批准新的协议复测范围。满足其一后再生成有界计划、复核 TTL/费用并按授权执行，随后安排两台现有真机验证登录、授权、线路、退款撤权及匹配节点回执。支付 fake channel、Web/Android 离线校验、发布清单整理可并行，不以真实商户资料或云会话为由暂停。当前没有可靠受控试点上线日期；此前 2027-02 至 2027-05 是低置信、已撤销为当前预测的历史估计，不承诺单日，也不代表已可发布。
 
 - **M8 Node Agent member bridge trust descriptor artifact（2026-11-23，本机离线验收）**：扩展 Go 生产形状 `ProfileArtifact`，使受信配置创建的 renderer 必须同时注入 node data-plane HTTPS origin 与有效 CA PEM；profile 请求从 `PeerStore` 受信 renderer 配置生成，Go 校验 HTTPS origin、CA constraints/keyCertSign/有效期、响应 descriptor 与可信请求完全相同，profile 内容仍只含 loopback SOCKS bridge。补充非法 origin、伪造 CA 与 artifact descriptor 篡改测试。Node Agent `go test -race ./...` 113 项、vet/build 通过；PHP→Go 本地 mTLS provisioning Feature 8 项/92 assertions 通过。此阶段仅实现 Node Agent artifact 数据契约，不启用 executable renderer；PHP 目前尚未校验/持久化/返回 descriptor，Android grant 无法由当前生产 API 创建。示例 endpoint 与 CA 仅测试临时材料，不对应真实节点；生产 gate 仍关闭。下一步在 PHP acknowledgement/persistence/authorization response 中校验 endpoint 与管理员信任边界、加密保存 CA 并在授权响应输出，缺少受信 node runtime 实际 endpoint/CA 时继续失败关闭。
 
