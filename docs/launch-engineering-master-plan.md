@@ -18,7 +18,7 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-26）
 
-**2026-11-26 后续检查点**：M5/M6 live harness 已补撤权前后累计流量单调性与最终快照/回执相等断言；`go test -race ./...` 154 passed/5 packages、vet/build 通过。此前隔离节点和 IAM 资源已删除，本次仅完成本地回归代码验收，没有新云资源写入或远端 live 重跑。放行门仍为 5/12（42%）；下一步在新获批隔离节点窗口执行新 harness，或并行梳理生产 Node Agent runtime/mTLS 注入契约，不能将 synthetic peer 证据外推到真实会员线路。
+**2026-11-26 后续检查点**：M5/M6 live harness 已补撤权前后累计流量单调性与最终快照/回执相等断言，并在 `xlb-lab-us-20261126-m5mon` 隔离节点重新运行通过。专用节点/IAM 栈随后回收，资源核验无残留。Node Agent 离线 race/vet/build 检查通过。放行门仍为 5/12（42%）；下一步继续离线推进生产 Node Agent runtime/mTLS 注入契约与 PHP provisioning 接线，真实 profile 和节点身份/CA 材料到位后再做会员真机联验；合成 peer 证据不能外推到真实会员线路。
 
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
