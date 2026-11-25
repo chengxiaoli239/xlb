@@ -125,6 +125,7 @@ public final class MemberTunnelSessionTest {
                 assertFalse(session.isStarted());
                 assertTrue("TUN/core not stopped after " + blockedStage, runtime.events.contains("stop-tun"));
                 assertTrue("bridge not stopped after " + blockedStage, runtime.events.contains("stop-bridge"));
+                assertCleanupOrderAfterBlockedStartup(runtime.events, blockedStage);
                 int blockedIndex = runtime.events.indexOf(blockedStage);
                 for (String laterStage : startupStages.subList(startupStages.indexOf(blockedStage) + 1,
                         startupStages.size())) {
@@ -137,6 +138,30 @@ public final class MemberTunnelSessionTest {
                 executor.shutdownNow();
             }
         }
+    }
+
+    private static void assertCleanupOrderAfterBlockedStartup(List<String> events, String blockedStage) {
+        int blockedIndex = events.indexOf(blockedStage);
+        int stopTunIndex = events.indexOf("stop-tun");
+        int stopBridgeIndex = events.indexOf("stop-bridge");
+        int clearCredentialsIndex = events.indexOf("clear-credentials");
+        int closeCertificateIndex = events.indexOf("close-certificate");
+        assertTrue("TUN/core cleanup did not follow blocked " + blockedStage, stopTunIndex > blockedIndex);
+        assertTrue("bridge cleanup did not follow TUN/core cleanup after " + blockedStage,
+                stopBridgeIndex > stopTunIndex);
+        if ("certificate".equals(blockedStage)) {
+            assertEquals("credentials should not exist when certificate creation is cancelled", -1,
+                    clearCredentialsIndex);
+            assertTrue("certificate was not closed after bridge cleanup at " + blockedStage,
+                    closeCertificateIndex > stopBridgeIndex);
+        } else {
+            assertTrue("bridge credentials were not cleared after " + blockedStage,
+                    clearCredentialsIndex > stopBridgeIndex);
+            assertTrue("certificate was not closed after credentials were cleared at " + blockedStage,
+                    closeCertificateIndex > clearCredentialsIndex);
+        }
+        assertTrue("certificate cleanup preceded certificate creation at " + blockedStage,
+                closeCertificateIndex > events.indexOf("certificate"));
     }
 
     @Test
