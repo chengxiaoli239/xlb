@@ -30,6 +30,8 @@
 | M10 智能路由 | 加权候选、熔断、SQLite CAS 健康仓库、默认关闭的健康命令/条件 15 秒 scheduler/route filter、PHP opt-in HTTPS/mTLS transport 与 Go opt-in loopback TLS 1.3 listener 均有离线测试；新增 `isolated-test` runtime-config opt-in HTTPS canary executor，固定 HTTPS/443 target、显式 CA、无代理/redirect、响应有界且 challenge 字符串精确匹配；Go race tests 覆盖 mTLS probe listener→HTTPS canary，PHP transport 另有全链本机集成覆盖 PHP→Go Agent mTLS→本地 HTTPS canary；M10 profile 健康过滤、route version 发布/回滚、合成熔断恢复与不健康 canary 回退均有 Feature 测试 | executor 默认关闭，生产 runtime 不支持且保留 `503 probe_unavailable`；没有获批真实 canary URL/CA 或隔离节点运行，因此尚无真实健康观测，probe/route filter/scheduler 继续默认关闭，不能称稳定性/切换验收。后续需获批 canary 与节点身份后实测超时、证书失败、状态新鲜度及恢复；严格 peer profile 不变，D3 范围仍待决且不能绕过 peer revoke/provision/receipt |
 | M11 与 E0 工程基础 | GitHub Actions 覆盖 Web/API、PHP/API/Web/扩展测试、Go race/vet/build、mock-only ops 安全测试及 Android pinned NDK/Go 下 Debug APK/JVM/lint；最新主线 `8412a62` 的 CI `45510039238` 全绿，包含 Android、Node Agent、PHP/MySQL/PostgreSQL、容器 smoke 与 SBOM provenance；本机 Android JBR21 JVM、lint、Debug APK build 通过 | 本机 M11 80 请求/并发1与4结果只是 PHP dev server + 临时 SQLite smoke，不是生产容量门。2026-11-25 GitHub Environment 只读 API 返回 `total_count=0`，正式签名候选仍无法运行。SBOM provenance 不等于 APK/Release 签名；生产签名制品/回滚、staging、静态资源发布、监控告警与成本预算仍缺 |
 
+**M8 Windows 状态更正（2026-11-25）**：上方旧快照中“AppState 无 bridge supervisor/process handle”的描述已被本日新实现取代：AppState 现在持有生命周期 supervisor，restore/login/logout 必须先 stop/reap，失败则阻止会话变更；fake-process 成功/失败回归已加入，Windows hosted MSVC 验收待 CI。生产 adapter、TUN/节点数据面仍未实现，bridge gate 仍关闭。
+
 ### 0.2 一周首版冲刺（检查更新：2026-11-25；检查点 2026-12-01）
 
 目标范围沿用已确认的 Android + 网站/API 单服务商受控试点。工作按并行泳道推进，外部放行材料不能替代，也不因代码完成自动通过。
@@ -270,7 +272,7 @@ M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求�
 | Q1 重要且紧急 | **最大技术工作量与首发关键路径**是 Android M8/M6 生产形状闭环：服务端签发的 member grant/profile → 设备 proof bridge → Mihomo/TUN → 节点 peer 授权，再覆盖重连、停止、退款撤权和匹配节点回执。已有离线/隔离 AVD 和合成 Agent 证据，生产 gate 仍关闭，不能将其当作会员线路验收。 | 代码按接口分成可测小阶段继续；在真实 profile/endpoint/CA/mTLS 及节点回执契约冻结前，剩余实现和联调工时为低置信、不能给单日估期。节点负责人需提供受控测试材料/窗口；AWS 资源盘点等用户本人重新登录后再做。 |
 | Q1 重要且紧急 | **发布阻塞主要是外部放行工作**：GitHub `android-release-candidate` Environment 只读查询为 0 项；真实节点与撤权证据、商户沙箱契约、合规意见、staging/回滚窗口和负责人日期均未齐。 | 用户表示稍后提供外部放行负责人；当前继续无依赖离线工作。责任人到位后并行处理环境、材料、staging 与书面意见。AWS STS 过期，用户本人重新 `aws login` 前暂停 AWS 查询。外部日历等待不可由 AI 编码压缩。 |
 | Q2 重要但不紧急 | Android/API 授权与隧道失败安全诊断、失败关闭竞态、Web/API 沙箱下单退款、M10 健康探测契约和候选制品校验，属于上线前离线质量工作。Android diagnostics patch 在主线等效提交 `5be4a7a` 的 CI run `45316986228` 六个 jobs 全绿。 | 按每项约 1–2 小时拆成定向测试、修复、全模块回归；同一文件/接口串行，Android、支付/对账、发布文档可由独立 worktree 并行，合入时逐阶段 CI。 |
-| Q2 重要但不紧急 | Windows 授权 grant 的下一离线边界是 Tauri `AppState` 持有 lifecycle supervisor，并把授权失效联动到 bridge stop/reap；Windows hosted 测试可独立验收。Windows 数据面不属于当前 Android + Web/API 试点放行范围。 | 仅在不挤占 Android 真实会员链路准备、Web/API 首发回归与签名候选工作的情况下推进；测试依赖 Windows hosted runner，本机没有 Rust 工具链。 |
+| Q2 重要但不紧急 | Tauri `AppState` 持有 lifecycle supervisor，并在 restore/login/logout 前 stop/reap；若进程无法回收则 fail closed 阻止会话变更。Fake-process 成功/失败回归已实现，Windows hosted MSVC 尚待验收。Windows 数据面不属于当前 Android + Web/API 试点放行范围。 | 本阶段只占用并行空档，不挤占 Android 真实会员链路、Web/API 首发回归和签名候选工作；本机没有 Rust 工具链，提交后由 hosted Windows runner 验收。生产 adapter/TUN/节点仍列后续，不因 supervisor 接线提前放开 gate。 |
 | Q3 紧急但相对次要 | 20 分钟哨兵状态播报、重复状态核对和临时进度汇报。 | 自动化唤醒后检查真实提交/测试/阻塞并执行下一项离线工作；“无代码变化”不是停止理由。用一条同步的模块状态和可验收队列减少重复巡检开销。 |
 | Q4 不重要且不紧急 | 本次受控 Android + Web/API 试点之外的全平台扩展、外观细节，以及 Reality/uTLS 等抗审查伪装。 | 移至首发之后；Reality/uTLS 只保留为已知差距，不作为本周冲刺或已解决事项。 |
 

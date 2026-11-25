@@ -1,4 +1,4 @@
-#![allow(dead_code)] // Process supervision stays disabled until the production adapter contract is implemented.
+#![allow(dead_code)] // Production process launch stays disabled until the adapter contract is implemented.
 
 use std::{fmt, sync::Arc};
 
@@ -395,13 +395,13 @@ impl BridgeConfig {
 
 /// Implementations must synchronously terminate and reap the child in `Drop`
 /// as the final backstop if both explicit stop operations fail.
-trait ProofBridgeProcess {
+trait ProofBridgeProcess: Send {
     fn is_alive(&mut self) -> bool;
     fn stop(&mut self) -> Result<(), BridgeFailure>;
     fn force_stop(&mut self) -> Result<(), BridgeFailure>;
 }
 
-trait ProofBridgeAdapter {
+trait ProofBridgeAdapter: Send {
     /// Recheck current entitlement and binding against revocation, use the
     /// supplied signer for the peer proof handshake, and only then return an
     /// alive process. On error, implementations must not leave a child process
@@ -412,22 +412,40 @@ trait ProofBridgeAdapter {
     ) -> Result<Box<dyn ProofBridgeProcess>, BridgeFailure>;
 }
 
-struct BridgeSupervisor<A: ProofBridgeAdapter> {
-    adapter: A,
+/// Production process integration is intentionally unavailable. Keeping this
+/// adapter installed makes the AppState lifecycle owner explicit while the
+/// feature gate remains closed and no child process can be launched.
+pub(super) struct DisabledBridgeAdapter;
+
+impl ProofBridgeAdapter for DisabledBridgeAdapter {
+    fn launch(
+        &mut self,
+        _config: &BridgeConfig,
+    ) -> Result<Box<dyn ProofBridgeProcess>, BridgeFailure> {
+        Err(BridgeFailure::FeatureDisabled)
+    }
+}
+
+pub(super) struct BridgeSupervisor {
+    adapter: Box<dyn ProofBridgeAdapter>,
     process: Option<Box<dyn ProofBridgeProcess>>,
     snapshot: BridgeSnapshot,
 }
 
-impl<A: ProofBridgeAdapter> BridgeSupervisor<A> {
-    fn new(adapter: A) -> Self {
+impl BridgeSupervisor {
+    fn new(adapter: impl ProofBridgeAdapter + 'static) -> Self {
         Self {
-            adapter,
+            adapter: Box::new(adapter),
             process: None,
             snapshot: BridgeSnapshot {
                 state: BridgeState::Stopped,
                 failure: None,
             },
         }
+    }
+
+    pub(super) fn disabled() -> Self {
+        Self::new(DisabledBridgeAdapter)
     }
 
     fn status(&mut self) -> BridgeSnapshot {
@@ -522,6 +540,15 @@ impl<A: ProofBridgeAdapter> BridgeSupervisor<A> {
         self.snapshot
     }
 
+    pub(super) fn stop_for_member_auth_change(&mut self) -> Result<(), String> {
+        let snapshot = self.stop();
+        if snapshot.state == BridgeState::Stopped && snapshot.failure.is_none() {
+            Ok(())
+        } else {
+            Err("无法安全停止本地授权进程，请重试后再更改会员会话".to_owned())
+        }
+    }
+
     fn stop_process(&mut self) -> Result<(), BridgeFailure> {
         let Some(process) = self.process.as_mut() else {
             return Ok(());
@@ -546,7 +573,7 @@ impl<A: ProofBridgeAdapter> BridgeSupervisor<A> {
     }
 }
 
-impl<A: ProofBridgeAdapter> Drop for BridgeSupervisor<A> {
+impl Drop for BridgeSupervisor {
     fn drop(&mut self) {
         let _ = self.cleanup_process();
     }
@@ -555,7 +582,7 @@ impl<A: ProofBridgeAdapter> Drop for BridgeSupervisor<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{cell::Cell, rc::Rc};
+    use std::sync::{Arc, Mutex};
 
     const TEST_CA_PEM: &str = "-----BEGIN CERTIFICATE-----\n\
 MIIDDDCCAfSgAwIBAgIUO3xVpkTXq2ci+clkcnp4HbQ0gGIwDQYJKoZIhvcNAQEL\n\
@@ -577,15 +604,40 @@ d7hVvJRLG4xfs/M1H6xZ0UqTvRYE0eIYF39mzGWL2xfgdFpMVYhQ6g3pkfgV3H/F\n\
 JeIGIezus8B92pF7Fd1XSQ==\n\
 -----END CERTIFICATE-----\n";
 
+    #[derive(Clone)]
+    struct Shared<T>(Arc<Mutex<T>>);
+
+    impl<T: Default> Default for Shared<T> {
+        fn default() -> Self {
+            Self(Arc::new(Mutex::new(T::default())))
+        }
+    }
+
+    impl<T: Copy> Shared<T> {
+        fn get(&self) -> T {
+            *self.0.lock().unwrap()
+        }
+
+        fn set(&self, value: T) {
+            *self.0.lock().unwrap() = value;
+        }
+    }
+
+    impl Shared<usize> {
+        fn increment(&self) {
+            *self.0.lock().unwrap() += 1;
+        }
+    }
+
     #[derive(Clone, Default)]
     struct Counters {
-        launches: Rc<Cell<usize>>,
-        stops: Rc<Cell<usize>>,
-        alive: Rc<Cell<bool>>,
-        launch_fails: Rc<Cell<bool>>,
-        stop_fails: Rc<Cell<bool>>,
-        force_stop_fails: Rc<Cell<bool>>,
-        drop_kills: Rc<Cell<usize>>,
+        launches: Shared<usize>,
+        stops: Shared<usize>,
+        alive: Shared<bool>,
+        launch_fails: Shared<bool>,
+        stop_fails: Shared<bool>,
+        force_stop_fails: Shared<bool>,
+        drop_kills: Shared<usize>,
     }
 
     struct FakeAdapter(Counters);
@@ -635,7 +687,7 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
             &mut self,
             _config: &BridgeConfig,
         ) -> Result<Box<dyn ProofBridgeProcess>, BridgeFailure> {
-            self.0.launches.set(self.0.launches.get() + 1);
+            self.0.launches.increment();
             if self.0.launch_fails.get() {
                 return Err(BridgeFailure::LaunchFailed);
             }
@@ -652,7 +704,7 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
         }
 
         fn stop(&mut self) -> Result<(), BridgeFailure> {
-            self.0.stops.set(self.0.stops.get() + 1);
+            self.0.stops.increment();
             if self.0.stop_fails.get() {
                 Err(BridgeFailure::StopFailed)
             } else {
@@ -662,7 +714,7 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
         }
 
         fn force_stop(&mut self) -> Result<(), BridgeFailure> {
-            self.0.stops.set(self.0.stops.get() + 1);
+            self.0.stops.increment();
             if self.0.force_stop_fails.get() {
                 Err(BridgeFailure::StopFailed)
             } else {
@@ -675,7 +727,7 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
     impl Drop for FakeProcess {
         fn drop(&mut self) {
             if self.0.alive.get() {
-                self.0.drop_kills.set(self.0.drop_kills.get() + 1);
+                self.0.drop_kills.increment();
                 self.0.alive.set(false);
             }
         }
@@ -709,7 +761,7 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
         BridgeConfig::from_authorized_grant(grant)
     }
 
-    fn supervisor(counters: Counters) -> BridgeSupervisor<FakeAdapter> {
+    fn supervisor(counters: Counters) -> BridgeSupervisor {
         BridgeSupervisor::new(FakeAdapter(counters))
     }
 
@@ -1052,6 +1104,46 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
 
         assert_eq!(counters.stops.get(), 3);
         assert!(!counters.alive.get());
+    }
+
+    #[tokio::test]
+    async fn app_state_stops_and_reaps_bridge_before_member_auth_changes() {
+        let counters = Counters::default();
+        let mut bridge = supervisor(counters.clone());
+        assert_eq!(bridge.start_enabled_for_test(&valid_config()).state, BridgeState::Ready);
+        let state = super::super::AppState {
+            account: tokio::sync::Mutex::new(Err("unused test account".into())),
+            bridge_supervisor: tokio::sync::Mutex::new(bridge),
+            api_base_url: "https://api.example.test/".into(),
+        };
+
+        super::super::stop_bridge_before_member_auth_change(&state)
+            .await
+            .unwrap();
+
+        assert_eq!(counters.stops.get(), 1);
+        assert!(!counters.alive.get());
+        assert_eq!(state.bridge_supervisor.lock().await.snapshot.state, BridgeState::Stopped);
+    }
+
+    #[tokio::test]
+    async fn app_state_blocks_member_auth_changes_when_bridge_cannot_be_reaped() {
+        let counters = Counters::default();
+        let mut bridge = supervisor(counters.clone());
+        assert_eq!(bridge.start_enabled_for_test(&valid_config()).state, BridgeState::Ready);
+        counters.stop_fails.set(true);
+        counters.force_stop_fails.set(true);
+        let state = super::super::AppState {
+            account: tokio::sync::Mutex::new(Err("unused test account".into())),
+            bridge_supervisor: tokio::sync::Mutex::new(bridge),
+            api_base_url: "https://api.example.test/".into(),
+        };
+
+        let result = super::super::stop_bridge_before_member_auth_change(&state).await;
+
+        assert!(result.is_err());
+        assert!(counters.alive.get());
+        assert_eq!(state.bridge_supervisor.lock().await.snapshot.state, BridgeState::Failed);
     }
 
     #[test]

@@ -1223,6 +1223,7 @@ JeIGIezus8B92pF7Fd1XSQ==\n\
 
 pub struct AppState {
     account: tokio::sync::Mutex<Result<AccountClient, String>>,
+    bridge_supervisor: tokio::sync::Mutex<proof_bridge::BridgeSupervisor>,
     api_base_url: String,
 }
 
@@ -1237,6 +1238,7 @@ pub struct LocalTestCredentials {
 async fn restore_session(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<AccountSnapshot>, String> {
+    stop_bridge_before_member_auth_change(&state).await?;
     match state.account.lock().await.as_mut() {
         Ok(account) => account.restore().await,
         Err(error) => Err(error.clone()),
@@ -1249,6 +1251,7 @@ async fn login(
     password: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<AccountSnapshot, String> {
+    stop_bridge_before_member_auth_change(&state).await?;
     match state.account.lock().await.as_mut() {
         Ok(account) => account.login(&email, &password).await,
         Err(error) => Err(error.clone()),
@@ -1257,10 +1260,19 @@ async fn login(
 
 #[tauri::command]
 async fn logout(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    stop_bridge_before_member_auth_change(&state).await?;
     match state.account.lock().await.as_mut() {
         Ok(account) => account.logout().await,
         Err(error) => Err(error.clone()),
     }
+}
+
+async fn stop_bridge_before_member_auth_change(state: &AppState) -> Result<(), String> {
+    state
+        .bridge_supervisor
+        .lock()
+        .await
+        .stop_for_member_auth_change()
 }
 
 #[tauri::command]
@@ -1301,6 +1313,7 @@ pub fn run() {
         });
     let state = AppState {
         account: tokio::sync::Mutex::new(account),
+        bridge_supervisor: tokio::sync::Mutex::new(proof_bridge::BridgeSupervisor::disabled()),
         api_base_url,
     };
 
