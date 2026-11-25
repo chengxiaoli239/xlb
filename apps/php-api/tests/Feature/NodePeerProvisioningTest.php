@@ -41,6 +41,8 @@ class NodePeerProvisioningTest extends TestCase
         $this->assertSame(1, (int) $peer->device_binding_generation);
         $this->assertSame(str_repeat('d', 64), $peer->device_key_fingerprint);
         $this->assertSame($peer->provision_request_id, $job->id);
+        $this->assertSame($job->id, $first['node_operation_id']);
+        $this->assertSame($job->id, $second['node_operation_id']);
         $this->assertSame(13, (int) DB::table('nodes')->where('id', 'node-test-1')->value('active_sessions'));
     }
 
@@ -213,6 +215,7 @@ class NodePeerProvisioningTest extends TestCase
 
             $ready = $service->ensureForProvenDevice('user-member', 'device-provision-1', $fingerprint);
             $this->assertSame('ready', $ready['status']);
+            $this->assertSame($peer->provision_request_id, $ready['node_operation_id']);
             $this->assertSame($peer->id, $ready['peer_id']);
             $this->assertSame($nodeId, $ready['node_id']);
             $this->assertSame($profile, $ready['profile']);

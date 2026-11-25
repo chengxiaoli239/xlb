@@ -117,6 +117,7 @@ public final class PlatformApi {
             String registrationMessage = null;
             NodeAuthorizationStatus nodeAuthorizationStatus = NodeAuthorizationStatus.UNAVAILABLE;
             String authorizationDiagnosticCode = null;
+            String nodeOperationId = null;
             MemberDeviceProof authorizedProof = null;
             MemberTunnelGrant authorizedGrant = null;
             try {
@@ -141,6 +142,8 @@ public final class PlatformApi {
                 JSONObject nodeAuthorization = authorization.optJSONObject("node_authorization");
                 nodeAuthorizationStatus = NodeAuthorizationStatus.fromStatus(
                         nodeAuthorization == null ? null : nodeAuthorization.optString("status", null));
+                nodeOperationId = ApiFailureDiagnostics.serverRequestReference(
+                        nodeAuthorization == null ? null : nodeAuthorization.optString("node_operation_id", null));
                 if (nodeAuthorizationStatus == NodeAuthorizationStatus.READY) {
                     JSONObject authorizedDevice = authorization.optJSONObject("device");
                     authorizedProof = MemberDeviceProof.fromAuthorizedResponse(
@@ -200,6 +203,9 @@ public final class PlatformApi {
             ClientSnapshot snapshot = withOverview(loadDevices(account, registrationMessage, nodeAuthorizationStatus));
             if (authorizationDiagnosticCode != null) {
                 snapshot = snapshot.withDiagnosticCode(authorizationDiagnosticCode);
+            }
+            if (nodeOperationId != null) {
+                snapshot = snapshot.withNodeOperationId(nodeOperationId);
             }
             if (authorizedProof != null && authorizedProof.matches(
                     account.id, snapshot.device, snapshot.entitlement != null)) {
@@ -523,6 +529,7 @@ public final class PlatformApi {
         public final String accountProfile;
         public final NodeAuthorizationStatus nodeAuthorizationStatus;
         public final String diagnosticCode;
+        public final String nodeOperationId;
 
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message) {
             this(account, device, message, null, 0);
@@ -549,6 +556,14 @@ public final class PlatformApi {
         public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
                               EntitlementSummary entitlement, int subscriptionCount, String accountProfile,
                               NodeAuthorizationStatus nodeAuthorizationStatus, String diagnosticCode) {
+            this(account, device, message, entitlement, subscriptionCount, accountProfile,
+                    nodeAuthorizationStatus, diagnosticCode, null);
+        }
+
+        public ClientSnapshot(MemberAccount account, DeviceSnapshot device, String message,
+                              EntitlementSummary entitlement, int subscriptionCount, String accountProfile,
+                              NodeAuthorizationStatus nodeAuthorizationStatus, String diagnosticCode,
+                              String nodeOperationId) {
             this.account = account;
             this.device = device;
             this.message = message;
@@ -558,21 +573,27 @@ public final class PlatformApi {
             this.nodeAuthorizationStatus = nodeAuthorizationStatus == null
                     ? NodeAuthorizationStatus.UNAVAILABLE : nodeAuthorizationStatus;
             this.diagnosticCode = diagnosticCode;
+            this.nodeOperationId = nodeOperationId;
         }
 
         ClientSnapshot withOverview(EntitlementSummary overviewEntitlement, int activeSubscriptions) {
             return new ClientSnapshot(account, device, message, overviewEntitlement, activeSubscriptions,
-                    accountProfile, nodeAuthorizationStatus, diagnosticCode);
+                    accountProfile, nodeAuthorizationStatus, diagnosticCode, nodeOperationId);
         }
 
         ClientSnapshot withNodeAuthorizationStatus(NodeAuthorizationStatus status) {
             return new ClientSnapshot(account, device, message, entitlement, subscriptionCount,
-                    accountProfile, status, diagnosticCode);
+                    accountProfile, status, diagnosticCode, nodeOperationId);
         }
 
         ClientSnapshot withDiagnosticCode(String code) {
             return new ClientSnapshot(account, device, message, entitlement, subscriptionCount,
-                    accountProfile, nodeAuthorizationStatus, code);
+                    accountProfile, nodeAuthorizationStatus, code, nodeOperationId);
+        }
+
+        ClientSnapshot withNodeOperationId(String id) {
+            return new ClientSnapshot(account, device, message, entitlement, subscriptionCount,
+                    accountProfile, nodeAuthorizationStatus, diagnosticCode, id);
         }
     }
 

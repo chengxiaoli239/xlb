@@ -155,6 +155,7 @@ public final class PlatformApiMemberGrantInstrumentedTest {
             PlatformApi.ClientSnapshot snapshot = api.synchronize(account);
             MemberTunnelGrant grant = api.verifiedMemberTunnelGrant();
             assertEquals(PlatformApi.NodeAuthorizationStatus.READY, snapshot.nodeAuthorizationStatus);
+            assertEquals(SERVER_REQUEST_ID, snapshot.nodeOperationId);
             assertNotNull("PlatformApi did not produce a verified grant from the signed challenge", grant);
             assertTrue("fake API did not verify the Android Keystore challenge signature",
                     server.challengeSignatureVerified());
@@ -1111,6 +1112,7 @@ public final class PlatformApiMemberGrantInstrumentedTest {
                             .put("bound", true))
                     .put("node_authorization", new JSONObject()
                             .put("status", "ready")
+                            .put("node_operation_id", SERVER_REQUEST_ID)
                             .put("peer_id", MemberTunnelGrantAvdFixture.PEER_ID)
                             .put("node_id", MemberTunnelGrantAvdFixture.NODE_ID)
                             .put("peer_generation", MemberTunnelGrantAvdFixture.PEER_GENERATION)

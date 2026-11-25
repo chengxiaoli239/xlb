@@ -122,7 +122,8 @@ class MemberDeviceApiTest extends TestCase
                     && hash_equals(hash('sha256', $keyPair['public_key_der']), $fingerprint);
             })
             ->andReturn([
-                'status' => 'ready', 'message' => 'ready', 'peer_id' => 'peer-android-grant',
+                'status' => 'ready', 'message' => 'ready', 'node_operation_id' => 'a12b3456-7890-4abc-8def-0123456789ab',
+                'peer_id' => 'peer-android-grant',
                 'node_id' => 'node-android-grant', 'peer_generation' => 2,
                 'device_binding_generation' => 3,
                 'bridge_endpoint' => 'https://node.example.invalid:9444',
@@ -136,6 +137,7 @@ class MemberDeviceApiTest extends TestCase
         $response = $this->authorizeDevice($keyPair);
         $response->assertCreated()
             ->assertJsonPath('data.node_authorization.status', 'ready')
+            ->assertJsonPath('data.node_authorization.node_operation_id', 'a12b3456-7890-4abc-8def-0123456789ab')
             ->assertJsonPath('data.node_authorization.bridge_endpoint', 'https://node.example.invalid:9444')
             ->assertJsonPath('data.node_authorization.profile_sha256', hash('sha256', $profile))
             ->assertJsonPath('data.node_authorization.profile_renderer_id', 'xlb-mihomo-bridge-v1')

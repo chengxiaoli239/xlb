@@ -18,7 +18,7 @@ class NodePeerProvisioningService
     /**
      * Call only after the authenticated device has completed its challenge signature.
      *
-     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,profile_sha256?:string,profile_renderer_id?:string,profile_renderer_version?:string,bridge_protocol?:string,connectable?:bool,peer_credential?:string,profile?:string}
+     * @return array{status:string,message:string,node_operation_id?:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,profile_sha256?:string,profile_renderer_id?:string,profile_renderer_version?:string,bridge_protocol?:string,connectable?:bool,peer_credential?:string,profile?:string}
      */
     public function ensureForProvenDevice(string $userId, string $deviceId, string $proofFingerprint): array
     {
@@ -143,7 +143,7 @@ class NodePeerProvisioningService
     }
 
     /**
-     * @return array{status:string,message:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,profile_sha256?:string,profile_renderer_id?:string,profile_renderer_version?:string,bridge_protocol?:string,connectable?:bool,peer_credential?:string,profile?:string}
+     * @return array{status:string,message:string,node_operation_id?:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,profile_sha256?:string,profile_renderer_id?:string,profile_renderer_version?:string,bridge_protocol?:string,connectable?:bool,peer_credential?:string,profile?:string}
      */
     private function present(object $peer, string $userId, string $proofFingerprint): array
     {
@@ -157,7 +157,11 @@ class NodePeerProvisioningService
         }
 
         if ($peer->status === 'provisioning') {
-            return ['status' => 'provisioning', 'message' => '正在准备设备线路'];
+            return [
+                'status' => 'provisioning',
+                'message' => '正在准备设备线路',
+                'node_operation_id' => (string) $peer->provision_request_id,
+            ];
         }
         $node = DB::table('nodes')->where('id', $peer->node_id)->first([
             'is_test', 'status', 'health_status', 'last_health_check_at', 'agent_endpoint',
@@ -189,6 +193,7 @@ class NodePeerProvisioningService
         return [
             'status' => 'ready',
             'message' => '设备线路已就绪',
+            'node_operation_id' => (string) $peer->provision_request_id,
             'peer_id' => (string) $peer->id,
             'node_id' => (string) $peer->node_id,
             'peer_generation' => (int) $peer->generation,
