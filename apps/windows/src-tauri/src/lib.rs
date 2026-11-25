@@ -382,6 +382,7 @@ impl AccountClient {
         self.authorized_member_tunnel_grant.is_some()
     }
 
+    #[allow(dead_code)] // Consumed by the Windows process supervisor in the next integration stage.
     fn authorized_member_tunnel_grant(&self) -> Option<&proof_bridge::AuthorizedMemberTunnelGrant> {
         self.authorized_member_tunnel_grant.as_ref()
     }

@@ -166,8 +166,6 @@ impl AuthorizedMemberTunnelGrant {
         proof: Arc<VerifiedMemberDeviceProof>,
         authorization: &super::DeviceAuthorization,
     ) -> Result<Self, BridgeFailure> {
-        let peer_id = authorization.peer_id.as_deref().unwrap_or_default();
-        let node_id = authorization.node_id.as_deref().unwrap_or_default();
         let peer_generation = authorization.peer_generation.unwrap_or_default();
         let device_binding_generation = authorization.device_binding_generation.unwrap_or_default();
         let bridge_endpoint = authorization.bridge_endpoint.as_deref().unwrap_or_default();
