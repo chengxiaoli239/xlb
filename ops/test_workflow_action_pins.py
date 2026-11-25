@@ -140,9 +140,12 @@ class WorkflowActionPinsTest(unittest.TestCase):
             candidate_job,
         )
         self.assertIsNotNone(manifest_verification_step)
+        manifest_verification_body = manifest_verification_step.group("body")
+        self.assertIn("python3 ops/verify_artifact_manifest.py", manifest_verification_body)
+        self.assertIn('--expected-commit "$GITHUB_SHA"', manifest_verification_body)
         self.assertIn(
-            "ops/verify_artifact_manifest.py apps/android/app/build/outputs/apk/release/build-manifest.json",
-            manifest_verification_step.group("body"),
+            "apps/android/app/build/outputs/apk/release/build-manifest.json",
+            manifest_verification_body,
         )
         self.assertNotIn("gh release create", workflow)
         self.assertNotIn("softprops/action-gh-release@", workflow)

@@ -30,7 +30,12 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def verify_manifest(repo_root: Path, manifest_path: Path) -> list[str]:
+def verify_manifest(
+    repo_root: Path,
+    manifest_path: Path,
+    *,
+    expected_commit: str | None = None,
+) -> list[str]:
     resolved_manifest = resolve_repo_path(repo_root, str(manifest_path), must_exist=True)
     if not resolved_manifest.is_file():
         raise ValueError("manifest must be a regular file")
@@ -52,6 +57,11 @@ def verify_manifest(repo_root: Path, manifest_path: Path) -> list[str]:
         raise ValueError("manifest source commit is missing")
     if not re.fullmatch(r"[0-9a-f]{40,64}", source["commit"]):
         raise ValueError("manifest source commit is invalid")
+    if expected_commit is not None:
+        if not re.fullmatch(r"[0-9a-f]{40,64}", expected_commit):
+            raise ValueError("expected commit is invalid")
+        if source["commit"] != expected_commit:
+            raise ValueError("manifest source commit does not match expected commit")
 
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
@@ -98,12 +108,17 @@ def main() -> int:
     default_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=default_root)
+    parser.add_argument("--expected-commit", help="require this exact source commit")
     parser.add_argument("manifest", help="source-bound artifact manifest path")
     args = parser.parse_args()
 
     try:
         repo_root = args.repo_root.resolve(strict=True)
-        verified_paths = verify_manifest(repo_root, Path(args.manifest))
+        verified_paths = verify_manifest(
+            repo_root,
+            Path(args.manifest),
+            expected_commit=args.expected_commit,
+        )
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

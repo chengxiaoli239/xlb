@@ -102,7 +102,10 @@ jobs:
           CANDIDATE_REASON: ${{ inputs.reason }}
 
       - name: Verify candidate artifact manifest
-        run: python3 ops/verify_artifact_manifest.py apps/android/app/build/outputs/apk/release/build-manifest.json
+        run: >-
+          python3 ops/verify_artifact_manifest.py
+          --expected-commit "$GITHUB_SHA"
+          apps/android/app/build/outputs/apk/release/build-manifest.json
 
       - name: Attest signed candidate APK
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1

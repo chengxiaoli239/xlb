@@ -48,6 +48,19 @@ class VerifyArtifactManifestTest(unittest.TestCase):
 
         self.assertEqual(verified, ["candidate/app-release.apk", "candidate/bom.json"])
 
+    def test_verifies_manifest_source_commit_matches_expected_commit(self) -> None:
+        verified = verify_manifest(self.repo, self.manifest_path, expected_commit="a" * 40)
+
+        self.assertEqual(verified, ["candidate/app-release.apk", "candidate/bom.json"])
+
+    def test_rejects_manifest_source_commit_that_differs_from_expected_commit(self) -> None:
+        with self.assertRaisesRegex(ValueError, "does not match expected commit"):
+            verify_manifest(self.repo, self.manifest_path, expected_commit="b" * 40)
+
+    def test_rejects_invalid_expected_commit(self) -> None:
+        with self.assertRaisesRegex(ValueError, "expected commit is invalid"):
+            verify_manifest(self.repo, self.manifest_path, expected_commit="not-a-commit")
+
     def test_rejects_modified_artifact(self) -> None:
         self.apk.write_bytes(b"different candidate bytes")
 
