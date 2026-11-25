@@ -141,7 +141,7 @@
 
 | Q1 门 | 当前证据/状态 | 需要的负责人动作 | 可核对退出证据 | 截止检查点 |
 | --- | --- | --- | --- | --- |
-| 会员节点与撤权回执 | 11-25 经 `ops/aws-cli` 只读尝试确认 `xlb-ops` STS 已过期，未继续查询 AWS 资源；实验资源最新一次历史只读盘点为空（11-24）；尚无会员专属线路/节点材料 | 节点/运维负责人提供隔离节点 endpoint、节点身份、CA 与生产用途 mTLS 注入路径、获批 canary 地址；用户本人先重新 `aws login`，之后只读盘点并审查获批 plan；指定窗口让两台绑定设备跑连接/复制拒绝/退款撤权 | 节点 `node/peer/request/generation` 匹配的回执、最终累计流量与重连拒绝；两台设备各自输出脱敏版本/时间证据 | 11-25 负责人/材料尚未确认；11-27 仍为原计划目标、并非已承诺窗口；缺材料则 12-01 不可称受控试点上线 |
+| 会员节点与撤权回执 | 11-25 用 `ops/aws-cli --profile xlb-ops --cli-connect-timeout 5 --cli-read-timeout 5 sts get-caller-identity` 明确返回 session expired；未查询 AWS 资源。实验资源最新一次历史只读盘点为空（11-24）；尚无会员专属线路/节点材料 | 节点/运维负责人提供隔离节点 endpoint、节点身份、CA 与生产用途 mTLS 注入路径、获批 canary 地址；用户本人先重新 `aws login`，之后只读盘点并审查获批 plan；指定窗口让两台绑定设备跑连接/复制拒绝/退款撤权 | 节点 `node/peer/request/generation` 匹配的回执、最终累计流量与重连拒绝；两台设备各自输出脱敏版本/时间证据 | 11-25 负责人/材料尚未确认；11-27 仍为原计划目标、并非已承诺窗口；缺材料则 12-01 不可称受控试点上线 |
 | Android 受保护签名候选 | 候选 workflow 和签名配置离线验证通过；11-25 GitHub 只读 API 返回 Environment 数量 0 项 | 仓库管理员创建 `android-release-candidate` protected environment，限定 main、设置审核者；凭据负责人按批准通道注入 keystore/password 与 approved API origin，不在仓库/聊天传递 | 获批者手动运行 workflow，保存 APK、BOM、manifest、provenance 与审核结果；不自动建 GitHub Release 或上架 | 11-25 管理员/凭据负责人尚未确认；11-27 仍为原计划目标、并非已承诺候选日期；未配置不得称候选可审核 |
 | staging 与回滚 | CI 容器构建/HTTP smoke 通过；无 staging 部署记录 | staging 负责人确认隔离 URL、数据库/数据保留、部署权限、回滚责任人与维护窗口；任何新增费用/云资源先单独审批 | 按同一源 commit 部署、健康检查、登录/权益/支付沙箱 smoke、回滚演练记录 | 11-25 确认窗口；11-28 前验收，否则不开放付费试点 |
 | 商户沙箱与首发合规 | provider-neutral 支付及退款状态机只有 local/testing 证据；真实商户与首发市场书面意见未登记 | 支付负责人提供单一商户 sandbox、回调契约、签名/重试规则和对账字段；合规负责人确认首发地区、退款/隐私/服务条款并给书面意见 | 商户 sandbox 下单→回调→权益→退款→对账记录，以及可审计合规结论 | 11-25 确认资料/责任人；11-28 前验收，否则只保留本地沙箱演示，不宣称可收真实款或可上线 |
