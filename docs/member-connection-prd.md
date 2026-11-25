@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **Node Agent 生产模式与 AWS 身份前置复核（2026-11-25）**：源码核实 `apps/node-agent/cmd/node-agent` 仅接受 `NODE_AGENT_MODE=isolated-test`，production 启动会失败；trusted runtime v1 的生产 renderer 仍为 unavailable，尚无生产 key-source adapter。经项目包装器加 5 秒连接/读取超时执行 `sts get-caller-identity --profile xlb-ops`，明确返回 session expired；本轮未查询或改动 AWS 资源。后续云端盘点需用户本人重新 `aws login`，节点验收另需负责人提供获批身份、endpoint/CA/mTLS 与窗口。此状态不把隔离 peer、合成回执或本地 profile renderer 表述为生产节点能力。
+
 - **Android + 网站/API 受控试点 runbook 边界校正（2026-11-25）**：总体规划的上线日清单此前混入未经批准的 `5%→20%→50%→100%` 扩量、峰值×1.3 和热备要求，与当前没有 staging 容量数据、试点上限和回滚责任人的事实不符。现改为按获批 cohort 与资源上限受控开放，每次扩展需值守负责人复核；停止阈值、周期、联系人和回滚负责人必须先批准并演练。分级扩量与热备另属规模化发布门。本次只校正文档计划，不代表 staging、回滚或上线门已通过。
 
 - **Android 隔离会员隧道启动前真实路由验证（2026-11-25，专用 AVD 与 hosted CI）**：`XlbVpnService` 的 debug-only isolated member 路径此前在 TUN 建立后跳过启动验证，改为通过 `TunnelVerifier` 对系统 VPN network 上的隔离 echo 执行有界重试，并在 attempt 取消时停止验证；普通会员路径未改变，isolated test action 仍不发布生产 `CONNECTED`，`MEMBER_PROOF_BRIDGE_INTEGRATED=false` 保持关闭。专用 `xlb-m9-recovery` AVD 上 system-TUN echo 用例与 API grant→TUN→撤权回执用例各 1/1 通过；Android `testDebugUnitTest lintDebug assembleDebug` 通过；主线 CI `45522739482` 全部 jobs success。测试仅使用 fake API 与隔离 Node Agent，不能证明真实会员节点、生产授权、真实断流或严格限设备。真实 profile/endpoint/CA/mTLS 与匹配撤权回执仍是 Android 试点关键路径。
