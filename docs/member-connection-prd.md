@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **Android + 网站/API 受控试点 runbook 边界校正（2026-11-25）**：总体规划的上线日清单此前混入未经批准的 `5%→20%→50%→100%` 扩量、峰值×1.3 和热备要求，与当前没有 staging 容量数据、试点上限和回滚责任人的事实不符。现改为按获批 cohort 与资源上限受控开放，每次扩展需值守负责人复核；停止阈值、周期、联系人和回滚负责人必须先批准并演练。分级扩量与热备另属规模化发布门。本次只校正文档计划，不代表 staging、回滚或上线门已通过。
+
 - **Android 隔离会员隧道启动前真实路由验证（2026-11-25，专用 AVD 与 hosted CI）**：`XlbVpnService` 的 debug-only isolated member 路径此前在 TUN 建立后跳过启动验证，改为通过 `TunnelVerifier` 对系统 VPN network 上的隔离 echo 执行有界重试，并在 attempt 取消时停止验证；普通会员路径未改变，isolated test action 仍不发布生产 `CONNECTED`，`MEMBER_PROOF_BRIDGE_INTEGRATED=false` 保持关闭。专用 `xlb-m9-recovery` AVD 上 system-TUN echo 用例与 API grant→TUN→撤权回执用例各 1/1 通过；Android `testDebugUnitTest lintDebug assembleDebug` 通过；主线 CI `45522739482` 全部 jobs success。测试仅使用 fake API 与隔离 Node Agent，不能证明真实会员节点、生产授权、真实断流或严格限设备。真实 profile/endpoint/CA/mTLS 与匹配撤权回执仍是 Android 试点关键路径。
 
 - **Windows logout 失败时清理 tunnel grant（2026-11-25，hosted Windows MSVC）**：回归夹具构造完整且内部一致的 `AuthorizedMemberTunnelGrant`，确认登出 API 返回失败时 `VerifiedMemberDeviceProof`、grant 与持久化 cookie 仍全部清除。独立代码审查未发现问题；本机无 Cargo，未声称本地 Rust 测试通过。提交 `21ff9ea` 的 Windows native tests、Credential Manager smoke 与 MSVC build 在 run `45520314969` 全部通过。只验证本地 logout 生命周期，不证明 production bridge/process、TUN 或真实节点连接，`PROOF_BRIDGE_ENABLED=false` 保持不变。Windows `AppState` supervisor 与授权失效 stop/reap 联动仍是后续平台工作，不在 Android + 网站/API 首发放行范围内。
