@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AttachRequestCorrelationId;
 use App\Http\Middleware\RequireAdmin;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -14,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias(['admin' => RequireAdmin::class]);
+        $middleware->web(append: [AttachRequestCorrelationId::class]);
         $middleware->redirectGuestsTo(
             fn (Request $request): ?string => $request->is('api/*') ? null : '/',
         );
