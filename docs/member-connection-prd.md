@@ -5,6 +5,7 @@
 ## 开发进度（2026-11-25）
 
 - **Windows AppState 会员会话变更前 stop/reap 生命周期（2026-11-25，hosted Windows MSVC）**：`AppState` 持有显式关闭的 `BridgeSupervisor`，restore/login/logout 在触碰账号会话或清除 grant 前先请求停止当前 bridge；graceful stop 与 force stop 均失败时返回错误并阻止账户操作，supervisor 保留子进程句柄供重试及 Drop 清理。AppState 级 fake-process 回归覆盖成功回收与失败关闭。Windows hosted run `45532748910` 的 native tests **49/49**、UI tests **6/6**、MSVC build 全部通过；一般 CI `45532748858` 全绿。本机缺少 Cargo/Rust，未声称本地 Rust 测试通过。生产 adapter、bridge 启动命令、TUN/数据面均未实现，`PROOF_BRIDGE_ENABLED=false` 不变；不能外推为 Windows 会员连接或真实撤权已验收。
+- **Android 会员隧道启动取消后的资源清理顺序回归（2026-11-25，本机 JBR 21）**：扩展 `MemberTunnelSessionTest.stopRequestDoesNotWaitAtAnyUnresponsiveStartupStage`，覆盖启动各阶段的 fake runtime 阻塞解除后，必须停止 TUN/core，再停止 bridge，并按已创建的 handle 清理 credentials 和 certificate；仍断言取消后不进入后续启动阶段、不标记 started。定向 session tests 与 Android 全量 `testDebugUnitTest lintDebug assembleDebug` 通过。本项只验证 stop request 返回后、模拟 native/runtime 阶段最终返回时的生命周期；不证明 JNI 永不返回时能强制回收，也未运行 `XlbVpnService` 系统服务级撤销竞态、真机或真实节点验收。
 
 - **Windows 模块状态说明校正（2026-11-25，hosted Windows MSVC）**：`apps/windows/README.md` 先前称尚无设备授权，与已实现的 CNG installation-key challenge/authorization 和 server-authorized tunnel grant 校验不符。现已说明这两项能力，同时明确 bridge process、VPN engine、TUN/system proxy 和节点数据路径仍未实现，`PROOF_BRIDGE_ENABLED=false` 未变。文档提交 `278e11e` 的 Windows UI、native credential tests 与 MSVC build 在 run `45529815624` 全部通过；通用 CI `45529815690` 全绿。此项只纠正文档边界，不代表 Windows VPN 连接或生产授权放行。
 
