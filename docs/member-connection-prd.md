@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **M4 沙箱续费固定订阅回归主线集成（2026-11-25）**：提交 `80089cf` 已在主线 `main` 与 `origin/main` 同步；CI run `45536649412` 全部 jobs success，覆盖 PHP/Laravel、MySQL、PostgreSQL、Android、Web/API、Node Agent、构建和 SBOM provenance。该结果关闭本次离线续费回归阶段，不改变真实商户支付未接入、生产环境未放行的状态。下一工作仍按四象限选择首发关键路径中可独立验收的离线任务；外部负责人尚未提供期间继续推进离线工作。
+
 - **M4 沙箱续费保持固定订阅并追加权益（2026-11-25，主线 CI）**：复核 `SandboxPaymentTest::test_confirmed_renewal_reuses_the_existing_subscription_link` 与 `test_distinct_confirmed_orders_append_entitlements_and_reuse_one_subscription`，现有回归覆盖已创建订阅的续费仍返回相同订阅 ID/URL、数据库仍只有一条订阅，并验证多个已确认订单按前一段权益结束时间依次追加 grant。主线 CI `45535623303` 全部 jobs success，包含 Laravel tests。此证据只覆盖 local/testing 沙箱状态，不代表真实商户续费/支付/对账已验收；后续不重复这两个 happy-path，用新竞态或渠道契约驱动新增覆盖。
 
 - **Windows AppState 会员会话变更前 stop/reap 生命周期（2026-11-25，hosted Windows MSVC）**：`AppState` 持有显式关闭的 `BridgeSupervisor`，restore/login/logout 在触碰账号会话或清除 grant 前先请求停止当前 bridge；graceful stop 与 force stop 均失败时返回错误并阻止账户操作，supervisor 保留子进程句柄供重试及 Drop 清理。AppState 级 fake-process 回归覆盖成功回收与失败关闭。Windows hosted run `45532748910` 的 native tests **49/49**、UI tests **6/6**、MSVC build 全部通过；一般 CI `45532748858` 全绿。本机缺少 Cargo/Rust，未声称本地 Rust 测试通过。生产 adapter、bridge 启动命令、TUN/数据面均未实现，`PROOF_BRIDGE_ENABLED=false` 不变；不能外推为 Windows 会员连接或真实撤权已验收。
