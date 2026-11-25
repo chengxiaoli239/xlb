@@ -43,6 +43,7 @@ type NodeRevocationSummary = { status: 'not_required' | 'pending' | 'retrying' |
 type OrderDetail = OrderSummary & { plan_snapshot: Plan & { version: number }; user_email: string; is_test: boolean; payment: null | { id: string; transaction_id: string; amount_cents: number; currency: string; status: string; review_reason: string | null; created_at: string }; refund: null | { id: string; amount_cents: number; currency: string; status: string; reason: string; created_at: string; processor_name: string | null }; node_revocations: NodeRevocationSummary; entitlement_grant: null | { id: string; entitlement_id: string; status: string; starts_at: string; ends_at: string }; events: Array<{ id: string; from_status: string | null; to_status: string; created_at: string; actor_name: string | null }> };
 const orderStatusText: Record<string, string> = { pending_test: '待支付 · 测试', cancelled_test: '已取消 · 测试', expired_test: '已超时 · 测试', paid_test: '已完成 · 测试', refunded_test: '已退款 · 测试' };
 const orderTone = (status: string): string => status === 'paid_test' ? 'green' : status === 'pending_test' ? 'amber' : status === 'refunded_test' ? 'red' : 'gray';
+const serverRequestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const nodeRevocationText = (summary: NodeRevocationSummary): string => {
   if (summary.status === 'not_required') return '没有登记中的节点凭证，无需撤权';
   if (summary.status === 'pending') return `等待节点回执 ${summary.pending_count} 台 · 已确认 ${summary.confirmed_count}/${summary.total_count}`;
@@ -62,7 +63,12 @@ const apiEnvelope = async <T,>(path: string, init?: RequestInit): Promise<{ data
   const response = await fetch(path, { ...init, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-TOKEN': csrf.data.token } : {}), ...init?.headers } });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(body?.error?.message ?? '请求失败');
+    const message = body?.error?.message ?? '请求失败';
+    const requestId = response.headers.get('X-Request-Id');
+    const requestReference = requestId && serverRequestIdPattern.test(requestId)
+      ? `（服务请求编号 ${requestId}）`
+      : '';
+    throw new Error(`${message}${requestReference}`);
   }
   if (response.status === 204) return { data: undefined as T };
   return response.json();
@@ -199,7 +205,7 @@ export default function App() {
   };
 
   if (loading) return <main className="boot"><span className="brand-mark">X</span><span>迅连宝控制台</span></main>;
-  if (!user) return <Login portalRole={portalRole} email={loginEmail} setEmail={setLoginEmail} password={password} setPassword={setPassword} onSubmit={login} />;
+  if (!user) return <Login portalRole={portalRole} email={loginEmail} setEmail={setLoginEmail} password={password} setPassword={setPassword} onSubmit={login} toast={toast} />;
   if (user.role === 'member') return <MemberPortal user={user} view={view} setView={setView} theme={theme} setTheme={setTheme} refresh={nonce} refreshData={refresh} notify={notify} logout={logout} toast={toast} />;
 
   return <div className="app-shell" data-theme={theme}>
@@ -305,8 +311,8 @@ function NavItem({ label, icon: Icon, active, onClick }: { label: string; icon: 
   return <button className={'nav-item' + (active ? ' active' : '')} onClick={onClick}><Icon size={17} strokeWidth={1.8} /><span>{label}</span>{active && <span className="nav-indicator" />}</button>;
 }
 
-function Login({ portalRole, email, setEmail, password, setPassword, onSubmit }: {
-  portalRole: User['role']; email: string; setEmail: (value: string) => void; password: string; setPassword: (value: string) => void; onSubmit: (event: React.FormEvent) => void;
+function Login({ portalRole, email, setEmail, password, setPassword, onSubmit, toast }: {
+  portalRole: User['role']; email: string; setEmail: (value: string) => void; password: string; setPassword: (value: string) => void; onSubmit: (event: React.FormEvent) => void; toast: string;
 }) {
   return <main className="login-shell">
     <div className="login-aside">
@@ -323,6 +329,7 @@ function Login({ portalRole, email, setEmail, password, setPassword, onSubmit }:
         <button className="primary-button login-submit">{portalRole === 'member' ? '登录会员中心' : '登录管理后台'} <ArrowUpRight size={16} /></button>
         <div className="demo-hint"><ShieldCheck size={15} /><span>请使用当前环境配置的账户登录；密码不会预填或显示。</span></div>
       </form>
+      {toast && <div className="toast" role="status">{toast}</div>}
       <div className="login-panel-foot"><span>© 2026 迅连宝</span><span>仅用于本地开发与验证</span></div>
     </section>
   </main>;

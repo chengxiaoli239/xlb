@@ -93,6 +93,38 @@ describe('member sandbox purchase flow', () => {
     expect(container.textContent).not.toContain('会员演示：');
   });
 
+  it('shows a valid server request reference when member login fails', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    window.history.replaceState({}, '', '/account');
+    const requestId = 'a12b3456-7890-4abc-8def-0123456789ab';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith('/api/v1/auth/session')) return json(null);
+      if (path.endsWith('/api/v1/auth/csrf')) return json({ token: 'test-csrf-token' });
+      if (path.endsWith('/api/v1/auth/login')) {
+        return new Response(JSON.stringify({ error: { code: 'invalid_credentials', message: '登录失败' } }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', 'X-Request-Id': requestId },
+        });
+      }
+      return json(null);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const container = await render(<App />);
+    await settle();
+    await fireEvent(container.querySelector<HTMLInputElement>('input[type="email"]')!, 'input', {
+      value: 'member@example.test',
+    });
+    await fireEvent(container.querySelector<HTMLInputElement>('input[type="password"]')!, 'input', {
+      value: 'test-only-password',
+    });
+    await fireEvent(container.querySelector<HTMLFormElement>('.login-form')!, 'submit');
+    await settle();
+
+    expect(container.textContent).toContain(`服务请求编号 ${requestId}`);
+  });
+
   it('creates a test order and simulates payment without contacting a payment provider', async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     window.history.replaceState({}, '', '/account?view=plans');
