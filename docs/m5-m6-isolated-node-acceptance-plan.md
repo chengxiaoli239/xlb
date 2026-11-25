@@ -1,6 +1,7 @@
 # M5/M6 隔离节点验收计划
 
-- **本轮 AWS 登录后只读复核（2026-11-25）**：用户告知已重新 `aws login` 后，项目包装器的 `sts get-caller-identity --profile xlb-ops` 返回账号 `289069331089` 的 root 身份；紧接着 CloudFormation、EC2、EBS、ENI、安全组、Scheduler 与 SSM 只读查询均返回 `session expired`。因此当前实验资源状态仍未查明，本轮没有创建、删除、延长 TTL 或改动任何云资源。待会话可稳定读取服务 API 后，再串行进行获批范围内的只读盘点；真实会员 profile、节点身份/endpoint、mTLS 材料与匹配回执仍未提供。
+- **AWS 资源只读盘点（2026-11-25，us-west-2，获批隔离实验标签范围）**：`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 root principal。`cloudformation list-stacks` 显示所有 `xlb-lab-*` 与 `xlb-auto-*` 历史栈为 `DELETE_COMPLETE`，仅既有 `xlb-node-manager-access-usw2` 为 `CREATE_COMPLETE`。按 `ManagedBy=xlb-node-lab` 筛选 EC2、EBS、ENI、安全组、公网地址均为空；`xlb-lab-*` Scheduler 为空；`XlbLab*` IAM role/instance profile 为空；带 `ManagedBy` 标签的 SSM 托管实例数为 0。全部经项目包装器只读查询，没有创建、删除、延长 TTL 或修改云资源。该结果仅覆盖所列 XLB 实验资源筛选范围，不是全账号账单盘点。由于 11-21 M5/M6 synthetic live harness 已通过且没有新的协议变更，本轮未生成或执行云端 plan；真实 member profile、节点 endpoint/身份、生产用途 mTLS 材料与匹配回执仍未提供。
+- **较早 AWS 查询快照（2026-11-25）**：用户告知已重新 `aws login` 后，项目包装器的 STS 请求返回 root 身份，但紧接着的 CloudFormation、EC2、EBS、ENI、安全组、Scheduler 与 SSM 查询报 `session expired`。该较早错误在同日后续复核未重现；后续的有界盘点结果见本文件第一条。此较早查询期间没有创建、删除、延长 TTL 或改动任何云资源。
 
 - **当前 AWS 会话与资源状态（2026-11-24，只读复核）**：项目 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `arn:aws:iam::289069331089:root`，当前会话有效。us-west-2 活动 XLB CloudFormation 栈只有既有 `xlb-node-manager-access-usw2`；历史 `xlb-lab-*` 栈均为 `DELETE_COMPLETE`；按 `ManagedBy=xlb-node-lab` 查询的 EC2、EBS、ENI、安全组、公网地址、Scheduler 均无结果，SSM 托管实例查询为空。只读，无资源写入。11-21 合成 peer live harness 已通过，之后 peer-store/data-plane 没有协议变更，未为重复验收重建资源；真实 M6 member profile、节点 endpoint/身份及可注入 mTLS 材料仍未提供。没有匹配节点回执时不宣称会员数据面断流。
 
