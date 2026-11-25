@@ -441,6 +441,7 @@ func assertLiveDeviceProofAndRevocation(t *testing.T, config liveAcceptanceConfi
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 2048))
 	response.Body.Close()
+	usageBeforeRevocation := livePeerUsage(t, adminClient, config, first.identity.PeerID)
 	revocation := agent.RevokePeerRequest{
 		NodeID: config.nodeID, PeerID: first.identity.PeerID, RequestID: liveNonce(), Generation: first.identity.PeerGeneration + 1,
 	}
@@ -449,6 +450,18 @@ func assertLiveDeviceProofAndRevocation(t *testing.T, config liveAcceptanceConfi
 	if receipt.NodeID != config.nodeID || receipt.PeerID != first.identity.PeerID || receipt.RequestID != revocation.RequestID ||
 		receipt.ConfirmationStatus != "confirmed_test" || receipt.UploadBytes == 0 || receipt.DownloadBytes == 0 {
 		t.Fatalf("live revocation receipt did not include final node/peer/request/traffic: %+v", receipt)
+	}
+	usageAfterRevocation := livePeerUsage(t, adminClient, config, first.identity.PeerID)
+	if usageAfterRevocation.NodeID != config.nodeID || usageAfterRevocation.PeerID != first.identity.PeerID ||
+		usageAfterRevocation.Generation != revocation.Generation || usageAfterRevocation.Status != "revoked" {
+		t.Fatalf("post-revocation usage snapshot has mismatched identity or state: %+v", usageAfterRevocation)
+	}
+	if usageAfterRevocation.UploadBytes < usageBeforeRevocation.UploadBytes ||
+		usageAfterRevocation.DownloadBytes < usageBeforeRevocation.DownloadBytes {
+		t.Fatalf("cumulative traffic decreased across revocation: before=%+v after=%+v", usageBeforeRevocation, usageAfterRevocation)
+	}
+	if receipt.UploadBytes != usageAfterRevocation.UploadBytes || receipt.DownloadBytes != usageAfterRevocation.DownloadBytes {
+		t.Fatalf("revocation receipt traffic differs from final cumulative usage: receipt=%+v final=%+v", receipt, usageAfterRevocation)
 	}
 	_ = secure.Close()
 	_ = firstBridge.Close()
@@ -459,6 +472,29 @@ func assertLiveDeviceProofAndRevocation(t *testing.T, config liveAcceptanceConfi
 		t.Fatalf("revoked device reconnect returned HTTP %d; want authorization denial %d", blockedStatus, http.StatusForbidden)
 	}
 	assertLiveSessionCount(t, adminClient, config, 0)
+}
+
+func livePeerUsage(t *testing.T, client *http.Client, config liveAcceptanceConfig, peerID string) agent.PeerUsageSnapshot {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, strings.TrimSuffix(config.controlURL, "/")+"/v1/member-peers/"+url.PathEscape(peerID)+"/usage", nil)
+	if err != nil {
+		t.Fatal("build isolated node peer-usage request")
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal("read isolated node peer usage")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("isolated node peer-usage endpoint returned HTTP %d", response.StatusCode)
+	}
+	var envelope struct {
+		Data agent.PeerUsageSnapshot `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatal("decode isolated node peer-usage snapshot")
+	}
+	return envelope.Data
 }
 
 func liveRuntimeStatus(t *testing.T, client *http.Client, config liveAcceptanceConfig) liveRuntimeSnapshot {
