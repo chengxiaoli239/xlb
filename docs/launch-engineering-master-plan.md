@@ -21,7 +21,7 @@
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
 | M1–M2 产品与盘点 | PRD、边界、账号/节点/支付现状盘点已固化 | 随新实现继续维护，不代表发布审查完成 |
-| M3–M4 会员控制面 | Android Debug 登录、读取权益、设备 challenge 绑定；Laravel 设备、订阅和撤权 outbox 有本地测试 | member profile/真实节点授权、生产凭证和真实数据面尚未接通 |
+| M3–M4 会员控制面 | Android Debug 登录、读取权益、设备 challenge 绑定；Laravel 设备、订阅和撤权 outbox 有本地测试；订阅 profile 成功及 token 轮换/撤权后 404 均要求 `Cache-Control: no-store, private`，API Feature regression 已补齐 | member profile/真实节点授权、生产凭证和真实数据面尚未接通；cache header tests 不代替 CDN 配置审查或真实节点撤权回执 |
 | M5 / M7 隔离协议与回收 | 本地并发/额度内核测试；2026-11-21 获批隔离节点上合成 peer 并发、复用拒绝、独立 peer、撤权回执/最终流量测试通过；资源按计划回收核查 | 只证明限定 harness 与隔离节点；不能外推生产数据库、会员客户端或长期容量 |
 | M6 双身份与会员线路 | 合成 peer 隔离协议测试通过；ALT-AN00 与 VOG-AL10 当前安装均曾以 local/testing 沙箱完成登录和 P-256 challenge 绑定；两台足够，无需第三台 | 会员真机复制拒绝、真实 member profile 隧道、匹配会员撤权回执未完成。11-24 历史只读盘点曾确认实验标签资源无活动项；11-25 用户重新登录后，STS 身份查询成功，但紧接着 CloudFormation/EC2 等资源只读查询均报 session expired，当前资源状态未确认且没有云写入。待会话可稳定读取后再按获批范围只读盘点并审查计划。真实 member profile、节点身份/endpoint、生产用途 mTLS 材料和可核对回执仍是 M6 硬依赖 |
 | 支付适配器与本地沙箱账本 | provider-neutral 契约、签名/时间窗验签、重复及乱序决策、SQLite 事件账本、fulfillment/refund outbox 与 local/testing webhook/worker 已贯通；订单、权益、退款只在沙箱状态机处理。补偿失败保留权益并幂等重试已有回归；本轮新增 local/testing 每分钟处理两个 sandbox outbox 的调度注册，production 不注册；调度定向 3/3，Laravel 全套 260 passed、1 skipped、2,310 assertions | 未接任何真实商户/真实收单，不发生真实扣款或退款；真实商户 sandbox、回调契约、凭据及合规意见仍未到位。调度注册不证明 staging scheduler 常驻；离线代码不能代替真实支付/退款验收 |

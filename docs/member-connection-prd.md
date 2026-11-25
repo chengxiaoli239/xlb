@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **M4/Q1 轮换与撤权后旧 profile 错误响应不可缓存（2026-11-25，Laravel Feature）**：扩展 `SubscriptionProfileTest::test_rotation_and_revocation_apply_to_every_format_and_mode`，验证 token 轮换及撤权后旧订阅 URL 的 404 响应仍带 `Cache-Control: no-store, private`，防止共享缓存留存失效凭证结果。定向 suite 18 项（17 passed、1 existing skip、278 assertions）通过，Pint 通过；代码提交 `fdaedea`。这是对现有 `SubscriptionProfileService::privateResponse()` 缓存边界的回归保护，没有改变订阅或撤权状态机；也不构成真实节点断流回执。
+
 - **M9/Q2 Android 加密状态篡改后失败关闭（2026-11-25，专用 AVD）**：增加 AES-GCM 持久状态末字节篡改回归，确认 `SecureSessionStore` 不恢复旧 Cookie、匿名恢复同意、installation ID 或 recovery secret；随后恢复为新安装身份。专用 `xlb-m9-recovery` 新用例在完整 `test-anonymous-recovery-emulator.sh` 中通过，主隔离 instrumentation 30/30，相关 TUN/proof bridge/revoke 与 process-death 检查均随 harness 成功，Debug/AndroidTest/JVM/lint/APK 构建通过。仅验证本地 Keystore 加密状态认证失败路径，不证明硬件安全级别、生产账号或真实节点撤权。
 
 - **首发全局进度与模块分母复核（2026-11-25，主线与外部只读状态）**：上线总计划 §0.1.1 将首发锁定为 12 项等权交付门，已有 5 项退出证据、7 项未通过，进度 42%（只表示门项计数，不是工时/排期/上线概率）。模块子门：Android 2/3（67%，真实 member profile/双机节点回执未完成）、Web/API 与支付 1/2（50%，真实商户 sandbox/对账未完成）、Node Agent 1/2（50%，生产 runtime/真实回执未完成）、发布运维 1/3（33%，protected Environment/签名候选/staging 未完成）；Windows/macOS/iOS 不在当前首发分母。主线 `24dd1b9` 与 `origin/main` 同步，CI `45571571648` 全绿；GitHub Environment 数量为 0。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回账号身份，但后续 CloudFormation 只读列表报 `session expired`；资源现状未核实且没有云写入。12 项逐条证据与外部责任动作见[上线工程总体规划 §0.1.1–0.2.2](launch-engineering-master-plan.md)。
