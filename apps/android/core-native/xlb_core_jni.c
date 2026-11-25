@@ -7,6 +7,10 @@ extern char *XlbStartAndroidNodeAgentFixture(char *, int);
 extern void XlbStopAndroidNodeAgentFixture(void);
 extern char *XlbAndroidNodeAgentFixtureStatus(void);
 extern char *XlbRevokeAndroidNodeAgentFixturePeer(void);
+extern void XlbArmAndroidNodeAgentFixtureEchoGate(void);
+extern int XlbAwaitAndroidNodeAgentFixtureEchoGate(long long);
+extern void XlbReleaseAndroidNodeAgentFixtureEchoGate(void);
+extern int XlbAndroidNodeAgentFixtureEchoTargetDialCount(void);
 #endif
 extern void XlbInit(char *, int (*)(int));
 extern char *XlbLoad(char *, int);
@@ -210,6 +214,46 @@ JNIEXPORT jstring JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeRevokeNodeA
     return response;
 #else
     return (*env)->NewStringUTF(env, "{\"error\":\"fixture is unavailable\"}");
+#endif
+}
+
+JNIEXPORT void JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeArmNodeAgentFixtureEchoGate(
+    JNIEnv *env, jclass type) {
+    (void)env;
+    (void)type;
+#ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
+    XlbArmAndroidNodeAgentFixtureEchoGate();
+#endif
+}
+
+JNIEXPORT jboolean JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeAwaitNodeAgentFixtureEchoGate(
+    JNIEnv *env, jclass type, jlong timeout_millis) {
+    (void)type;
+#ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
+    return XlbAwaitAndroidNodeAgentFixtureEchoGate((long long)timeout_millis) == 1 ? JNI_TRUE : JNI_FALSE;
+#else
+    (void)timeout_millis;
+    return JNI_FALSE;
+#endif
+}
+
+JNIEXPORT void JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeReleaseNodeAgentFixtureEchoGate(
+    JNIEnv *env, jclass type) {
+    (void)env;
+    (void)type;
+#ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
+    XlbReleaseAndroidNodeAgentFixtureEchoGate();
+#endif
+}
+
+JNIEXPORT jint JNICALL Java_com_xlb_vpn_data_DeviceProofJni_nativeNodeAgentFixtureEchoTargetDialCount(
+    JNIEnv *env, jclass type) {
+    (void)env;
+    (void)type;
+#ifdef XLB_ANDROID_TEST_SIGNER_CALLBACK
+    return (jint)XlbAndroidNodeAgentFixtureEchoTargetDialCount();
+#else
+    return 0;
 #endif
 }
 #endif

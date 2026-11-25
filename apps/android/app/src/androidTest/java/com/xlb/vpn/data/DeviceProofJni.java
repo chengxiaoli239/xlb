@@ -1,6 +1,6 @@
 package com.xlb.vpn.data;
 
-/** Instrumentation-only signer callback contract; it is not connected to the VPN or bridge lifecycle. */
+/** JNI hooks for Android instrumentation-only signer, bridge, and isolated Agent fixtures. */
 public final class DeviceProofJni {
     static {
         System.loadLibrary("xlbcore");
@@ -33,6 +33,22 @@ public final class DeviceProofJni {
         return nativeRevokeNodeAgentFixturePeer();
     }
 
+    public static void armNodeAgentFixtureEchoGate() {
+        nativeArmNodeAgentFixtureEchoGate();
+    }
+
+    public static boolean awaitNodeAgentFixtureEchoGate(long timeoutMillis) {
+        return nativeAwaitNodeAgentFixtureEchoGate(timeoutMillis);
+    }
+
+    public static void releaseNodeAgentFixtureEchoGate() {
+        nativeReleaseNodeAgentFixtureEchoGate();
+    }
+
+    public static int nodeAgentFixtureEchoTargetDialCount() {
+        return nativeNodeAgentFixtureEchoTargetDialCount();
+    }
+
     private static native boolean nativeCompleteTls13MtlsHandshake(
             DigestSigner signer, byte[] publicKeySpkiDer);
 
@@ -43,4 +59,12 @@ public final class DeviceProofJni {
     private static native String nativeNodeAgentFixtureStatus();
 
     private static native String nativeRevokeNodeAgentFixturePeer();
+
+    private static native void nativeArmNodeAgentFixtureEchoGate();
+
+    private static native boolean nativeAwaitNodeAgentFixtureEchoGate(long timeoutMillis);
+
+    private static native void nativeReleaseNodeAgentFixtureEchoGate();
+
+    private static native int nativeNodeAgentFixtureEchoTargetDialCount();
 }

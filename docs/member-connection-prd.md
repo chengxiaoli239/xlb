@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **Android 会员隧道启动期间撤权/停止竞态（2026-11-25，专用 AVD + synthetic Node Agent）**：新增 Android instrumentation，在 proof bridge→Mihomo→系统 TUN 的隔离会员启动验证探针进入可控阻塞时，对合成 peer 撤权取得 `confirmed_test`，随后停止 service 并释放探针。验证启动 attempt 未发布 `CONNECTED`，已清除 member session、VPN route 和 route label，等待一个 health interval 后 Agent echo target dial count 仍为 1，证明该失败路径未启动运行期 health monitor。夹具在撤权 cancellation 时退出阻塞，避免测试本身卡住 Agent drain。完整 `test-anonymous-recovery-emulator.sh` 在显式 `emulator-5554` / `xlb-m9-recovery` 上退出码 0，主 instrumentation 报告 `OK (27 tests)`，并通过 Keystore/bridge、session、system TUN、grant/revocation 与 process-death 专项；`testDebugUnitTest lintDebug assembleDebug` 通过。只验证隔离 AVD、fake/local API 和合成 Node Agent 的服务生命周期，不代表真实会员节点、真实撤权回执或生产断流；生产 gate 保持关闭。
+
 - **M4 沙箱续费固定订阅回归主线集成（2026-11-25）**：提交 `80089cf` 已在主线 `main` 与 `origin/main` 同步；CI run `45536649412` 全部 jobs success，覆盖 PHP/Laravel、MySQL、PostgreSQL、Android、Web/API、Node Agent、构建和 SBOM provenance。该结果关闭本次离线续费回归阶段，不改变真实商户支付未接入、生产环境未放行的状态。下一工作仍按四象限选择首发关键路径中可独立验收的离线任务；外部负责人尚未提供期间继续推进离线工作。
 
 - **M4 沙箱续费保持固定订阅并追加权益（2026-11-25，主线 CI）**：复核 `SandboxPaymentTest::test_confirmed_renewal_reuses_the_existing_subscription_link` 与 `test_distinct_confirmed_orders_append_entitlements_and_reuse_one_subscription`，现有回归覆盖已创建订阅的续费仍返回相同订阅 ID/URL、数据库仍只有一条订阅，并验证多个已确认订单按前一段权益结束时间依次追加 grant。主线 CI `45535623303` 全部 jobs success，包含 Laravel tests。此证据只覆盖 local/testing 沙箱状态，不代表真实商户续费/支付/对账已验收；后续不重复这两个 happy-path，用新竞态或渠道契约驱动新增覆盖。

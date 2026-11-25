@@ -58,6 +58,13 @@ type androidNodeAgentFixtureResponse struct {
 	CAPEM    string `json:"ca_pem"`
 }
 
+type androidFixtureEchoGate struct {
+	entered     chan struct{}
+	release     chan struct{}
+	enteredOnce sync.Once
+	releaseOnce sync.Once
+}
+
 var androidNodeAgentFixture struct {
 	sync.Mutex
 	server     *httptest.Server
@@ -68,6 +75,8 @@ var androidNodeAgentFixture struct {
 	generation int
 	lastStatus int
 	lastBody   string
+	echoGate   *androidFixtureEchoGate
+	echoDials  int
 }
 
 //export XlbStartAndroidNodeAgentFixture
@@ -99,10 +108,17 @@ func XlbStartAndroidNodeAgentFixture(requestJSON *C.char, requestLength C.int) *
 func XlbStopAndroidNodeAgentFixture() {
 	androidNodeAgentFixture.Lock()
 	server := androidNodeAgentFixture.server
+	gate := androidNodeAgentFixture.echoGate
 	androidNodeAgentFixture.server = nil
 	androidNodeAgentFixture.store = nil
 	androidNodeAgentFixture.dataPlane = nil
+	androidNodeAgentFixture.echoGate = nil
 	androidNodeAgentFixture.Unlock()
+	if gate != nil {
+		gate.releaseOnce.Do(func() {
+			close(gate.release)
+		})
+	}
 	if server == nil {
 		return
 	}
@@ -115,6 +131,7 @@ func XlbAndroidNodeAgentFixtureStatus() *C.char {
 	status := androidNodeAgentFixture.lastStatus
 	body := androidNodeAgentFixture.lastBody
 	store := androidNodeAgentFixture.store
+	echoDials := androidNodeAgentFixture.echoDials
 	androidNodeAgentFixture.Unlock()
 	activeSessions := 0
 	if store != nil {
@@ -123,14 +140,67 @@ func XlbAndroidNodeAgentFixtureStatus() *C.char {
 		}
 	}
 	encoded, err := json.Marshal(map[string]any{
-		"status":          status,
-		"body":            body,
-		"active_sessions": activeSessions,
+		"status":            status,
+		"body":              body,
+		"active_sessions":   activeSessions,
+		"echo_target_dials": echoDials,
 	})
 	if err != nil {
 		return C.CString(`{"status":0,"body":""}`)
 	}
 	return C.CString(string(encoded))
+}
+
+//export XlbArmAndroidNodeAgentFixtureEchoGate
+func XlbArmAndroidNodeAgentFixtureEchoGate() {
+	androidNodeAgentFixture.Lock()
+	if androidNodeAgentFixture.echoGate != nil {
+		androidNodeAgentFixture.echoGate.releaseOnce.Do(func() {
+			close(androidNodeAgentFixture.echoGate.release)
+		})
+	}
+	androidNodeAgentFixture.echoGate = &androidFixtureEchoGate{
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	androidNodeAgentFixture.echoDials = 0
+	androidNodeAgentFixture.Unlock()
+}
+
+//export XlbAwaitAndroidNodeAgentFixtureEchoGate
+func XlbAwaitAndroidNodeAgentFixtureEchoGate(timeoutMillis int64) C.int {
+	androidNodeAgentFixture.Lock()
+	gate := androidNodeAgentFixture.echoGate
+	androidNodeAgentFixture.Unlock()
+	if gate == nil || timeoutMillis < 0 {
+		return 0
+	}
+	select {
+	case <-gate.entered:
+		return 1
+	case <-time.After(time.Duration(timeoutMillis) * time.Millisecond):
+		return 0
+	}
+}
+
+//export XlbReleaseAndroidNodeAgentFixtureEchoGate
+func XlbReleaseAndroidNodeAgentFixtureEchoGate() {
+	androidNodeAgentFixture.Lock()
+	gate := androidNodeAgentFixture.echoGate
+	androidNodeAgentFixture.echoGate = nil
+	androidNodeAgentFixture.Unlock()
+	if gate != nil {
+		gate.releaseOnce.Do(func() {
+			close(gate.release)
+		})
+	}
+}
+
+//export XlbAndroidNodeAgentFixtureEchoTargetDialCount
+func XlbAndroidNodeAgentFixtureEchoTargetDialCount() C.int {
+	androidNodeAgentFixture.Lock()
+	count := androidNodeAgentFixture.echoDials
+	androidNodeAgentFixture.Unlock()
+	return C.int(count)
 }
 
 //export XlbRevokeAndroidNodeAgentFixturePeer
@@ -224,6 +294,7 @@ func startAndroidNodeAgentFixture(request androidNodeAgentFixtureRequest) (andro
 	androidNodeAgentFixture.generation = request.Generation
 	androidNodeAgentFixture.lastStatus = 0
 	androidNodeAgentFixture.lastBody = ""
+	androidNodeAgentFixture.echoDials = 0
 	return androidNodeAgentFixtureResponse{
 		Endpoint: "https://" + server.Listener.Addr().String(), CAPEM: caPEM,
 	}, nil
@@ -265,7 +336,21 @@ func (writer *androidFixtureResponseWriter) Flush() {
 
 type androidFixtureEchoTargetDialer struct{}
 
-func (androidFixtureEchoTargetDialer) DialTarget(context.Context, string, uint16) (net.Conn, error) {
+func (androidFixtureEchoTargetDialer) DialTarget(ctx context.Context, _ string, _ uint16) (net.Conn, error) {
+	androidNodeAgentFixture.Lock()
+	gate := androidNodeAgentFixture.echoGate
+	androidNodeAgentFixture.echoDials++
+	androidNodeAgentFixture.Unlock()
+	if gate != nil {
+		gate.enteredOnce.Do(func() {
+			close(gate.entered)
+		})
+		select {
+		case <-gate.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	client, server := net.Pipe()
 	go func() {
 		defer server.Close()

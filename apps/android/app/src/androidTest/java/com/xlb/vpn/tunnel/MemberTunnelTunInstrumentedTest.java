@@ -143,6 +143,93 @@ public final class MemberTunnelTunInstrumentedTest {
         }
     }
 
+    @Test
+    public void revocationDuringMemberStartupDoesNotStartHealthMonitorOrPublishConnected() throws Exception {
+        requireDisposableEmulator();
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        String installationId = MemberTunnelGrantAvdFixture.newInstallationId();
+        String publicKey = MemberTunnelGrantAvdFixture.publicKey(installationId);
+        File peerStateDirectory = new File(context.getCacheDir(), "isolated-node-agent-" + UUID.randomUUID());
+        assertTrue(peerStateDirectory.mkdirs());
+        JSONObject peerRequest = new JSONObject()
+                .put("node_id", MemberTunnelGrantAvdFixture.NODE_ID)
+                .put("peer_id", MemberTunnelGrantAvdFixture.PEER_ID)
+                .put("entitlement_id", "81000000-0000-4000-8000-000000000004")
+                .put("request_id", "81000000-0000-4000-8000-000000000005")
+                .put("generation", MemberTunnelGrantAvdFixture.PEER_GENERATION)
+                .put("device_id", MemberTunnelGrantAvdFixture.DEVICE_ID)
+                .put("device_name", "Disposable AVD startup revocation")
+                .put("device_public_key", publicKey)
+                .put("device_key_fingerprint", MemberTunnelGrantAvdFixture.publicKeyFingerprint(publicKey))
+                .put("device_binding_generation", MemberTunnelGrantAvdFixture.DEVICE_GENERATION)
+                .put("peer_generation", MemberTunnelGrantAvdFixture.PEER_GENERATION)
+                .put("device_generation", MemberTunnelGrantAvdFixture.DEVICE_GENERATION)
+                .put("expires_at", Instant.now().plus(1, ChronoUnit.HOURS).toString())
+                .put("credential", "isolated-test-credential")
+                .put("state_path", new File(peerStateDirectory, "peer-store.json").getAbsolutePath());
+
+        AtomicInteger connectedStates = new AtomicInteger();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context receiverContext, Intent intent) {
+                if (XlbVpnService.STATE_CONNECTED.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                    connectedStates.incrementAndGet();
+                }
+            }
+        };
+        registerReceiver(context, receiver);
+        long handoffId = 0;
+        boolean serviceStarted = false;
+        try {
+            JSONObject node = new JSONObject(DeviceProofJni.startNodeAgentFixture(peerRequest.toString()));
+            assertFalse("isolated Node Agent fixture did not start", node.has("error"));
+            MemberTunnelGrant grant = MemberTunnelGrantAvdFixture.createGrant(installationId, publicKey,
+                    node.getString("endpoint"), node.getString("ca_pem"));
+            handoffId = MemberTunnelGrantStore.publish(grant);
+            requestVpnPermission(context);
+            DeviceProofJni.armNodeAgentFixtureEchoGate();
+
+            Intent startIntent = new Intent(context, XlbVpnService.class)
+                    .setAction(XlbVpnService.ACTION_START_ISOLATED_MEMBER_TEST)
+                    .putExtra(XlbVpnService.EXTRA_MEMBER_GRANT_HANDOFF_ID, handoffId);
+            ComponentName started = startVpnService(context, startIntent);
+            assertNotNull("VPN service did not start", started);
+            serviceStarted = true;
+
+            assertTrue("member startup did not reach its blocked route probe",
+                    DeviceProofJni.awaitNodeAgentFixtureEchoGate(TimeUnit.SECONDS.toMillis(10)));
+            assertEquals("startup probe did not enter the isolated peer exactly once", 1,
+                    DeviceProofJni.nodeAgentFixtureEchoTargetDialCount());
+
+            JSONObject receipt = new JSONObject(DeviceProofJni.revokeNodeAgentFixturePeer());
+            assertFalse("isolated Node Agent did not return a revocation receipt", receipt.has("error"));
+            assertEquals("confirmed_test", receipt.getString("confirmation_status"));
+
+            startVpnService(context, new Intent(context, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
+            DeviceProofJni.releaseNodeAgentFixtureEchoGate();
+            awaitVpnStopped(context, TimeUnit.SECONDS.toMillis(10));
+            assertEquals("revoked startup published a connected state", 0, connectedStates.get());
+            assertFalse("revoked startup retained a member session", XlbVpnService.currentTunnelIsMember());
+            assertEquals("revoked startup retained its VPN route", "", XlbVpnService.currentRouteName());
+
+            Thread.sleep(1_250);
+            assertEquals("startup incorrectly installed a health monitor after its attempt was revoked", 1,
+                    DeviceProofJni.nodeAgentFixtureEchoTargetDialCount());
+        } finally {
+            DeviceProofJni.releaseNodeAgentFixtureEchoGate();
+            if (serviceStarted) {
+                startVpnService(context, new Intent(context, XlbVpnService.class).setAction(XlbVpnService.ACTION_STOP));
+                awaitVpnStopped(context, TimeUnit.SECONDS.toMillis(10));
+            } else if (handoffId != 0) {
+                MemberTunnelGrantStore.clear();
+            }
+            context.unregisterReceiver(receiver);
+            DeviceProofJni.stopNodeAgentFixture();
+            MemberTunnelGrantAvdFixture.deleteInstallationKey(installationId);
+            deleteRecursively(peerStateDirectory);
+        }
+    }
+
     private static void requestVpnPermission(Context context) throws Exception {
         Intent approval = VpnService.prepare(context);
         if (approval == null) return;
