@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **主仓临时 Playwright 产物忽略规则（2026-11-25）**：根 `.gitignore` 新增 `.playwright-cli/` 与 `/output/` 两条路径规则；`git check-ignore` 确认两处现有目录均由预期规则忽略，目录与文件内容保留在本机，不进入 Git 状态或提交。该仓库状态整理不改变首发放行门计数。
+
 - **M9/Q2 Android Keystore 密钥丢失后的会员状态失败关闭（2026-11-25，专用 `xlb-m9-recovery` AVD）**：新增 instrumentation 回归，先加密保存 installation ID、匿名恢复密钥、恢复同意和会员 Cookie，再模拟恢复 SharedPreferences 但 Android Keystore AES alias 丢失；旧 Cookie/恢复授权不可恢复，安装身份与恢复密钥重新生成。定向测试 1/1 通过；`test-anonymous-recovery-emulator.sh` 完整隔离 harness 退出码 0，Android JVM、lint、Debug/AndroidTest APK build 通过。Android 备份配置同时核实为 `allowBackup=false` 且云备份/设备迁移排除应用 root 数据。本项只验证 AVD 上丢失密钥时本地状态失败关闭，不证明 Android 系统备份实现、真机恢复、生产会员连接或真实节点撤权。
 - **首发全局进度与 AWS 隔离资源盘点（2026-11-25）**：本轮开始前 `main` 与 `origin/main` 同步于 `3a6c6b8`，整仓 CI `45581869634` 全绿；首发放行门仍为 5/12（42%），Android 2/3、Web/API 与支付 1/2、Node Agent 1/2、发布运维 1/3。GitHub protected Environment 仍为 0。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 AWS root principal。随后在 `us-west-2` 完成 XLB 隔离实验资源范围的只读盘点：所有 `xlb-lab-*`/`xlb-auto-*` 历史栈均为 `DELETE_COMPLETE`，只有既有 `xlb-node-manager-access-usw2` 为 `CREATE_COMPLETE`；隔离标签 EC2/EBS/ENI/安全组/EIP、`xlb-lab-*` 调度器、`XlbLab*` IAM roles/profiles 和匹配 SSM 节点均为空。CloudFormation 列表无后续页。本轮没有云写入；结果不是全账号账单盘点。真实 member profile、节点身份/endpoint/mTLS 与匹配回执仍缺，因没有新的协议变更未创建实验节点。下一步继续等节点/商户/合规/签名环境与 staging 责任人，并推进不依赖这些输入的工作。
 
