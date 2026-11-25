@@ -103,6 +103,26 @@ public final class SecureSessionStoreInstrumentedTest {
     }
 
     @Test
+    public void testRecoverySecretAndSessionCookieAreNotStoredAsPlaintext() {
+        SecureSessionStore store = new SecureSessionStore(targetContext());
+        String recoverySecret = store.anonymousRecoverySecret();
+        String sessionCookie = "test-session-cookie-never-store-in-plaintext";
+        store.recordAnonymousRecoveryConsent();
+        store.updateCookie("xlb_session", sessionCookie, false);
+
+        Map<String, ?> persistedPreferences = targetContext()
+                .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .getAll();
+
+        assertEquals(1, persistedPreferences.size());
+        assertTrue(persistedPreferences.containsKey("encrypted_state"));
+        Object encryptedState = persistedPreferences.get("encrypted_state");
+        assertTrue(encryptedState instanceof String);
+        assertFalse(((String) encryptedState).contains(recoverySecret));
+        assertFalse(((String) encryptedState).contains(sessionCookie));
+    }
+
+    @Test
     public void testAnonymousAccountRegistrationLogoutAndExplicitRecovery() throws Exception {
         requireIsolatedApiOptIn();
 
