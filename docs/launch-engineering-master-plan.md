@@ -40,7 +40,7 @@
 | 2 | local/testing 网站/API 会员、权益、购买、退款链路 | 已完成 | Laravel 与 Web 测试及本地浏览器沙箱联验；不是真实支付 |
 | 3 | 两台 Android 当前安装的独立身份与 P-256 绑定 | 已完成 | ALT-AN00、VOG-AL10 沙箱身份记录；无需第三台手机 |
 | 4 | Android Keystore→proof bridge→Mihomo→系统 TUN 隔离链 | 已完成 | 专用 AVD、fake member API、合成 Agent；不外推真实节点 |
-| 5 | 首发代码矩阵、制品来源校验与候选审核准备 | 已完成 | 主线 `099ccfd` CI `45570424762` 全绿；候选 commit 和 provenance 检查已有自动化/审核模板 |
+| 5 | 首发代码矩阵、制品来源校验与候选审核准备 | 已完成 | 主线 `b03af90` CI `45575660012` 全绿；候选 commit 和 provenance 检查已有自动化/审核模板 |
 | 6 | 生产 member profile 与可运行 Node Agent/mTLS 接线 | 未完成 | 生产 Agent 仍拒绝启动；真实 endpoint/CA/身份注入材料缺失 |
 | 7 | 两台真机真实会员连接与复制身份拒绝 | 未完成 | 需要真实会员授权与隔离节点；本地安装身份不等于在线数据面验收 |
 | 8 | 匹配真实节点的撤权回执和最终流量单调证据 | 未完成 | 需要 `node/peer/request/generation` 匹配回执；不得以 `confirmed_test` 替代 |
@@ -83,7 +83,7 @@
 
 本计划按知识库的四象限规则管理 Codex、DeepSeek Harness 和 WorkBuddy 的开发任务：四象限决定先后，WBS 将工作拆成通常不超过两小时的可验收单元；AI 主动编码时间、CI/设备运行时间、外部等待分别记录。每轮以 PRD 最新进度和 `main`/`origin/main` 为基准，不以某个旧 worktree 的分支差异代替主线状态。
 
-**2026-11-25 本轮复核**：主线 `main` 与 `origin/main` 同步于 `24dd1b9`；Android 会话持久化回归的代码 CI `45570424762` 与后续进度快照 CI `45571571648` 均全绿。§0.1.1 固定 12 个首发交付门，5 项已有证据、7 项未通过，计数 42%；此数是等权交付门比例，不代表投入时间、剩余工期或上线概率。模块子门为 Android 2/3（67%，生产数据面、双机真实回执仍缺）、Web/API 与支付 1/2（50%，商户渠道/对账未验）、Node Agent 1/2（50%，生产 runtime/真实回执未验）、发布运维 1/3（33%，受保护签名候选和 staging 未验）；Windows/macOS/iOS 不在当前首发分母。GitHub `android-release-candidate` Environment 数量为 0。`xlb-ops` STS 身份请求成功，但后续 CloudFormation 资源只读请求返回 `session expired`；当前 AWS 资源状态未知，未做云写入。最大 Q1 仍是 Android 生产 member profile/节点数据面、双设备复制拒绝与匹配撤权回执；节点材料、商户 sandbox、合规书面意见、签名 Environment 和 staging/回滚负责人均未落实。项目管理四象限通用规则已记入知识库，本计划保留逐模块退出证据、可并行边界与外部责任项。
+**2026-11-25 本轮复核**：主线 `main` 与 `origin/main` 同步于 `b03af90`，最新 CI `45575660012` 全绿。§0.1.1 固定 12 个首发交付门，5 项已有证据、7 项未通过，计数 42%；此数是等权交付门比例，不代表投入时间、剩余工期或上线概率。模块子门为 Android 2/3（67%，生产数据面、双机真实回执仍缺）、Web/API 与支付 1/2（50%，商户渠道/对账未验）、Node Agent 1/2（50%，生产 runtime/真实回执未验）、发布运维 1/3（33%，受保护签名候选和 staging 未验）；Windows/macOS/iOS 不在当前首发分母。GitHub `android-release-candidate` Environment 数量为 0。当前经 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 仅核实到 root principal，本轮未调用云资源 API，AWS 资源状态未知；此前“session expired”状态已变化，不能沿用为当前事实。最大 Q1 仍是 Android 生产 member profile/节点数据面、双设备复制拒绝与匹配撤权回执；节点材料、商户 sandbox、合规书面意见、签名 Environment 和 staging/回滚负责人均未落实。项目管理四象限通用规则已记入知识库，本计划保留逐模块退出证据、可并行边界与外部责任项。
 
 | 优先级/工作流 | 当前证据与主要工作量 | AI 主动投入估计 | 依赖与安排 | 下一项可验收结果 |
 | --- | --- | --- | --- | --- |

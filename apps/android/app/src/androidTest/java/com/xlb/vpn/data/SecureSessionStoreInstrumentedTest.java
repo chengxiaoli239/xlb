@@ -158,6 +158,26 @@ public final class SecureSessionStoreInstrumentedTest {
     }
 
     @Test
+    public void testMissingKeystoreKeyCannotRestoreBackedUpSessionState() throws Exception {
+        SecureSessionStore store = new SecureSessionStore(targetContext());
+        String oldInstallationId = store.installationId();
+        String oldRecoverySecret = store.anonymousRecoverySecret();
+        store.recordAnonymousRecoveryConsent();
+        store.updateCookie("xlb_session", "restored-without-keystore-key", false);
+
+        java.security.KeyStore keyStore = java.security.KeyStore.getInstance("AndroidKeyStore");
+        keyStore.load(null);
+        assertTrue("session encryption key was not created", keyStore.containsAlias("xlb-session-aes-v1"));
+        keyStore.deleteEntry("xlb-session-aes-v1");
+
+        SecureSessionStore restoredStore = new SecureSessionStore(targetContext());
+        assertEquals("", restoredStore.cookieHeader());
+        assertFalse(restoredStore.hasAnonymousRecoveryConsent());
+        assertFalse(oldInstallationId.equals(restoredStore.installationId()));
+        assertFalse(oldRecoverySecret.equals(restoredStore.anonymousRecoverySecret()));
+    }
+
+    @Test
     public void testAnonymousAccountRegistrationLogoutAndExplicitRecovery() throws Exception {
         requireIsolatedApiOptIn();
 

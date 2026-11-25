@@ -4,6 +4,9 @@
 
 ## 开发进度（2026-11-25）
 
+- **M9/Q2 Android Keystore 密钥丢失后的会员状态失败关闭（2026-11-25，专用 `xlb-m9-recovery` AVD）**：新增 instrumentation 回归，先加密保存 installation ID、匿名恢复密钥、恢复同意和会员 Cookie，再模拟恢复 SharedPreferences 但 Android Keystore AES alias 丢失；旧 Cookie/恢复授权不可恢复，安装身份与恢复密钥重新生成。定向测试 1/1 通过；`test-anonymous-recovery-emulator.sh` 完整隔离 harness 退出码 0，Android JVM、lint、Debug/AndroidTest APK build 通过。Android 备份配置同时核实为 `allowBackup=false` 且云备份/设备迁移排除应用 root 数据。本项只验证 AVD 上丢失密钥时本地状态失败关闭，不证明 Android 系统备份实现、真机恢复、生产会员连接或真实节点撤权。
+- **首发全局进度与外部身份复核（2026-11-25）**：主仓 `main` 与 `origin/main` 同步于 `b03af90`，最新主线 CI `45575660012` 全绿；首发放行门仍为 5/12（42%），Android 2/3、Web/API 与支付 1/2、Node Agent 1/2、发布运维 1/3。GitHub protected Environment 仍为 0。经 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 只读检查，当前 profile 返回 AWS root principal；本轮未调用云资源 API，资源状态仍未知。该身份状态与此前“STS 过期”记录不同，云端盘点和任何写操作暂停核清身份期间；继续推进离线任务。下一阶段优先处理真实节点/会员授权材料到位前可验的 Android/API 离线缺口，并同步等候节点、商户、合规、签名环境与 staging 责任人。
+
 - **M4/Q1 轮换与撤权后旧 profile 错误响应不可缓存（2026-11-25，Laravel Feature）**：扩展 `SubscriptionProfileTest::test_rotation_and_revocation_apply_to_every_format_and_mode`，验证 token 轮换及撤权后旧订阅 URL 的 404 响应仍带 `Cache-Control: no-store, private`，防止共享缓存留存失效凭证结果。定向 suite 18 项（17 passed、1 existing skip、278 assertions）通过，Pint 通过；代码提交 `fdaedea`。这是对现有 `SubscriptionProfileService::privateResponse()` 缓存边界的回归保护，没有改变订阅或撤权状态机；也不构成真实节点断流回执。
 
 - **M9/Q2 Android 加密状态篡改后失败关闭（2026-11-25，专用 AVD）**：增加 AES-GCM 持久状态末字节篡改回归，确认 `SecureSessionStore` 不恢复旧 Cookie、匿名恢复同意、installation ID 或 recovery secret；随后恢复为新安装身份。专用 `xlb-m9-recovery` 新用例在完整 `test-anonymous-recovery-emulator.sh` 中通过，主隔离 instrumentation 30/30，相关 TUN/proof bridge/revoke 与 process-death 检查均随 harness 成功，Debug/AndroidTest/JVM/lint/APK 构建通过。仅验证本地 Keystore 加密状态认证失败路径，不证明硬件安全级别、生产账号或真实节点撤权。
