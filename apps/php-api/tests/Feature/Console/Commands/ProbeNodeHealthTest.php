@@ -156,4 +156,116 @@ class ProbeNodeHealthTest extends TestCase
 
         $this->assertSame(['node-test-1', 'node-test-2'], $driver->nodeIds);
     }
+
+    public function test_probe_batches_rotate_to_nodes_with_the_oldest_or_missing_attempt(): void
+    {
+        $this->seed();
+        $secondNode = (array) DB::table('nodes')->where('id', 'node-test-1')->first();
+        $secondNode['id'] = 'node-test-2';
+        $secondNode['name'] = '演示节点 02';
+        DB::table('nodes')->insert($secondNode);
+
+        config(['node_health_probe.enabled' => true, 'node_health_probe.batch_size' => 1]);
+        $driver = new class implements NodeHealthProbeDriver
+        {
+            /** @var list<string> */
+            public array $nodeIds = [];
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                $this->nodeIds[] = $nodeId;
+
+                return new NodeHealthProbeResult(
+                    true,
+                    new DateTimeImmutable('2026-11-25T00:00:'.str_pad((string) (count($this->nodeIds) * 15), 2, '0', STR_PAD_LEFT).'Z'),
+                    latencyMs: 25,
+                );
+            }
+        };
+        $this->app->instance(NodeHealthProbeDriver::class, $driver);
+
+        foreach ([1, 2, 3] as $_) {
+            $this->artisan('nodes:probe-health')
+                ->expectsOutputToContain('不构成节点连接或会员隧道验收')
+                ->assertExitCode(0);
+        }
+
+        $this->assertSame(['node-test-1', 'node-test-2', 'node-test-1'], $driver->nodeIds);
+    }
+
+    public function test_stale_probe_results_do_not_keep_one_node_at_the_front_of_the_batch(): void
+    {
+        $this->seed();
+        $secondNode = (array) DB::table('nodes')->where('id', 'node-test-1')->first();
+        $secondNode['id'] = 'node-test-2';
+        $secondNode['name'] = '演示节点 02';
+        DB::table('nodes')->insert($secondNode);
+
+        $staleAt = new DateTimeImmutable(now()->utc()->subMinute()->format(DATE_ATOM));
+        $storedProbeAt = now()->utc()->addMinute()->format('Y-m-d\\TH:i:s.u\\Z');
+        DB::table('node_health_probe_states')->insert([
+            'node_id' => 'node-test-1',
+            'status' => 'healthy',
+            'failure_streak' => 0,
+            'success_streak' => 1,
+            'last_probe_at' => $storedProbeAt,
+        ]);
+
+        config(['node_health_probe.enabled' => true, 'node_health_probe.batch_size' => 1]);
+        $driver = new class($staleAt) implements NodeHealthProbeDriver
+        {
+            /** @var list<string> */
+            public array $nodeIds = [];
+
+            public function __construct(private readonly DateTimeImmutable $staleAt) {}
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                $this->nodeIds[] = $nodeId;
+
+                return new NodeHealthProbeResult(true, $this->staleAt, latencyMs: 25);
+            }
+        };
+        $this->app->instance(NodeHealthProbeDriver::class, $driver);
+
+        foreach ([1, 2, 3] as $_) {
+            $this->artisan('nodes:probe-health')
+                ->expectsOutputToContain('不构成节点连接或会员隧道验收')
+                ->assertExitCode(0);
+        }
+
+        $this->assertSame(['node-test-1', 'node-test-2', 'node-test-1'], $driver->nodeIds);
+        $attempts = DB::table('node_health_probe_attempts')->orderBy('node_id')->pluck('last_attempted_at', 'node_id');
+        $this->assertSame(['node-test-1', 'node-test-2'], $attempts->keys()->all());
+        $this->assertMatchesRegularExpression('/Z$/', $attempts->get('node-test-1'));
+        $this->assertSame(
+            $storedProbeAt,
+            DB::table('node_health_probe_states')->where('node_id', 'node-test-1')->value('last_probe_at'),
+        );
+    }
+
+    public function test_explicit_probe_batch_larger_than_limit_fails_without_partial_probes(): void
+    {
+        $this->seed();
+        config(['node_health_probe.enabled' => true, 'node_health_probe.batch_size' => 1]);
+        $driver = new class implements NodeHealthProbeDriver
+        {
+            public int $calls = 0;
+
+            public function probe(string $nodeId): NodeHealthProbeResult
+            {
+                $this->calls++;
+
+                return new NodeHealthProbeResult(true, new DateTimeImmutable('2026-11-25T00:00:00Z'));
+            }
+        };
+        $this->app->instance(NodeHealthProbeDriver::class, $driver);
+
+        $this->artisan('nodes:probe-health', ['--node' => ['node-test-1', 'node-test-2']])
+            ->expectsOutputToContain('超过单批上限')
+            ->assertExitCode(1);
+
+        $this->assertSame(0, $driver->calls);
+        $this->assertDatabaseCount('node_health_probe_states', 0);
+    }
 }

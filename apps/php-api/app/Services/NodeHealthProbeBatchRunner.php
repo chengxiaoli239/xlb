@@ -12,7 +12,7 @@ class NodeHealthProbeBatchRunner
      * @param  iterable<string>  $nodeIds
      * @return array<string, NodeHealthProbeAssessment>
      */
-    public function run(iterable $nodeIds): array
+    public function run(iterable $nodeIds, ?callable $onAttempt = null): array
     {
         $assessments = [];
         foreach ($nodeIds as $nodeId) {
@@ -23,6 +23,10 @@ class NodeHealthProbeBatchRunner
             $nodeId = trim($nodeId);
             if (array_key_exists($nodeId, $assessments)) {
                 continue;
+            }
+
+            if ($onAttempt !== null) {
+                $onAttempt($nodeId);
             }
 
             $assessments[$nodeId] = $this->coordinator->probe($nodeId);
