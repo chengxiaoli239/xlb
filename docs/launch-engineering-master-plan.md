@@ -52,7 +52,7 @@
 
 本计划按知识库的四象限规则管理 Codex、DeepSeek Harness 和 WorkBuddy 的开发任务：四象限决定先后，WBS 将工作拆成通常不超过两小时的可验收单元；AI 主动编码时间、CI/设备运行时间、外部等待分别记录。每轮以 PRD 最新进度和 `main`/`origin/main` 为基准，不以某个旧 worktree 的分支差异代替主线状态。
 
-**2026-11-25 本轮复核**：最新主线 `main` 与 `origin/main` 同步于 `5802a79`，CI `45548542173` 全部 jobs success，覆盖 Android、PHP/MySQL/PostgreSQL、Web/API、Node Agent、容器及 SBOM provenance。用户报告的“2 天 12 小时”按日历耗时管理，不换算成 AI 主动开发工时；全局四象限规则及跨 Codex、DeepSeek Harness、WorkBuddy 的规划要求已记录在知识库 `10-全局/规范/AI项目四象限与持续推进.md`，本节维护具体 Q1–Q4、估时、并行边界与验收证据。当前 Q1 最大工作量仍是 Android 真实会员授权/节点数据面/双设备与撤权回执闭环，估时只能在真实接口材料到位后收窄；签名候选/staging 与商户/合规工作可分泳道并行，必须由对应负责人提供受控环境、契约和书面意见。用户表示稍后提供外部放行负责人；在其到位前继续推进离线 Q2，不重复已由 CI 关闭的 happy-path。`xlb-ops` 本轮只读身份检查返回 session expired，未查询或修改 AWS 资源。
+**2026-11-25 本轮复核**：最新主线 `main` 与 `origin/main` 同步于 `5e6c299`，代码 CI `45556194672` 全部 jobs success，覆盖 Android、PHP/MySQL/PostgreSQL、Web/API、Node Agent、容器和 SBOM provenance。此后进度文档提交也已推送。请求诊断已覆盖 PHP 生成 HTTP request ID、Web/Android错误提示和 Android 节点操作编号；它们仍不替代真实节点遥测或生产运行证据。用户报告的“2 天 12 小时”按日历耗时管理，不换算成 AI 主动开发工时；全局四象限规则及跨 Codex、DeepSeek Harness、WorkBuddy 的规划要求已记录在知识库 `10-全局/规范/AI项目四象限与持续推进.md`，本节维护具体 Q1–Q4、估时、并行边界与验收证据。当前 Q1 最大工作量仍是 Android 真实会员授权/节点数据面/双设备与撤权回执闭环，估时只能在真实接口材料到位后收窄；签名候选/staging 与商户/合规工作可分泳道并行，必须由对应负责人提供受控环境、契约和书面意见。用户表示稍后提供外部放行负责人；在其到位前继续推进离线 Q2，不重复已由 CI 关闭的 happy-path。`xlb-ops` 本轮只读身份检查返回 session expired，未查询或修改 AWS 资源。
 
 | 优先级/工作流 | 当前证据与主要工作量 | AI 主动投入估计 | 依赖与安排 | 下一项可验收结果 |
 | --- | --- | --- | --- | --- |
@@ -95,7 +95,7 @@
 
 **M11 外部签名配置复查（2026-11-24，只读 GitHub 元数据）**：本轮再次查询 repository environments 与 Actions variables，均为空（Environment `total_count=0`、variables `total_count=0`）；没有读取 secrets、创建 Environment 或发起候选 workflow。`android-release-candidate` 仍需仓库管理员设置 main-only 部署规则与审核者，并由凭据负责人通过受控通道配置正式签名/API origin 后，才可进行审批后的手动候选构建。
 
-本轮只读盘点发现 39 个 worktree。该盘点以 `2918b4c` 为基线；此后请求关联阶段已分别提交到 `0aa1f10`、`4f3de03`、`da9d2b6`，最新主线 CI `45553204296` 全部 jobs success，`main` 与 `origin/main` 同步。逐分支以 `git cherry -v main <branch>` 比较 patch 等价性后，绝大多数领先提交已在主线有等效补丁；少量非等效提交逐项核对如下：
+本轮只读盘点发现 39 个 worktree。该盘点以 `2918b4c` 为基线；此后请求诊断与节点操作编号阶段已分别提交到 `0aa1f10`、`4f3de03`、`da9d2b6`、`5e6c299`，对应代码 CI `45551133373`、`45552121951`、`45553204296`、`45556194672` 全部 jobs success，`main` 与 `origin/main` 继续同步。逐分支以 `git cherry -v main <branch>` 比较 patch 等价性后，绝大多数领先提交已在主线有等效补丁；少量非等效提交逐项核对如下：
 
 | 分支 | 独有 patch | 复核结果 |
 | --- | --- | --- |
