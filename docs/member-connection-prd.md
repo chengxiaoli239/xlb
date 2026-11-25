@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **M11/Q1 候选 manifest 来源 commit 强制比对（2026-11-25，主线与 hosted CI）**：`verify_artifact_manifest.py` 新增 `--expected-commit`，拒绝无效 commit 或 manifest source commit 与审阅目标不一致；Android signed release candidate workflow 将 `GITHUB_SHA` 作为预期值传入，不匹配时在生成候选 attestation 前失败。正例、错配和非法输入回归均通过；manifest 定向测试 10/10，`ops` 全套 66/66，主线 CI `45562668654` 全部 jobs success。仍未配置 `android-release-candidate` Environment 或正式签名材料，本阶段不生成签名候选，也不代表发布放行。
+
 - **PHP PostgreSQL 16 设备移除回归稳定性（2026-11-25，主线与 hosted CI）**：修正 `MemberDeviceApiTest` 将数据库时间与测试执行时的当前时间按 ISO 字符串精确比较导致的跨秒误报，改为分别断言设备仍为 `registered` 且移除请求时间已持久化。定向设备 API 19/19、250 assertions，Pint 与 diff check 通过；提交 `b99e8e4` 的主线 CI `45557900909` 全部 jobs success，含 PostgreSQL 16、MySQL 8.4、Android、Web/API、Node Agent、容器构建与 SBOM provenance。此为测试健壮性修复，没有改变设备移除或撤权状态机，也不构成真实节点撤权回执。
 
 - **Android 节点操作编号可见化（2026-11-25，本机 PHP + Android AVD）**：设备 challenge 授权响应在存在 peer 时返回 `node_operation_id`，复用持久 outbox/Node Agent 的稳定操作 `request_id`；Android 仅接受 UUIDv4 并在连接中心显示，不把编号当作设备凭证或 grant 能力。ProvisioningService 定向与会员设备 API 测试共 27/27、358 assertions，Laravel 全套 274 passed、1 skipped、2,441 assertions，Pint 通过；Android JVM/lint/AndroidTest 编译/Debug APK 构建通过，专用 `xlb-m9-recovery` AVD 的 API grant→TUN→撤权主测试 1/1 通过，完整相关 7 项 instrumentation class 6 passed、1 项因 AVD 已有 VPN consent 跳过。此操作 ID 可对照现有 Agent 回执，但仍未把入口 HTTP `X-Request-Id` 映射到异步 outbox、没有持久故障事件或生产 telemetry；未证明真实节点稳定或撤权断流。

@@ -117,7 +117,7 @@
 | 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | `main@4d7f514` 的 hosted CI `45505126826` 全部 jobs success；其中 PHP 严格设备名额定向回归基于 `158d93f`。正式候选冻结仍须绑定审核/审批记录 |
 | 签名权限 | `android-release-candidate` Environment 存在、仅允许 main、设置人工审核者；签名 secrets 和 approved API origin 由负责人经受控通道配置 | 2026-11-25 GitHub 只读 API 返回 Environment 数量为 0；未查询 secrets、未创建或修改 Environment，签名候选不可运行 |
 | 候选构建 | 获批者手动运行 workflow；Release unit tests、lint、APK signature/package identity 检查、runtime SBOM、APK+SBOM source-bound manifest、manifest 校验及两项 provenance attest 全部成功 | 常规 CI 仅以临时测试密钥检查签名配置并产出 Debug APK/SBOM；正式 workflow 仍受 `workflow_dispatch`、`main` 与 protected Environment 限制。没有正式凭据，未构建签名候选 |
-| 候选审查 | 下载 APK/BOM/manifest；核对 manifest source commit 等于审阅 commit、摘要一致；验证 APK signer/package 与来源证明；记录审阅结果 | 当前无正式签名候选制品；脚本和 CI 规则已覆盖校验路径，但该阶段未通过 |
+| 候选审查 | 下载 APK/BOM/manifest；核对 manifest source commit 等于审阅 commit、摘要一致；验证 APK signer/package 与来源证明；记录审阅结果 | `verify_artifact_manifest.py --expected-commit` 现可强制 manifest commit 与审阅目标相同，signed candidate workflow 传入 `GITHUB_SHA`；错配/非法输入测试通过，ops 66/66，主线 CI `45562668654` 全绿。当前无正式签名候选制品，候选审查本身仍未通过 |
 | staging 放行 | 负责人提供已批准 staging、数据保留与回滚窗口；候选摘要固定后部署；登录/权益、商户沙箱、Android 安装/线路和撤权回执 smoke 通过；回滚演练有记录 | 尚无 staging 环境、窗口与回滚责任人记录；不部署、不产生云费用 |
 | 付费试点 Go/No-Go | Android 双身份复制拒绝和匹配节点撤权最终流量回执、商户 sandbox 对账、目标市场合规意见、签名/制品审查、staging 和支持/回滚责任均有证据 | **No-Go**：真实会员节点/撤权回执、真实商户 sandbox/对账、合规意见、正式签名候选、staging 与责任人日期均未齐。离线 CI、AVD、合成 peer、local/testing 不能代替放行证据 |
 
