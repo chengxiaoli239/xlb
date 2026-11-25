@@ -83,7 +83,7 @@
 
 本计划按知识库的四象限规则管理 Codex、DeepSeek Harness 和 WorkBuddy 的开发任务：四象限决定先后，WBS 将工作拆成通常不超过两小时的可验收单元；AI 主动编码时间、CI/设备运行时间、外部等待分别记录。每轮以 PRD 最新进度和 `main`/`origin/main` 为基准，不以某个旧 worktree 的分支差异代替主线状态。
 
-**2026-11-25 本轮复核**：主线 `main` 与 `origin/main` 同步于 `b03af90`，最新 CI `45575660012` 全绿。§0.1.1 固定 12 个首发交付门，5 项已有证据、7 项未通过，计数 42%；此数是等权交付门比例，不代表投入时间、剩余工期或上线概率。模块子门为 Android 2/3（67%，生产数据面、双机真实回执仍缺）、Web/API 与支付 1/2（50%，商户渠道/对账未验）、Node Agent 1/2（50%，生产 runtime/真实回执未验）、发布运维 1/3（33%，受保护签名候选和 staging 未验）；Windows/macOS/iOS 不在当前首发分母。GitHub `android-release-candidate` Environment 数量为 0。当前经 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 仅核实到 root principal，本轮未调用云资源 API，AWS 资源状态未知；此前“session expired”状态已变化，不能沿用为当前事实。最大 Q1 仍是 Android 生产 member profile/节点数据面、双设备复制拒绝与匹配撤权回执；节点材料、商户 sandbox、合规书面意见、签名 Environment 和 staging/回滚负责人均未落实。项目管理四象限通用规则已记入知识库，本计划保留逐模块退出证据、可并行边界与外部责任项。
+**2026-11-25 本轮复核**：主线 `main` 与 `origin/main` 同步于 `b03af90`，最新 CI `45575660012` 全绿。§0.1.1 固定 12 个首发交付门，5 项已有证据、7 项未通过，计数 42%；此数是等权交付门比例，不代表投入时间、剩余工期或上线概率。模块子门为 Android 2/3（67%，生产数据面、双机真实回执仍缺）、Web/API 与支付 1/2（50%，商户渠道/对账未验）、Node Agent 1/2（50%，生产 runtime/真实回执未验）、发布运维 1/3（33%，受保护签名候选和 staging 未验）；Windows/macOS/iOS 不在当前首发分母。GitHub `android-release-candidate` Environment 数量为 0。当前经 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 核实到 root principal；紧接着同包装器执行 CloudFormation `list-stacks --max-items 1` 成功，先前 `session expired` 本轮未复现。该查询只有一页，不构成完整云资源盘点；本轮无云写入。最大 Q1 仍是 Android 生产 member profile/节点数据面、双设备复制拒绝与匹配撤权回执；节点材料、商户 sandbox、合规书面意见、签名 Environment 和 staging/回滚负责人均未落实。项目管理四象限通用规则已记入知识库，本计划保留逐模块退出证据、可并行边界与外部责任项。
 
 | 优先级/工作流 | 当前证据与主要工作量 | AI 主动投入估计 | 依赖与安排 | 下一项可验收结果 |
 | --- | --- | --- | --- | --- |
