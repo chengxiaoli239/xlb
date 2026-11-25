@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-25）
 
-- **M9/Q2 Android 恢复凭据与会话 Cookie 持久化明文隔离回归（2026-11-25，专用 AVD）**：为 `SecureSessionStore` 增加 instrumentation，实际生成匿名恢复秘密和 session Cookie 后直接检查 SharedPreferences 只含 `encrypted_state`，且持久化字符串中不出现恢复秘密或 Cookie 明文。专用 `xlb-m9-recovery` AVD 定向用例 1/1 通过；完整 `test-anonymous-recovery-emulator.sh` 包含该 instrumentation、API opt-in 用例和相关隧道回归，退出码 0。另有一次不带本地 API opt-in 的整类直接调用按设计在 API 依赖用例失败，随后以支持的隔离 harness 验证成功。该测试只证明 Android SharedPreferences 明文隔离与本地恢复状态行为，不证明设备安全硬件等级、真实 API、生产账号或真实节点连接。
+- **M9/Q2 Android 恢复凭据与会话 Cookie 持久化明文隔离回归（2026-11-25，专用 AVD）**：为 `SecureSessionStore` 增加 instrumentation，实际生成匿名恢复秘密和 session Cookie 后检查 SharedPreferences 只含 `encrypted_state`，且原始存储及 Base64 解码后的内容都不出现秘密或 Cookie 明文，以防仅 Base64 编码明文 JSON 的实现通过。新用例在专用 `xlb-m9-recovery` AVD 定向 1/1 通过；完整 `test-anonymous-recovery-emulator.sh` 包含该 instrumentation、隔离 API opt-in 用例和相关隧道回归，退出码 0。一次不带本地 API opt-in 的整类直接调用因其中 API 用例按设计要求显式授权隔离 API 而失败；支持的完整 harness 随后通过。该测试只证明 Android SharedPreferences 明文隔离与本地恢复状态行为，不证明设备安全硬件等级、真实 API、生产账号或真实节点连接。
 
 - **M11 Android release Environment 只读预检（2026-11-25，GitHub metadata + ops tests）**：新增 `ops/verify_android_release_environment.py`，只读取 repository Environments、目标环境 protection rules 和 deployment branch policies，检查目标 `android-release-candidate` 存在、配置有带有效 ID 的 required reviewer，并且显式 allowlist 恰为 `main` branch；不查询 secrets、不更改 GitHub 配置。覆盖缺环境、缺 reviewer、无效 reviewer、允许所有 protected branches、额外分支和 tag policy 的 10 项测试通过；ops 全套 76/76。当前 GitHub API 返回 Environment 数量 0，预检实际返回 not configured；提交 `bf9771a` 已推送，目标环境尚未创建，正式签名候选仍不可运行。
 

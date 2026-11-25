@@ -3,6 +3,7 @@ package com.xlb.vpn.data;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.util.Base64;
 
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -118,8 +119,15 @@ public final class SecureSessionStoreInstrumentedTest {
         assertTrue(persistedPreferences.containsKey("encrypted_state"));
         Object encryptedState = persistedPreferences.get("encrypted_state");
         assertTrue(encryptedState instanceof String);
-        assertFalse(((String) encryptedState).contains(recoverySecret));
-        assertFalse(((String) encryptedState).contains(sessionCookie));
+        String encodedState = (String) encryptedState;
+        assertFalse(encodedState.contains(recoverySecret));
+        assertFalse(encodedState.contains(sessionCookie));
+        String decodedState = new String(
+                Base64.decode(encodedState, Base64.NO_WRAP),
+                StandardCharsets.UTF_8
+        );
+        assertFalse(decodedState.contains(recoverySecret));
+        assertFalse(decodedState.contains(sessionCookie));
     }
 
     @Test
