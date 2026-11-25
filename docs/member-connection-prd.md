@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-25）
 
+- **M11 Android release Environment 只读预检（2026-11-25，GitHub metadata + ops tests）**：新增 `ops/verify_android_release_environment.py`，只读取 repository Environments、目标环境 protection rules 和 deployment branch policies，检查目标 `android-release-candidate` 存在、配置有带有效 ID 的 required reviewer，并且显式 allowlist 恰为 `main` branch；不查询 secrets、不更改 GitHub 配置。覆盖缺环境、缺 reviewer、无效 reviewer、允许所有 protected branches、额外分支和 tag policy 的 10 项测试通过；ops 全套 76/76。当前 GitHub API 返回 Environment 数量 0，预检实际返回 not configured；提交 `bf9771a` 已推送，目标环境尚未创建，正式签名候选仍不可运行。
+
 - **M11/Q1 候选制品下载后复核步骤（2026-11-25，计划与命令模板）**：在总计划中固化获批候选下载后的核验命令，要求 manifest 与审阅 commit 一致、APK 包名为 `com.xlb.vpn`、签名证书指纹与受控渠道批准值相符，并分别验证 APK 和 runtime SBOM 的 GitHub SLSA provenance，锁定仓库、签名 workflow、main 来源引用和 commit。命令模板通过 shell 语法检查；当前尚无正式签名制品，未实际执行审查。下一步须由仓库管理员创建受保护 Environment，并由获批者生成候选后按模板实测。
 
 - **M11/Q1 候选 manifest 来源 commit 强制比对（2026-11-25，主线与 hosted CI）**：`verify_artifact_manifest.py` 新增 `--expected-commit`，拒绝无效 commit 或 manifest source commit 与审阅目标不一致；Android signed release candidate workflow 将 `GITHUB_SHA` 作为预期值传入，不匹配时在生成候选 attestation 前失败。正例、错配和非法输入回归均通过；manifest 定向测试 10/10，`ops` 全套 66/66，主线 CI `45562668654` 全部 jobs success。仍未配置 `android-release-candidate` Environment 或正式签名材料，本阶段不生成签名候选，也不代表发布放行。
