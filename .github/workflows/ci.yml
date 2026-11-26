@@ -200,6 +200,42 @@ jobs:
           extensions: mbstring, pdo_mysql, pdo_pgsql, pdo_sqlite, sqlite3
           coverage: none
 
+      - name: Create isolated quota race database in the disposable service
+        working-directory: apps/php-api
+        run: |
+          php -r '
+          $driver = getenv("DB_CONNECTION");
+          $host = "127.0.0.1";
+          $port = getenv("DB_PORT");
+          $database = "xlb_quota_race_" . getenv("GITHUB_RUN_ID") . "_" . getenv("GITHUB_RUN_ATTEMPT");
+          if (!preg_match("/\\Axlb_quota_race_[0-9]+_[0-9]+\\z/", $database)) {
+              fwrite(STDERR, "Invalid one-off quota race database name.\n");
+              exit(1);
+          }
+          $username = getenv("DB_USERNAME");
+          $password = getenv("DB_PASSWORD");
+          $pdo = new PDO("$driver:host=$host;port=$port;dbname=xlb_test", $username, $password,
+              [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+          if ($driver === "mysql") {
+              $pdo->exec("CREATE DATABASE `$database` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+              $scheme = "mysql";
+          } elseif ($driver === "pgsql") {
+              $pdo->exec("CREATE DATABASE \"$database\"");
+              $scheme = "postgresql";
+          } else {
+              fwrite(STDERR, "Unsupported disposable quota race database driver.\n");
+              exit(1);
+          }
+          $url = $scheme . "://" . rawurlencode($username) . ":" . rawurlencode($password)
+              . "@$host:$port/$database";
+          file_put_contents(getenv("GITHUB_ENV"), "XLB_QUOTA_DB_RACE_URL=$url\n", FILE_APPEND);
+          '
+        env:
+          DB_CONNECTION: ${{ matrix.connection }}
+          DB_PORT: ${{ matrix.port }}
+          DB_USERNAME: ${{ matrix.username }}
+          DB_PASSWORD: ${{ matrix.password }}
+
       - name: Install Composer dependencies
         working-directory: apps/php-api
         run: composer install --no-interaction --prefer-dist
@@ -234,7 +270,6 @@ jobs:
           DB_PORT: ${{ matrix.port }}
           DB_URL: ''
           DB_USERNAME: ${{ matrix.username }}
-          XLB_RUN_QUOTA_DB_RACE_TEST: '1'
           XLB_MIHOMO_BINARY: ${{ runner.temp }}/mihomo-bin/mihomo
 
   node-agent:

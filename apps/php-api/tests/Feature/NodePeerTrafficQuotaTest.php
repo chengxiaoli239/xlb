@@ -19,9 +19,7 @@ final class NodePeerTrafficQuotaTest extends TestCase
 
     private string $testDatabaseConnection;
 
-    private ?string $raceDatabaseName = null;
-
-    private ?string $originalDatabaseName = null;
+    private ?array $originalDatabaseConfig = null;
 
     protected function setUp(): void
     {
@@ -29,25 +27,18 @@ final class NodePeerTrafficQuotaTest extends TestCase
         $this->defaultDatabaseConnection = (string) config('database.default');
         $databaseRaceTest = $this->name() === 'test_concurrent_request_id_reuse_by_another_peer_returns_conflict';
         $this->testDatabaseConnection = 'sqlite';
-        $databaseName = (string) config('database.connections.'.$this->defaultDatabaseConnection.'.database');
-        $databaseHost = (string) config('database.connections.'.$this->defaultDatabaseConnection.'.host');
-        $databaseUrl = config('database.connections.'.$this->defaultDatabaseConnection.'.url');
-        $canCreateRaceDatabase = $databaseRaceTest
-            && env('XLB_RUN_QUOTA_DB_RACE_TEST') === '1'
-            && app()->environment('testing')
-            && in_array($this->defaultDatabaseConnection, ['mysql', 'pgsql'], true)
-            && $databaseName === 'xlb_test'
-            && in_array($databaseHost, ['127.0.0.1', 'localhost', '::1'], true)
-            && ($databaseUrl === null || $databaseUrl === '');
-        if ($canCreateRaceDatabase) {
-            $this->originalDatabaseName = $databaseName;
-            $this->raceDatabaseName = 'xlb_quota_race_'.Str::lower(Str::random(12));
-            $quotedDatabaseName = $this->defaultDatabaseConnection === 'mysql'
-                ? '`'.$this->raceDatabaseName.'`'
-                : '"'.$this->raceDatabaseName.'"';
-            DB::connection($this->defaultDatabaseConnection)->statement('CREATE DATABASE '.$quotedDatabaseName);
-            config(['database.connections.'.$this->defaultDatabaseConnection.'.database' => $this->raceDatabaseName]);
-            $this->testDatabaseConnection = $this->defaultDatabaseConnection;
+        if ($databaseRaceTest) {
+            $raceDatabaseUrl = (string) env('XLB_QUOTA_DB_RACE_URL', '');
+            if (! $this->isDedicatedRaceDatabaseUrl($raceDatabaseUrl, $this->defaultDatabaseConnection)) {
+                $this->markTestSkipped('A separate XLB_QUOTA_DB_RACE_URL disposable database is required for the row-lock race test.');
+            }
+
+            $this->originalDatabaseConfig = config('database.connections.'.$this->defaultDatabaseConnection);
+            config(['database.connections.quota_race' => array_merge(
+                $this->originalDatabaseConfig,
+                ['url' => $raceDatabaseUrl],
+            )]);
+            $this->testDatabaseConnection = 'quota_race';
         }
         if ($this->testDatabaseConnection === 'sqlite') {
             $path = tempnam(sys_get_temp_dir(), 'xlb-quota-');
@@ -62,7 +53,25 @@ final class NodePeerTrafficQuotaTest extends TestCase
         }
         DB::setDefaultConnection($this->testDatabaseConnection);
         DB::purge($this->testDatabaseConnection);
+        $watchOriginalConnection = $databaseRaceTest;
+        $originalConnectionDdl = [];
+        DB::listen(function (QueryExecuted $query) use (&$watchOriginalConnection, &$originalConnectionDdl): void {
+            if ($watchOriginalConnection
+                && $query->connectionName === $this->defaultDatabaseConnection
+                && preg_match('/\\A\\s*(create|drop|alter|truncate)\\b/i', $query->sql)) {
+                $originalConnectionDdl[] = $query->sql;
+            }
+        });
         Artisan::call('migrate:fresh', ['--database' => $this->testDatabaseConnection, '--force' => true]);
+        $watchOriginalConnection = false;
+        if ($databaseRaceTest) {
+            $this->assertSame([], $originalConnectionDdl, 'The shared database connection received DDL during race setup.');
+            $this->assertSame(
+                $this->originalDatabaseConfig,
+                config('database.connections.'.$this->defaultDatabaseConnection),
+                'The shared database connection config must remain untouched by the isolated race setup.',
+            );
+        }
         $this->seed();
         $this->createPeer(1024);
     }
@@ -70,14 +79,6 @@ final class NodePeerTrafficQuotaTest extends TestCase
     protected function tearDown(): void
     {
         DB::purge($this->testDatabaseConnection);
-        if ($this->raceDatabaseName !== null && $this->originalDatabaseName !== null) {
-            config(['database.connections.'.$this->defaultDatabaseConnection.'.database' => $this->originalDatabaseName]);
-            DB::purge($this->defaultDatabaseConnection);
-            $quotedDatabaseName = $this->defaultDatabaseConnection === 'mysql'
-                ? '`'.$this->raceDatabaseName.'`'
-                : '"'.$this->raceDatabaseName.'"';
-            DB::connection($this->defaultDatabaseConnection)->statement('DROP DATABASE IF EXISTS '.$quotedDatabaseName);
-        }
         if ($this->databasePath !== null && is_file($this->databasePath)) {
             unlink($this->databasePath);
         }
@@ -92,6 +93,46 @@ final class NodePeerTrafficQuotaTest extends TestCase
         DB::setDefaultConnection($this->defaultDatabaseConnection);
 
         parent::tearDown();
+    }
+
+    private function isDedicatedRaceDatabaseUrl(string $url, string $expectedDriver): bool
+    {
+        if (! app()->environment('testing') || ! in_array($expectedDriver, ['mysql', 'pgsql'], true)) {
+            return false;
+        }
+
+        $parts = parse_url($url);
+        if (! is_array($parts)
+            || ! isset($parts['scheme'], $parts['host'], $parts['user'], $parts['pass'], $parts['path'])
+            || ! in_array($parts['host'], ['127.0.0.1', '::1', '[::1]'], true)
+            || isset($parts['query']) || isset($parts['fragment'])
+            || ! preg_match('/\\A\\/xlb_quota_race_[a-z0-9_]+\\z/', $parts['path'])) {
+            return false;
+        }
+
+        $expectedSchemes = $expectedDriver === 'mysql' ? ['mysql'] : ['pgsql', 'postgres', 'postgresql'];
+
+        return in_array($parts['scheme'], $expectedSchemes, true);
+    }
+
+    public function test_row_lock_race_dsn_must_be_a_separate_loopback_run_database(): void
+    {
+        $validator = new \ReflectionMethod($this, 'isDedicatedRaceDatabaseUrl');
+
+        $this->assertTrue($validator->invoke($this,
+            'mysql://root:password@127.0.0.1:3306/xlb_quota_race_123_1', 'mysql'));
+        $this->assertTrue($validator->invoke($this,
+            'postgresql://postgres:password@[::1]:5432/xlb_quota_race_123_1', 'pgsql'));
+        $this->assertFalse($validator->invoke($this,
+            'mysql://root:password@127.0.0.1:3306/xlb_test', 'mysql'));
+        $this->assertFalse($validator->invoke($this,
+            'mysql://root:password@localhost:3306/xlb_quota_race_123_1', 'mysql'));
+        $this->assertFalse($validator->invoke($this,
+            'mysql://root:password@db.example.com:3306/xlb_quota_race_123_1', 'mysql'));
+        $this->assertFalse($validator->invoke($this,
+            'postgresql://postgres:password@127.0.0.1:5432/xlb_quota_race_123_1?sslmode=disable', 'pgsql'));
+        $this->assertFalse($validator->invoke($this,
+            'postgresql://postgres:password@127.0.0.1:5432/xlb_quota_race_123_1', 'mysql'));
     }
 
     public function test_reservation_is_idempotent_and_refuses_capacity_overcommit(): void
