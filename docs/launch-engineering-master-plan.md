@@ -22,6 +22,8 @@
 
 **Q2 运维诊断增量（2026-11-26）**：设备授权 API 的服务端 `X-Request-Id` 已持久关联到 provisioning outbox；异步 worker 带该 ID 与稳定 `node_operation_id`/peer ID 写安全日志并清理上下文，重复请求仍只复用原 operation。Laravel 全套 275 passed、1 skipped、2,457 assertions，Pint 通过。该改进不改变首发放行门计数，也不代替 production runtime、节点回执或 staging 验收。
 
+**Node Agent mTLS 离线接线增量（2026-11-26）**：新增受限的 KMS `crypto.Signer`/`NodeTLSIdentitySource` 适配合同和严格公有 PEM 证书链/client-CA provider，Go race 164 passed/5 packages、vet/build 通过，CA 私钥混入问题经独立审查后补齐拒绝测试。尚未集成 AWS SDK client、KMS/IAM 资源、证书签发/分发与 `cmd/node-agent` production 启动接线；模块依赖下载目前网络超时。上线门计数保持 5/12（42%），不得把模拟 KMS 测试当生产 mTLS 验收。
+
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
 | M1–M2 产品与盘点 | PRD、边界、账号/节点/支付现状盘点已固化 | 随新实现继续维护，不代表发布审查完成 |
