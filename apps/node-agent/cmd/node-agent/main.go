@@ -94,7 +94,9 @@ func run() error {
 	if err := validateProbeListenerAddress(probeAddress, address, dataAddress); err != nil {
 		return err
 	}
-	dataPlane, err := agent.NewDataPlane(store, agent.NewPublicTargetDialer())
+	dataPlane, err := agent.NewRuntimeDataPlane(
+		context.Background(), store, agent.NewPublicTargetDialer(), identity, runtimeConfig,
+	)
 	if err != nil {
 		return err
 	}

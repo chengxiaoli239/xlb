@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-26）
 
-- **Node Agent quota mTLS client identity 启动前校验（2026-11-26，离线 Go）**：`NewHTTPQuotaAuthority` 现在在建立 client transport 前验证 client leaf 的有效期、digital-signature key usage、ClientAuth EKU（或未限制 EKU）以及证书公钥与注入 signer 一致；server-only EKU、过期证书和 signer 错配均 fail closed。定向 HTTPQuotaAuthority 测试 4/4、Go race 187/187（5 packages）、vet/build 通过；Laravel `NodePeerTrafficQuotaTest` 12/12、111 assertions 通过。测试只证明本地构造与假证书链行为，不代表生产证书或实际控制面 mTLS。Node Agent production gate 仍关闭；下一步需把 trusted quota runtime descriptor、KMS-backed node cert 和 durable journal 恢复顺序接入 startup，但需确认签发证书同时允许 ServerAuth 与 ClientAuth，且不能在缺真实 trust materials 时宣称已连通。
+- **Node Agent quota client → durable data-plane initializer（2026-11-26，离线 Go）**：新增 `NewRuntimeDataPlane`，isolated-test 继续使用不接在线计量的 test plane；validated production-shaped v2 先由 KMS-backed node signer 与 trusted quota CA 构造 HTTPS/TLS 1.3 mTLS authority，再恢复 reservation/settlement durable outboxes，未恢复成功则不返回 data plane。正向本机配置构造、server-only certificate 拒绝与隔离模式不启用 quota 三项回归通过；Go race 190/190（5 packages）、vet/build 通过，Laravel `NodePeerTrafficQuotaTest` 12/12、111 assertions 通过。生产 executable 仍在读取配置前拒绝 production mode，因此未部署/启用该路径，不代表真实 mTLS、商户控制面额度或生产流量计量验收。下一步由签发材料确认节点证书同时具备 ServerAuth 与 ClientAuth，并继续核验 production startup 的持久状态目录与恢复顺序。
 
 - **当前主线与发布门快照（2026-11-26）**：本轮阶段代码 `7340964c8d5e4ee3c8d877b411cec69dab9c6e8c` 已推送，CI `45757280170` 全部成功，主线工作树干净。AWS `xlb-ops` 本轮复核为 `session expired`，资源状态未读取或推断。受控首发放行门仍为 5/12（42%），Node Agent 配额配置校验不增加放行门数。下一步完成可离线的 quota mTLS client identity 与 durable journal startup 接线审查；恢复会话后先只读盘点 KMS/IAM/节点材料。
 
