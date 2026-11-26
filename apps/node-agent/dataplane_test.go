@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -497,6 +499,63 @@ func TestDataPlaneServerUsesTLS13AndHTTP2(t *testing.T) {
 	response.Body.Close()
 	if response.ProtoMajor != 2 || response.StatusCode != http.StatusOK {
 		t.Fatalf("data-plane server protocol/status HTTP/%d %d; want HTTP/2 200", response.ProtoMajor, response.StatusCode)
+	}
+}
+
+func TestKMSNodeTLSIdentityServesTLS13HTTP2DataPlane(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCertificate, roots := nodeTLSCertificateForKey(t, key)
+	publicKeyDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identitySource, err := NewKMSNodeTLSIdentitySource(
+		fakeKMSClient{publicKeyDER: publicKeyDER, privateKey: key},
+		fakeNodeTLSCertificateProvider{identity: NodeTLSIdentity{Certificate: serverCertificate, ClientCAs: roots}},
+		map[string]string{"node-kms-data-plane": "test-key"},
+		time.Second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := LoadNodeTLSIdentity(context.Background(), "node-kms-data-plane", identitySource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := openTestStore(t, 1)
+	plane, err := NewDataPlane(store, newEchoTargetDialer(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverConfig, err := NewDataPlaneServerWithNodeTLSIdentity("127.0.0.1:0", identity.Certificate, plane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(serverConfig.Handler)
+	server.EnableHTTP2 = true
+	server.Config.ConnContext = serverConfig.ConnContext
+	server.Config.ConnState = serverConfig.ConnState
+	server.TLS = serverConfig.TLSConfig
+	server.StartTLS()
+	defer server.Close()
+
+	clientCertificate, _, _ := createTestCertificates(t)
+	clientTLS := &tls.Config{
+		MinVersion: tls.VersionTLS13, RootCAs: roots,
+		Certificates: []tls.Certificate{clientCertificate}, ServerName: "localhost",
+	}
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: clientTLS, ForceAttemptHTTP2: true}}
+	defer client.CloseIdleConnections()
+	response, err := client.Get(server.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("HTTP/2 request through KMS-backed NodeTLSIdentity failed: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.ProtoMajor != 2 {
+		t.Fatalf("data-plane response status/protocol=%d/HTTP%d; want 200/HTTP2", response.StatusCode, response.ProtoMajor)
 	}
 }
 
