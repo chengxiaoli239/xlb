@@ -1,6 +1,6 @@
 # 上线工程总体规划：批量部署 / 快速上下线 / 压测负载均衡 / 四端研发 / 多云长期演进
 
-日期：2026-11-26（滚动执行状态复核）
+日期：2026-11-27（滚动执行状态复核）
 状态：**滚动执行计划**。路线与验收门在本文维护；具体阶段证据以 `docs/member-connection-prd.md` 顶部和链接验收记录为准。本文不改任何线上资源，不代表生产已上线或可发布。
 
 ## 0. 这份文档解决什么
@@ -17,6 +17,8 @@
 > 结论先行：目前已从单纯本地业务原型推进到隔离节点协议证据、支付沙箱账本、Android Debug 客户端和 M9 多端账号状态；**离上线仍有技术放行、合规与运营门槛**。CI、Docker 构建文件、k6 场景和 smoke 脚本已入库，但没有实测压测报告、staging、生产部署/回滚演练、生产监控告警或批量节点编排。下方 §0.1 是当前执行快照；旧章节中的全仓"无脚本/无工作流/客户端未实现"等基线文字应以该快照和源码复核为准。
 
 ### 0.1 当前完成度与工作队列（2026-11-27）
+
+**2026-11-27 M6 Android→隔离节点实测准备未通过**：当前 `xlb-lab-us-20261127-m6member2` 栈为一台 `t3.small`、单一 `/32` TCP 443 入站和 60 分钟 Scheduler TTL；截止时间为 2026-11-26 18:55:28 UTC。实例运行检查通过且 SSM Online；Android AVD instrumentation 的 Debug/AndroidTest/JVM 构建通过，Node Agent test service 因 KMS TLS identity 加载失败而停止，未产生该节点的 provisioning receipt、TUN 流量或撤权回执。18:00 UTC 只读 KMS 查询显示签名 key 为 `Enabled`，覆盖较早的 `PendingDeletion` 状态记录；随后 `xlb-ops` STS 返回 `ExpiredToken`，因此尚未确认 `XlbLabSsmRole` 的当前单 key 权限，也未清理 CloudFormation 节点栈。下次用户登录后先只读检查 IAM 参数和资源状态，随后仅在有效授权窗口内继续；不增加首发放行门，整体仍 5/12，Android/M6 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。
 
 **2026-11-27 M6 隔离会员入口准备**：node-lab 模板默认无入站；只有显式单个全球可路由 IPv4 `/32` 时才开 TCP 443 并以 HAProxy TCP passthrough 转发至 loopback Node Agent，PHP 管理仍走 SSM。ops 安全回归 78/78 与 AWS CloudFormation `validate-template` 通过，本轮无资源写入。当前目标是一次性用该 source-IP 窗口联调 Android/PHP 沙箱和隔离 Agent，再完整回收临时节点；不作为生产网络策略，用户双真机与匹配撤权回执仍未验收，放行门保持 5/12。
 
