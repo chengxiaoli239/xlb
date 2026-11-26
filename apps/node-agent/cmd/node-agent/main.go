@@ -317,11 +317,19 @@ func validateRuntimeConfig(path, nodeID string) error {
 }
 
 func readRuntimeConfig(path, nodeID string) (agent.TrustedNodeRuntimeConfig, error) {
+	pathInfo, err := os.Lstat(path)
+	if err != nil || !pathInfo.Mode().IsRegular() || pathInfo.Mode()&os.ModeSymlink != 0 || pathInfo.Mode().Perm()&0o022 != 0 {
+		return agent.TrustedNodeRuntimeConfig{}, errors.New("NODE_AGENT_RUNTIME_CONFIG is not a protected regular file")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return agent.TrustedNodeRuntimeConfig{}, errors.New("NODE_AGENT_RUNTIME_CONFIG could not be opened")
 	}
 	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil || !os.SameFile(pathInfo, openedInfo) || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0o022 != 0 {
+		return agent.TrustedNodeRuntimeConfig{}, errors.New("NODE_AGENT_RUNTIME_CONFIG changed while opening")
+	}
 
 	config, err := agent.DecodeTrustedNodeRuntimeConfig(file)
 	if err != nil {

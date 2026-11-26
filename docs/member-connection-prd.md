@@ -4,7 +4,9 @@
 
 ## 开发进度（2026-11-26）
 
-- **Node Agent runtime quota initializer → Laravel CGI/mTLS 集成（2026-11-26，隔离本机）**：将 Go/Laravel CGI mTLS 集成从直接调用 `HTTPQuotaAuthority` 扩展为 `NewRuntimeDataPlane` 按 production-shaped v2 构造 NodeTLS identity、trusted authority CA 与 durable quota provider；通过真实 Laravel CGI 完成 reservation 和最终结算，并验证该 fixture 下累计 `used_bytes=57`、`reserved_bytes=0`、同一 peer 两个 reservation 均 settled。Laravel quota feature 12/12、112 assertions 通过；Go race 191/191（5 packages）、vet/build 通过。证据仅限本机临时 SQLite、临时测试证书与本地 CGI，不是部署 mTLS、生产 KMS/IAM、目标数据库并发或真实会员流量验收。production executable 仍在加载 production config/AWS 前拒绝启动，首发门仍 5/12。
+- **Node Agent trusted runtime config 文件边界（2026-11-26，离线 Go）**：`readRuntimeConfig` 现在在解析前用 `Lstat` 和打开后 `fstat` 复核，拒绝符号链接、非普通文件、组/其他用户可写文件和替换竞态；isolated-test runtime parser 专项 26/26 通过。此项保护未来 production 配置的信任来源，不让 Node Agent 启动或读取 AWS；完整 race/vet/build 与 Laravel quota integration 本轮结果待本阶段提交后记录。
+
+- **Node Agent runtime quota initializer → Laravel CGI/mTLS 集成（2026-11-26，隔离本机）**：将 Go/Laravel CGI mTLS 集成从直接调用 `HTTPQuotaAuthority` 扩展为 `NewRuntimeDataPlane` 按 production-shaped v2 构造 NodeTLS identity、trusted authority CA 与 durable quota provider；通过真实 Laravel CGI 完成 reservation 和最终结算，并验证该 fixture 下累计 `used_bytes=57`、`reserved_bytes=0`、同一 peer 两个 reservation 均 settled。Laravel quota feature 12/12、112 assertions 通过；Go race 192/192（5 packages）、vet/build 通过。证据仅限本机临时 SQLite、临时测试证书与本地 CGI，不是部署 mTLS、生产 KMS/IAM、目标数据库并发或真实会员流量验收。production executable 仍在加载 production config/AWS 前拒绝启动，首发门仍 5/12。
 
 - **Node Agent quota grant 上限（2026-11-26，离线 Go）**：v2 trusted quota 配置的单次 grant 上限设为 64 MiB，与 Agent `CopyWithQuota` 的 32 KiB permit 粒度相容，并拒绝超过上限的配置。Go race 191/191（5 packages）、vet/build 通过；Laravel quota feature 12/12、111 assertions 通过。此项只收紧配置范围，不代表生产配额服务已接通；对应功能提交 `6676db8` 的 hosted CI `45758904103` 全绿。本项回归代码待提交并由 hosted CI 复核。
 

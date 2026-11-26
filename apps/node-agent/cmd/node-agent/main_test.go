@@ -210,6 +210,28 @@ func TestRuntimeConfigPathIsRequiredAtStartup(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigRejectsSymlinkAndGroupWritableFiles(t *testing.T) {
+	validConfig := `{"schema_version":"xlb-node-runtime/v1","environment":"isolated-test","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"test-file-only"},"profile_renderer":{"status":"unavailable"}}`
+	directory := t.TempDir()
+	protectedPath := filepath.Join(directory, "runtime.json")
+	if err := os.WriteFile(protectedPath, []byte(validConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(directory, "runtime-link.json")
+	if err := os.Symlink(protectedPath, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRuntimeConfig(symlinkPath, "node-a"); err == nil {
+		t.Fatal("runtime config loader accepted a symlink")
+	}
+	if err := os.Chmod(protectedPath, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRuntimeConfig(protectedPath, "node-a"); err == nil {
+		t.Fatal("runtime config loader accepted a group-writable file")
+	}
+}
+
 func TestLoadNodeTLSIdentityUsesFileProviderOnlyForIsolatedTestMode(t *testing.T) {
 	now := time.Now()
 	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
