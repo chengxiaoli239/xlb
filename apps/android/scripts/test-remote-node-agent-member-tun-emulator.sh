@@ -19,7 +19,7 @@ fail() {
 }
 
 usage() {
-    printf 'Usage: %s <serial> <node-id> <control-origin> <bridge-origin> <expected-egress-ip> <node-ca.pem> <admin-cert.pem> <admin-key.pem>\n' "$0" >&2
+    printf 'Usage: %s <serial> <node-id> <control-https-loopback-origin> <bridge-https-origin> <expected-egress-ip> <node-ca.pem> <admin-cert.pem> <admin-key.pem>\n' "$0" >&2
     exit 2
 }
 
@@ -37,7 +37,8 @@ ADMIN_KEY=$8
 [[ -n "$ANDROID_ROOT" && -x "$ADB_PATH" ]] || fail 'Set ANDROID_HOME or ANDROID_SDK_ROOT to a usable Android SDK.'
 [[ "$SERIAL" =~ ^[A-Za-z0-9._:-]+$ ]] || fail 'The emulator serial contains unsupported characters.'
 [[ "$NODE_ID" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || fail 'The isolated node ID contains unsupported characters.'
-[[ "$CONTROL_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] || fail 'The control URL must be an HTTPS origin.'
+[[ "$CONTROL_ORIGIN" =~ ^https://127\.0\.0\.1:([0-9]{1,5})$ ]] || fail 'The control URL must use the local HTTPS SSM-forward origin https://127.0.0.1:<port>.'
+CONTROL_PORT=${BASH_REMATCH[1]}
 [[ "$BRIDGE_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] || fail 'The bridge URL must be an HTTPS origin.'
 
 python3 - "$EXPECTED_EGRESS_IP" <<'PY'
@@ -58,6 +59,23 @@ done
 
 "$SCRIPT_DIR/validate-disposable-avd.sh" "$SERIAL"
 
+python3 - "$CONTROL_PORT" <<'PY'
+import socket
+import sys
+
+try:
+    port = int(sys.argv[1])
+except ValueError:
+    raise SystemExit('ERROR: the local SSM-forward port is invalid.')
+if not 1 <= port <= 65535:
+    raise SystemExit('ERROR: the local SSM-forward port must be between 1 and 65535.')
+try:
+    with socket.create_connection(('127.0.0.1', port), timeout=2):
+        pass
+except OSError as error:
+    raise SystemExit(f'ERROR: no local SSM port-forward is listening on 127.0.0.1:{port} ({type(error).__name__}).')
+PY
+
 printf 'Building the Debug app and AndroidTest APK...\n'
 (
     cd "$ANDROID_ROOT_DIR"
@@ -73,13 +91,24 @@ test_token=$(python3 -c 'import secrets; print(secrets.token_hex(8))')
 host_stage=$(mktemp -d "${TMPDIR:-/tmp}/xlb-node-test.XXXXXX")
 device_stage="/data/local/tmp/xlb-node-test-$test_token"
 app_stage="cache/xlb-node-test-$test_token"
+control_reverse_added=false
 cleanup() {
     "$ADB_PATH" -s "$SERIAL" shell am force-stop "$APP_PACKAGE" >/dev/null 2>&1 || true
     "$ADB_PATH" -s "$SERIAL" shell run-as "$APP_PACKAGE" rm -rf "$app_stage" >/dev/null 2>&1 || true
     "$ADB_PATH" -s "$SERIAL" shell rm -rf "$device_stage" >/dev/null 2>&1 || true
+    if [[ "$control_reverse_added" == 'true' ]]; then
+        "$ADB_PATH" -s "$SERIAL" reverse --remove "tcp:$CONTROL_PORT" >/dev/null 2>&1 || true
+    fi
     rm -rf "$host_stage"
 }
 trap cleanup EXIT
+
+existing_reverse=$($ADB_PATH -s "$SERIAL" reverse --list)
+if printf '%s\n' "$existing_reverse" | awk -v port="tcp:$CONTROL_PORT" '$1 == port || $2 == port { found = 1 } END { exit !found }'; then
+    fail "The dedicated AVD already has a reverse mapping for tcp:$CONTROL_PORT; refusing to replace it."
+fi
+control_reverse_added=true
+"$ADB_PATH" -s "$SERIAL" reverse "tcp:$CONTROL_PORT" "tcp:$CONTROL_PORT"
 
 cp -- "$NODE_CA" "$host_stage/node-ca.pem"
 cp -- "$ADMIN_CERT" "$host_stage/admin-cert.pem"

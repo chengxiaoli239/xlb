@@ -116,6 +116,8 @@ ops/aws-cli --profile xlb-ops --region us-west-2 ssm start-session \
 
 在本机第二个终端通过 `https://127.0.0.1:19443/healthz` 使用隔离 test CA 和 client cert 验证 TLS、Agent 身份及健康状态；禁止 `curl -k`。若本机端口冲突，改用另一个仅本机监听的高端口。停止 session 后确认该端口不可达。所有请求使用稳定 ID，日志只记 request/node/peer ID 与状态，不打印凭证、私钥、profile 或订阅 URL。
 
+运行 Android remote-node instrumentation 前保持该 SSM session 活动，并将启动器的 control origin 设为 `https://127.0.0.1:19443`。Android runner 会在专用 AVD 上建立 `adb reverse tcp:19443 tcp:19443`，结束后清理自己创建的映射；若该 AVD 已有本地端口映射则拒绝覆盖。节点 TLS leaf 需同时包含数据面公网 endpoint 与 `127.0.0.1` SAN，Android 才能在 SSM 转发的管理连接上验证同一 CA 下的节点身份。之后通过 `apps/android/scripts/test-remote-node-agent-member-tun-emulator.sh` 提供 serial、node ID、control origin、bridge endpoint、节点公网 egress IPv4，以及 CA/管理 client cert/key 文件路径。测试材料只在临时主机目录和专用 AVD app cache 短暂存在，runner 退出时清理。
+
 ### D. M5/M6 实测门
 
 - **M5 并发原子性**：在 Agent 状态存储设置确定的节点容量，使用不同 peer 和签名 challenge 进行屏障同步并发开通（本轮配置为 12 个进程争 3 个名额）。验收成功数必须恰为 3；重复 request ID 只产生一个 peer；超时后用同 ID 重试得到原结果；Agent 多进程并发与重启后检查仍无超卖。保存脱敏 request/receipt 清单和持久状态计数。

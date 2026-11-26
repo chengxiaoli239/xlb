@@ -12,8 +12,25 @@ mkdir -p "$(dirname "$fake_adb")"
 cat >"$fake_adb" <<'ADB'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "$*" >>"$FAKE_ADB_LOG"
-exit 97
+
+case "$*" in
+    devices)
+        printf 'List of devices attached\nemulator-5554\tdevice\n'
+        ;;
+    '-s emulator-5554 emu avd name')
+        printf 'xlb-m9-recovery\nOK\n'
+        ;;
+    '-s emulator-5554 shell getprop ro.hardware')
+        printf 'ranchu\n'
+        ;;
+    '-s emulator-5554 shell getprop ro.build.fingerprint')
+        printf 'generic/sdk_gphone64_arm64/emulator:15/AP3A.240905.015/1234567:userdebug/test-keys\n'
+        ;;
+    *)
+        printf '%s\n' "$*" >>"$FAKE_ADB_LOG"
+        exit 97
+        ;;
+esac
 ADB
 chmod +x "$fake_adb"
 
@@ -27,7 +44,7 @@ expect_rejected_before_adb() {
     output="$test_dir/output.log"
 
     if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
-        emulator-5554 xlb-lab-test https://127.0.0.1 https://127.0.0.1 "$@" \
+        emulator-5554 xlb-lab-test https://127.0.0.1:19443 https://127.0.0.1 "$@" \
         "$test_dir/node-ca.pem" "$test_dir/admin-cert.pem" "$test_dir/admin-key.pem" \
         >"$output" 2>&1; then
         printf 'Unsafe runner arguments were accepted.\n' >&2
@@ -45,17 +62,17 @@ expect_rejected_before_adb 'globally routable IPv4' 192.0.2.1
 
 invalid_origin_output="$test_dir/invalid-origin.log"
 if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
-    emulator-5554 xlb-lab-test http://127.0.0.1 https://127.0.0.1 54.187.217.237 \
+    emulator-5554 xlb-lab-test http://127.0.0.1:19443 https://127.0.0.1 54.187.217.237 \
     "$test_dir/node-ca.pem" "$test_dir/admin-cert.pem" "$test_dir/admin-key.pem" \
     >"$invalid_origin_output" 2>&1; then
     printf 'A non-HTTPS control origin was accepted.\n' >&2
     exit 1
 fi
-grep -Fq 'control URL must be an HTTPS origin' "$invalid_origin_output"
+grep -Fq 'control URL must use the local HTTPS SSM-forward origin' "$invalid_origin_output"
 
 invalid_node_output="$test_dir/invalid-node.log"
 if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
-    emulator-5554 'xlb-lab-test;touch' https://127.0.0.1 https://127.0.0.1 54.187.217.237 \
+    emulator-5554 'xlb-lab-test;touch' https://127.0.0.1:19443 https://127.0.0.1 54.187.217.237 \
     "$test_dir/node-ca.pem" "$test_dir/admin-cert.pem" "$test_dir/admin-key.pem" \
     >"$invalid_node_output" 2>&1; then
     printf 'A shell-injection node ID was accepted.\n' >&2
