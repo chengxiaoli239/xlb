@@ -24,7 +24,7 @@
 
 **2026-11-26 Live KMS P-256 signer 验收**：用户明确授权临时 key 费用及随后释放。`us-west-2` 临时 `ECC_NIST_P256/SIGN_VERIFY` key 已通过真实 AWS SDK public-key/sign 调用完成 TLS 1.3 handshake acceptance（PASS）；最初按计划设为 `PendingDeletion`，后根据用户要求集中验收取消了待删除并重新启用同一 key；当前 key 保持 enabled 供后续 Node Agent 隔离验收使用，完成后统一安排最短 7 天待删除，期间持续计费。Key 不会被用于生产，节点侧生产 identity/profile/CA 与会员设备回执仍未满足；首发门保持 5/12。
 
-**2026-11-26 隔离节点 KMS role 最小授权**：node-lab IAM 模板支持可选精确 KMS key ARN，只有专用 `XlbLabSsmRole` 获得 `GetPublicKey`/`Sign`，不会修改现有 manager 或生产角色。CloudFormation validate 成功，IAM simulator 显示指定 key allowed、另一 key implicit deny，node-lab 5 项测试通过。下一步将其与单台 t3.small、30 分钟 TTL、TCP 443 出站的 KMS-backed Agent acceptance 合并为同一资源窗口；沿用 `$1` 人工预算上限，测试结束一起删除实验 IAM/EC2 栈，key 保留到本轮 KMS/节点验收完成后统一待删除。
+**2026-11-26 隔离节点 KMS role 最小授权**：node-lab IAM 模板支持可选精确 KMS key ARN，只有专用 `XlbLabSsmRole` 获得 `GetPublicKey`/`Sign`，不会修改现有 manager 或生产角色。CloudFormation validate 成功，IAM simulator 显示指定 key allowed、另一 key implicit deny，node-lab 5 项测试通过。`xlb-lab-access-usw2` 现为 `CREATE_COMPLETE`，只含专用实验 roles/profile 和单 key KMS policy，尚无 EC2 节点。下一步按最新生成的 plan 建一台 t3.small、30 分钟 TTL、TCP 443 出站的 KMS-backed Agent 节点；沿用 `$1` 人工预算上限，测试结束一起删除实验 IAM/EC2 栈，key 保留到本轮 KMS/节点验收完成后统一待删除。
 
 **2026-11-26 Q2 支付对账分页修复**：持久化 provider 每次按 event ID 取最多 500 条，cursor 依原始批次推进，避免窗外旧事件过滤后丢失 cursor，使后续页永远不可见。回归构造 500 条早期事件加一条目标时间窗事件，并通过真实 `PaymentReconciliationService` 断言 matched。ledger Feature 17/17（171 assertions）、sandbox payment Feature 7/7（87 assertions）、完整 Laravel 280 项（279 passed、1 skipped，2,484 assertions）、Pint passed。该修复只覆盖 local/testing 持久化 adapter，不验收真实商户 callback、对账服务或支付放行门。
 
