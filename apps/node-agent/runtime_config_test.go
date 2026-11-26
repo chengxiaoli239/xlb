@@ -16,10 +16,6 @@ func TestDecodeTrustedNodeRuntimeConfigAcceptsTestAndSecureProductionInputs(t *t
 			name:   "isolated test",
 			config: `{"schema_version":"xlb-node-runtime/v1","environment":"isolated-test","node":{"id":"xlb-lab-usw2","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"test-file-only"},"profile_renderer":{"status":"unavailable"}}`,
 		},
-		{
-			name:   "production secure-key declaration",
-			config: `{"schema_version":"xlb-node-runtime/v1","environment":"production","node":{"id":"node-a","provider":"provider-b","region":"region-c"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"[::1]:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"unavailable"}}`,
-		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			config, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(test.config))
@@ -42,6 +38,7 @@ func TestDecodeTrustedNodeRuntimeConfigRejectsUnsafeOrUnsupportedInputs(t *testi
 		{name: "unknown field", input: strings.TrimSuffix(valid, "}") + `,"subscription_token":"secret"}`},
 		{name: "trailing json", input: valid + `{}`},
 		{name: "unsupported schema", input: strings.Replace(valid, TrustedNodeRuntimeSchemaV1, "xlb-node-runtime/v2", 1)},
+		{name: "production cannot use test schema", input: strings.Replace(valid, `"environment":"isolated-test"`, `"environment":"production"`, 1)},
 		{name: "public bridge listener", input: strings.Replace(valid, "127.0.0.1:10808", "0.0.0.0:10808", 1)},
 		{name: "hostname listener", input: strings.Replace(valid, "127.0.0.1:10808", "localhost:10808", 1)},
 		{name: "device proof disabled", input: strings.Replace(valid, `"device_proof_required":true`, `"device_proof_required":false`, 1)},
@@ -83,6 +80,75 @@ func TestDecodeTrustedNodeRuntimeConfigAcceptsProductionRendererContractV2(t *te
 		config.ProfileRenderer.Status != RuntimeProfileMihomoBridge {
 		t.Fatalf("decoded renderer contract = %q/%q/%q; want production v2 Mihomo bridge",
 			config.SchemaVersion, config.Environment, config.ProfileRenderer.Status)
+	}
+}
+
+func TestProductionRuntimeV2RequiresQuotaAuthorityConfiguration(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	valid := productionRendererRuntimeConfigJSON(RuntimeProfileMihomoBridge,
+		"https://bridge.example.invalid:9444", string(caPEM))
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name: "missing quota authority",
+			mutate: func(config map[string]any) {
+				delete(config, "quota_authority")
+			},
+		},
+		{
+			name: "insecure authority endpoint",
+			mutate: func(config map[string]any) {
+				config["quota_authority"].(map[string]any)["endpoint"] = "http://quota.example.invalid"
+			},
+		},
+		{
+			name: "authority endpoint without a hostname",
+			mutate: func(config map[string]any) {
+				config["quota_authority"].(map[string]any)["endpoint"] = "https://:443"
+			},
+		},
+		{
+			name: "invalid authority trust bundle",
+			mutate: func(config map[string]any) {
+				config["quota_authority"].(map[string]any)["server_ca_pem"] = "not-a-certificate"
+			},
+		},
+		{
+			name: "non-positive grant",
+			mutate: func(config map[string]any) {
+				config["quota_authority"].(map[string]any)["grant_bytes"] = 0
+			},
+		},
+		{
+			name: "outbox limit above recovery bound",
+			mutate: func(config map[string]any) {
+				config["quota_authority"].(map[string]any)["outbox_limit"] = 1001
+			},
+		},
+		{
+			name: "unbounded timeout",
+			mutate: func(config map[string]any) {
+				config["quota_authority"].(map[string]any)["timeout_seconds"] = 61
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var config map[string]any
+			if err := json.Unmarshal([]byte(valid), &config); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(config)
+			payload, err := json.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(string(payload))); !errors.Is(err, ErrInvalidNodeRuntimeConfig) {
+				t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v; want ErrInvalidNodeRuntimeConfig", err)
+			}
+		})
 	}
 }
 
@@ -259,5 +325,5 @@ func rendererRuntimeConfigJSON(environment, status, endpoint, caPEM string) stri
 func productionRendererRuntimeConfigJSON(status, endpoint, caPEM string) string {
 	endpointJSON, _ := json.Marshal(endpoint)
 	caPEMJSON, _ := json.Marshal(caPEM)
-	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"node_tls_identity":{"source":"aws-kms","key_arn":"arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `}}`
+	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"node_tls_identity":{"source":"aws-kms","key_arn":"arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `},"quota_authority":{"endpoint":"https://quota.example.invalid","server_ca_pem":` + string(caPEMJSON) + `,"grant_bytes":4096,"outbox_limit":100,"timeout_seconds":5}}`
 }

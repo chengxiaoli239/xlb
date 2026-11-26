@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -35,6 +38,7 @@ type TrustedNodeRuntimeConfig struct {
 	ProofBridge     ProofBridgeRuntimeConfig     `json:"proof_bridge"`
 	ProfileRenderer ProfileRendererRuntimeConfig `json:"profile_renderer"`
 	DataPlaneProbe  DataPlaneProbeRuntimeConfig  `json:"data_plane_probe,omitempty"`
+	QuotaAuthority  QuotaAuthorityRuntimeConfig  `json:"quota_authority,omitempty"`
 }
 
 type NodeTLSIdentityRuntimeConfig struct {
@@ -69,6 +73,14 @@ type DataPlaneProbeRuntimeConfig struct {
 	ServerCAPEM    string `json:"server_ca_pem,omitempty"`
 }
 
+type QuotaAuthorityRuntimeConfig struct {
+	Endpoint       string `json:"endpoint,omitempty"`
+	ServerCAPEM    string `json:"server_ca_pem,omitempty"`
+	GrantBytes     int64  `json:"grant_bytes,omitempty"`
+	OutboxLimit    int    `json:"outbox_limit,omitempty"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+}
+
 func DecodeTrustedNodeRuntimeConfig(reader io.Reader) (TrustedNodeRuntimeConfig, error) {
 	var config TrustedNodeRuntimeConfig
 	decoder := json.NewDecoder(io.LimitReader(reader, maxNodeRuntimeConfigBytes+1))
@@ -87,7 +99,7 @@ func DecodeTrustedNodeRuntimeConfig(reader io.Reader) (TrustedNodeRuntimeConfig,
 
 func (config TrustedNodeRuntimeConfig) Validate() error {
 	validSchemaEnvironment := (config.SchemaVersion == TrustedNodeRuntimeSchemaV1 &&
-		(config.Environment == RuntimeEnvironmentTest || config.Environment == RuntimeEnvironmentProd)) ||
+		config.Environment == RuntimeEnvironmentTest) ||
 		(config.SchemaVersion == TrustedNodeRuntimeSchemaV2 && config.Environment == RuntimeEnvironmentProd)
 	if !validSchemaEnvironment ||
 		!validRuntimeToken(config.Node.ID, 64) || !validRuntimeToken(config.Node.Provider, 32) ||
@@ -107,13 +119,45 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 	}
 	if config.SchemaVersion == TrustedNodeRuntimeSchemaV2 {
 		if config.NodeTLSIdentity.Source != "aws-kms" || !ValidKMSKeyARN(config.NodeTLSIdentity.KeyARN) ||
-			kmsKeyARNRegion(config.NodeTLSIdentity.KeyARN) != config.Node.Region {
+			kmsKeyARNRegion(config.NodeTLSIdentity.KeyARN) != config.Node.Region ||
+			validateQuotaAuthorityRuntimeConfig(config.QuotaAuthority) != nil {
 			return ErrInvalidNodeRuntimeConfig
 		}
-	} else if config.NodeTLSIdentity.Source != "" || config.NodeTLSIdentity.KeyARN != "" {
+	} else if config.NodeTLSIdentity.Source != "" || config.NodeTLSIdentity.KeyARN != "" ||
+		config.QuotaAuthority != (QuotaAuthorityRuntimeConfig{}) {
 		return ErrInvalidNodeRuntimeConfig
 	}
 
+	return nil
+}
+
+func validateQuotaAuthorityRuntimeConfig(config QuotaAuthorityRuntimeConfig) error {
+	endpoint, err := url.Parse(config.Endpoint)
+	if err != nil || config.Endpoint == "" || strings.TrimSpace(config.Endpoint) != config.Endpoint ||
+		endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" ||
+		endpoint.ForceQuery || endpoint.Fragment != "" || endpoint.Opaque != "" ||
+		(config.GrantBytes < 1) || config.OutboxLimit < 1 || config.OutboxLimit > 1000 ||
+		config.TimeoutSeconds < 1 || config.TimeoutSeconds > 60 {
+		return ErrInvalidNodeRuntimeConfig
+	}
+	if endpoint.Port() != "" {
+		port, err := strconv.Atoi(endpoint.Port())
+		if err != nil || port < 1 || port > 65535 {
+			return ErrInvalidNodeRuntimeConfig
+		}
+	}
+
+	_, certificates, err := parseNodeTLSCertificatePEM([]byte(config.ServerCAPEM))
+	if err != nil || len(certificates) == 0 {
+		return ErrInvalidNodeRuntimeConfig
+	}
+	now := time.Now()
+	for _, certificate := range certificates {
+		if !certificate.IsCA || certificate.KeyUsage&x509.KeyUsageCertSign == 0 ||
+			now.Before(certificate.NotBefore) || !now.Before(certificate.NotAfter) {
+			return ErrInvalidNodeRuntimeConfig
+		}
+	}
 	return nil
 }
 

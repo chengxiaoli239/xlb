@@ -2,6 +2,8 @@
 
 Status: the Laravel control plane has a shared entitlement byte ledger with atomic reservation/receipt settlement and reverse quota routes protected by a node-certificate fingerprint mapping. The Go core has a provider-neutral quota authority interface, durable local lease journal/retry outbox, per-write byte permits, an HTTPS/TLS 1.3 mTLS authority client, and an optional quota-enforced isolated data plane. A shared settlement-ack fixture is asserted exactly by Laravel and parsed with Go's strict decoder. This locks the response field contract, but is not a live Laravel-to-Go mTLS session. The routes have not been exercised through a deployed TLS terminator or wired into a production Agent executable. The loopback-only test Agent emits `confirmed_test`, has no production profile renderer, and does not configure Mihomo/TUN. Nothing here is deployable for member traffic.
 
+The production-shaped `xlb-node-runtime/v2` schema now also requires a trusted HTTPS quota-authority descriptor, CA trust bundle, positive per-lease byte grant, bounded recovery-outbox batch, and bounded request timeout. This prevents a future production runtime config from omitting online quota enforcement prerequisites. The executable remains isolated-test-only and does not construct `HTTPQuotaAuthority` from this descriptor, so the validation is not production quota enforcement evidence.
+
 ## Trust Boundary
 
 - The Laravel control plane selects an already provisioned, healthy member node. Cloud-provider APIs provision whole nodes; this contract manages member peers on a node and does not depend on AWS.

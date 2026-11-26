@@ -49,6 +49,10 @@ func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
 			Status: agent.RuntimeProfileMihomoBridge, BridgeEndpoint: "https://bridge.example.invalid:9444",
 			BridgeServerCAPEM: testRuntimeRendererCA(t),
 		},
+		QuotaAuthority: agent.QuotaAuthorityRuntimeConfig{
+			Endpoint: "https://quota.example.invalid", ServerCAPEM: testRuntimeRendererCA(t),
+			GrantBytes: 4096, OutboxLimit: 100, TimeoutSeconds: 5,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +160,10 @@ func TestProductionShapedRuntimeSelectsMihomoBridgeRendererAndConfirmedReceipt(t
 		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
 			Status: agent.RuntimeProfileMihomoBridge, BridgeEndpoint: "https://bridge.example.invalid:9444",
 			BridgeServerCAPEM: caPEM,
+		},
+		QuotaAuthority: agent.QuotaAuthorityRuntimeConfig{
+			Endpoint: "https://quota.example.invalid", ServerCAPEM: caPEM,
+			GrantBytes: 4096, OutboxLimit: 100, TimeoutSeconds: 5,
 		},
 	})
 	if err != nil {
