@@ -129,7 +129,7 @@ done
 "$ADB_PATH" -s "$SERIAL" shell rm -rf "$device_stage"
 
 printf 'Running isolated Node Agent member TUN instrumentation on %s...\n' "$SERIAL"
-"$ADB_PATH" -s "$SERIAL" shell am instrument -w -r \
+if ! "$ADB_PATH" -s "$SERIAL" shell am instrument -w -r \
     -e disposable_avd true \
     -e node_id "$NODE_ID" \
     -e control_url "$CONTROL_ORIGIN" \
@@ -139,4 +139,9 @@ printf 'Running isolated Node Agent member TUN instrumentation on %s...\n' "$SER
     -e admin_cert_file "/data/user/0/$APP_PACKAGE/$app_stage/admin-cert.pem" \
     -e admin_key_file "/data/user/0/$APP_PACKAGE/$app_stage/admin-key.pem" \
     -e class "$TEST_CLASS" \
-    "$TEST_RUNNER"
+    "$TEST_RUNNER" >"$host_stage/instrumentation.log" 2>&1; then
+    cat "$host_stage/instrumentation.log" >&2
+    fail 'Android instrumentation exited unsuccessfully.'
+fi
+cat "$host_stage/instrumentation.log"
+"$SCRIPT_DIR/verify-instrumentation-success.sh" "$host_stage/instrumentation.log" 1
