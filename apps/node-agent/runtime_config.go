@@ -106,7 +106,7 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 		return ErrInvalidNodeRuntimeConfig
 	}
 	if config.SchemaVersion == TrustedNodeRuntimeSchemaV2 {
-		if config.NodeTLSIdentity.Source != "aws-kms" || !validKMSKeyARN(config.NodeTLSIdentity.KeyARN) ||
+		if config.NodeTLSIdentity.Source != "aws-kms" || !ValidKMSKeyARN(config.NodeTLSIdentity.KeyARN) ||
 			kmsKeyARNRegion(config.NodeTLSIdentity.KeyARN) != config.Node.Region {
 			return ErrInvalidNodeRuntimeConfig
 		}
@@ -117,7 +117,7 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 	return nil
 }
 
-func validKMSKeyARN(value string) bool {
+func ValidKMSKeyARN(value string) bool {
 	if len(value) < 70 || len(value) > 2048 || strings.TrimSpace(value) != value ||
 		strings.ContainsAny(value, " \t\r\n") {
 		return false
