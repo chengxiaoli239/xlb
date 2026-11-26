@@ -18,13 +18,17 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-26）
 
-**2026-11-26 AWS 会话恢复后只读盘点（最新）**：`ops/aws-cli sts get-caller-identity --profile xlb-ops` 成功，身份为账号 `289069331089` root。us-west-2 限定盘点没有活动 XLB lab/node 栈、`Project=xlb` 活动 EC2、`/xlb` SSM 参数或名称匹配 xlb 的 Secrets Manager 项。仅发现旧测试权限栈 `xlb-node-manager-access-usw2`，含 `XlbNodeCleanupRole`、`XlbNodeSsmRole` 和 `XlbNodeSsmProfile`，均未改动。该区仅有两个 AWS 托管 EBS/Secrets Manager 对称加密 key，没有可用于节点 mTLS 的 XLB P-256 签名 key。没有读取 secret 值、写入或删除云资源，也没有检查全账号账单/其他区域。首发门仍 5/12，模块门仍 Android/M6 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。真实 Node Agent key/certificate/CA/profile 与会员撤权回执仍是硬缺项；创建有费用的 KMS key 需先明确成本授权。
+**2026-11-26 AWS 会话恢复后只读盘点（临时 key 创建前基线）**：`ops/aws-cli sts get-caller-identity --profile xlb-ops` 成功，身份为账号 `289069331089` root。us-west-2 限定盘点没有活动 XLB lab/node 栈、`Project=xlb` 活动 EC2、`/xlb` SSM 参数或名称匹配 xlb 的 Secrets Manager 项。仅发现旧测试权限栈 `xlb-node-manager-access-usw2`，含 `XlbNodeCleanupRole`、`XlbNodeSsmRole` 和 `XlbNodeSsmProfile`，均未改动。该区仅有两个 AWS 托管 EBS/Secrets Manager 对称加密 key，没有可用于节点 mTLS 的 XLB P-256 签名 key。没有读取 secret 值、写入或删除云资源，也没有检查全账号账单/其他区域。首发门仍 5/12，模块门仍 Android/M6 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。真实 Node Agent key/certificate/CA/profile 与会员撤权回执仍是硬缺项；创建有费用的 KMS key 需先明确成本授权。
 
-**2026-11-26 成本只读检查**：Cost Explorer 对 11 月 1–26 日账户级未混合成本返回约 USD 685.75，其中 us-west-2 约 USD 0.07；主要花费发生于其他区域的非 XLB 标识资源，未据此把其他项目费用算给迅连宝。账户没有 AWS Budget。该估算有账单延迟且非最终金额。本项目不修改其他区域资源；新建有持续费用的 KMS 签名 key 需明确成本上限授权。
+**2026-11-26 成本只读检查（临时 key 创建前）**：Cost Explorer 对 11 月 1–26 日账户级未混合成本返回约 USD 685.75，其中 us-west-2 约 USD 0.07；主要花费发生于其他区域的非 XLB 标识资源，未据此把其他项目费用算给迅连宝。账户没有 AWS Budget。该估算有账单延迟且非最终金额。记录该快照时尚未执行本轮临时 KMS key 测试，之后仅创建一枚用户批准的临时 key 并安排待删除。本项目不修改其他区域资源；本轮单枚临时 KMS key 已获用户费用授权并保留给集中的隔离验收；删除尚未重新安排，测试完毕后再统一设待删除。若要重建或长期保留，仍须另行批准成本上限。
+
+**2026-11-26 Live KMS P-256 signer 验收**：用户明确授权临时 key 费用及随后释放。`us-west-2` 临时 `ECC_NIST_P256/SIGN_VERIFY` key 已通过真实 AWS SDK public-key/sign 调用完成 TLS 1.3 handshake acceptance（PASS）；最初按计划设为 `PendingDeletion`，后根据用户要求集中验收取消了待删除并重新启用同一 key；当前 key 保持 enabled 供后续 Node Agent 隔离验收使用，完成后统一安排最短 7 天待删除，期间持续计费。Key 不会被用于生产，节点侧生产 identity/profile/CA 与会员设备回执仍未满足；首发门保持 5/12。
+
+**2026-11-26 隔离节点 KMS role 最小授权**：node-lab IAM 模板支持可选精确 KMS key ARN，只有专用 `XlbLabSsmRole` 获得 `GetPublicKey`/`Sign`，不会修改现有 manager 或生产角色。CloudFormation validate 成功，IAM simulator 显示指定 key allowed、另一 key implicit deny，node-lab 5 项测试通过。下一步将其与单台 t3.small、30 分钟 TTL、TCP 443 出站的 KMS-backed Agent acceptance 合并为同一资源窗口；沿用 `$1` 人工预算上限，测试结束一起删除实验 IAM/EC2 栈，key 保留到本轮 KMS/节点验收完成后统一待删除。
 
 **2026-11-26 Q2 支付对账分页修复**：持久化 provider 每次按 event ID 取最多 500 条，cursor 依原始批次推进，避免窗外旧事件过滤后丢失 cursor，使后续页永远不可见。回归构造 500 条早期事件加一条目标时间窗事件，并通过真实 `PaymentReconciliationService` 断言 matched。ledger Feature 17/17（171 assertions）、sandbox payment Feature 7/7（87 assertions）、完整 Laravel 280 项（279 passed、1 skipped，2,484 assertions）、Pint passed。该修复只覆盖 local/testing 持久化 adapter，不验收真实商户 callback、对账服务或支付放行门。
 
-**2026-11-26 Live KMS signer handshake 夹具**：新增默认跳过、仅显式 `XLB_LIVE_KMS_KEY_ARN`/`XLB_LIVE_KMS_REGION` 启用的 Go 验收，使用临时本地证书和 TLS 1.3 handshake 实测 KMS `crypto.Signer`；不创建或删除资源。Go race 192/5 packages、vet/build 通过。下一步用本轮获批的临时 us-west-2 ECC_NIST_P256 key 运行该验收，然后将 key 设置为 AWS 最短 7 天待删除，并把剩余 7/12 放行门维持未通过。
+**2026-11-26 Live KMS signer handshake 夹具（准备阶段快照）**：新增默认跳过、仅显式 `XLB_LIVE_KMS_KEY_ARN`/`XLB_LIVE_KMS_REGION` 启用的 Go 验收，使用临时本地证书和 TLS 1.3 handshake 实测 KMS `crypto.Signer`；不创建或删除资源。Go race 192/5 packages、vet/build 通过。本段记录夹具建立时的待执行状态；后续实际 KMS 握手与 key deletion 状态见紧随其后的更新。
 
 **AWS 重新登录前的历史快照（2026-11-26）**：权威主线 `main=origin/main=09e3298a7790b404b4a0025006926bd6ec0ee87c`，CI `45764929395` success，工作区干净。本机 Node Agent 全量 race tests 192 项/5 packages、`go vet` 与 `go build` 通过。`codex/aws-kms-node-identity` worktree 在 `961406d` 且无 upstream；其 KMS signer、证书文件保护和 trusted runtime 能力已由主线较新实现覆盖，旧 quota/runtime 改动未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `session expired`，所以 AWS 资源状态未复核，无云查询或写入。12 项首发门仍为 5/12（42%），不是工时或上线概率；Android/M6、Web/API+支付、Node Agent、发布运维分别为 2/3、1/2、1/2、1/3。下一项继续做不依赖云的 Android/Node Agent 离线验收；会话恢复后先只读核查已有 KMS/IAM/节点证书材料，任何有费用的资源操作须先核成本并取得明确授权。
 

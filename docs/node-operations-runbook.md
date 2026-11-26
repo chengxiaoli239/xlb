@@ -47,7 +47,9 @@ AWS CLI 统一经 `ops/aws-cli` 执行。该入口移除大小写形式的 HTTP/
 
 首次需要准备：一个具有 EC2/CloudFormation/SSM/Scheduler 操作权限的个人项目运维身份、同区 VPC/公网子网、经核实的 AMI、专用 SSM 实例角色和到期终止角色。不要复用生产发布角色。终止角色由 `scheduler.amazonaws.com` 扮演，仅允许终止 `Project=xlb`、`Environment=test`、`ManagedBy=xlb-node-lab` 的实例；PassRole 只允许这两个精确角色。权限边界必须允许这些动作，单独添加普通策略不足以解除边界拒绝。
 
-专用权限预览：`ops/aws-node-lab-access.template.json`。只定义 `XlbLabSsmRole` / `XlbLabSsmProfile` 和 `XlbLabExpiryRole`；前者使用 AWS 标准 SSM 托管实例权限，后者仅可终止本账户 `us-west-2` 中同时具备上述三项标签的实例。调度角色信任限本账户、该区 default schedule group；角色不包含数据库、网站发布或生产 EC2 管理权限。实例角色的 SSM 托管权限使用 AWS 标准策略，其中部分资源范围为 `*`，不能宣传成“所有动作均只限一个实例”。
+专用权限预览：`ops/aws-node-lab-access.template.json`。默认定义 `XlbLabSsmRole` / `XlbLabSsmProfile` 和 `XlbLabExpiryRole`；传入 `NodeKmsKeyArn` 时另附仅限该 key 的 `XlbLabSsmRole` KMS 权限；前者使用 AWS 标准 SSM 托管实例权限，后者仅可终止本账户 `us-west-2` 中同时具备上述三项标签的实例。调度角色信任限本账户、该区 default schedule group；角色不包含数据库、网站发布或生产 EC2 管理权限。实例角色的 SSM 托管权限使用 AWS 标准策略，其中部分资源范围为 `*`，不能宣传成“所有动作均只限一个实例”。
+
+需要在隔离 Node Agent 上验收 KMS signer 时，可在权限栈参数 `NodeKmsKeyArn` 明确传入一枚 `us-west-2` customer-managed KMS key ARN。该参数默认空，空值不会附加 KMS 权限；非空时模板只给专用 `XlbLabSsmRole` `kms:GetPublicKey` 与 `kms:Sign`，且 Resource 固定为传入的单个 ARN。不要把权限加到现有 `XlbNodeSsmRole` 或任何生产角色。测试结束先回收节点和该临时权限栈，随后按 KMS 最短待删除周期释放临时 key；pending deletion 期间仍计费。
 
 这是单独的权限栈，创建应有明确 IAM 授权，不能复用节点脚本的 `delete` 操作处理它。以固定栈名 `xlb-lab-access-usw2` 在 `us-west-2` 创建并明确提供 `CAPABILITY_NAMED_IAM`；先核对不存在同名栈/角色，不更新或覆盖既有角色。测试节点全部释放后，如不保留实验权限，应核对栈标签、资源仅为这两角色及实例配置文件、没有其他节点依赖，再删除该精确权限栈。2026-11-08 用户已批准该范围，本次已成功创建并按约删除。
 

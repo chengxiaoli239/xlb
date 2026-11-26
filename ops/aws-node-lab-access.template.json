@@ -6,6 +6,17 @@
       "Type": "String",
       "Default": "us-west-2",
       "AllowedValues": ["us-west-2"]
+    },
+    "NodeKmsKeyArn": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^arn:aws:kms:us-west-2:[0-9]{12}:key/[0-9a-fA-F-]{36}$",
+      "ConstraintDescription": "Optional. When set, must be one us-west-2 KMS key ARN."
+    }
+  },
+  "Conditions": {
+    "UseNodeKmsKey": {
+      "Fn::Not": [{"Fn::Equals": [{"Ref": "NodeKmsKeyArn"}, ""]}]
     }
   },
   "Resources": {
@@ -27,6 +38,22 @@
           {"Key": "Environment", "Value": "test"},
           {"Key": "ManagedBy", "Value": "xlb-node-lab"}
         ]
+      }
+    },
+    "NodeKmsSigningPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "Condition": "UseNodeKmsKey",
+      "Properties": {
+        "PolicyName": "UseConfiguredXlbLabKmsSigningKey",
+        "Roles": [{"Ref": "SsmRole"}],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Action": ["kms:GetPublicKey", "kms:Sign"],
+            "Resource": {"Ref": "NodeKmsKeyArn"}
+          }]
+        }
       }
     },
     "SsmProfile": {
