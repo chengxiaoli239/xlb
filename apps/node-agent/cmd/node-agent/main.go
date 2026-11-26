@@ -41,13 +41,21 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	identitySource, keyARN, err := resolveNodeTLSIdentitySource(
+		runtimeConfig,
+		os.Getenv("NODE_AGENT_TLS_IDENTITY_SOURCE"),
+		os.Getenv("NODE_AGENT_TLS_KMS_KEY_ID"),
+	)
+	if err != nil {
+		return err
+	}
 	identity, err := loadNodeTLSIdentity(
 		nodeID,
-		os.Getenv("NODE_AGENT_TLS_IDENTITY_SOURCE"),
+		identitySource,
 		certificatePath,
 		privateKeyPath,
 		clientCAPath,
-		os.Getenv("NODE_AGENT_TLS_KMS_KEY_ID"),
+		keyARN,
 		os.Getenv("AWS_REGION"),
 	)
 	if err != nil {
@@ -131,6 +139,40 @@ func run() error {
 		return err
 	case <-signals:
 		return shutdownServers(servers)
+	}
+}
+
+func resolveNodeTLSIdentitySource(
+	runtimeConfig agent.TrustedNodeRuntimeConfig,
+	environmentSource string,
+	environmentKeyARN string,
+) (string, string, error) {
+	switch runtimeConfig.Environment {
+	case agent.RuntimeEnvironmentTest:
+		if runtimeConfig.SchemaVersion != agent.TrustedNodeRuntimeSchemaV1 ||
+			runtimeConfig.NodeTLSIdentity.Source != "" || runtimeConfig.NodeTLSIdentity.KeyARN != "" {
+			return "", "", agent.ErrInvalidNodeRuntimeConfig
+		}
+		if environmentSource == "" {
+			environmentSource = "test-files"
+		}
+		if environmentSource == "test-files" && environmentKeyARN == "" {
+			return environmentSource, "", nil
+		}
+		if environmentSource == "aws-kms" && agent.ValidKMSKeyARN(environmentKeyARN) {
+			return environmentSource, environmentKeyARN, nil
+		}
+		return "", "", agent.ErrInvalidNodeRuntimeConfig
+	case agent.RuntimeEnvironmentProd:
+		if runtimeConfig.SchemaVersion != agent.TrustedNodeRuntimeSchemaV2 ||
+			runtimeConfig.NodeTLSIdentity.Source != "aws-kms" ||
+			!agent.ValidKMSKeyARN(runtimeConfig.NodeTLSIdentity.KeyARN) ||
+			environmentSource != "" || environmentKeyARN != "" {
+			return "", "", agent.ErrInvalidNodeRuntimeConfig
+		}
+		return runtimeConfig.NodeTLSIdentity.Source, runtimeConfig.NodeTLSIdentity.KeyARN, nil
+	default:
+		return "", "", agent.ErrInvalidNodeRuntimeConfig
 	}
 }
 

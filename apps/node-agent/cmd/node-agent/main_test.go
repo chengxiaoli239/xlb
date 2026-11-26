@@ -257,6 +257,45 @@ func TestLoadNodeTLSIdentityUsesFileProviderOnlyForIsolatedTestMode(t *testing.T
 	}
 }
 
+func TestResolveNodeTLSIdentitySourceUsesTrustedRuntimeARNInProduction(t *testing.T) {
+	keyARN := "arn:aws:kms:us-west-2:123456789012:key/mrk-12345678-1234-1234-1234-123456789012"
+	productionConfig := agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV2,
+		Environment:   agent.RuntimeEnvironmentProd,
+		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+		NodeTLSIdentity: agent.NodeTLSIdentityRuntimeConfig{
+			Source: "aws-kms", KeyARN: keyARN,
+		},
+	}
+	source, resolvedARN, err := resolveNodeTLSIdentitySource(productionConfig, "", "")
+	if err != nil {
+		t.Fatalf("resolveNodeTLSIdentitySource error = %v", err)
+	}
+	if source != "aws-kms" || resolvedARN != keyARN {
+		t.Fatalf("resolved source/ARN=%q/%q; want aws-kms/%q", source, resolvedARN, keyARN)
+	}
+	if _, _, err := resolveNodeTLSIdentitySource(productionConfig, "aws-kms", keyARN); err == nil {
+		t.Fatal("production runtime accepted environment overrides for its trusted KMS key")
+	}
+}
+
+func TestResolveNodeTLSIdentitySourceKeepsIsolatedTestDefaultsAndExplicitKMSSelection(t *testing.T) {
+	isolatedConfig := agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV1,
+		Environment:   agent.RuntimeEnvironmentTest,
+		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+	}
+	source, keyARN, err := resolveNodeTLSIdentitySource(isolatedConfig, "", "")
+	if err != nil || source != "test-files" || keyARN != "" {
+		t.Fatalf("default isolated-test source=%q/%q err=%v", source, keyARN, err)
+	}
+	keyARN = "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+	source, resolvedARN, err := resolveNodeTLSIdentitySource(isolatedConfig, "aws-kms", keyARN)
+	if err != nil || source != "aws-kms" || resolvedARN != keyARN {
+		t.Fatalf("explicit isolated-test KMS source=%q/%q err=%v", source, resolvedARN, err)
+	}
+}
+
 func TestProbeListenerMustBeDistinctLoopback(t *testing.T) {
 	tests := []struct {
 		name    string
