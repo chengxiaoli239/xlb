@@ -76,6 +76,11 @@ except OSError as error:
     raise SystemExit(f'ERROR: no local SSM port-forward is listening on 127.0.0.1:{port} ({type(error).__name__}).')
 PY
 
+existing_reverse=$($ADB_PATH -s "$SERIAL" reverse --list)
+if printf '%s\n' "$existing_reverse" | awk -v port="tcp:$CONTROL_PORT" '$1 == port || $2 == port { found = 1 } END { exit !found }'; then
+    fail "The dedicated AVD already has a reverse mapping for tcp:$CONTROL_PORT; refusing to replace it."
+fi
+
 printf 'Building the Debug app and AndroidTest APK...\n'
 (
     cd "$ANDROID_ROOT_DIR"
@@ -103,12 +108,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-existing_reverse=$($ADB_PATH -s "$SERIAL" reverse --list)
-if printf '%s\n' "$existing_reverse" | awk -v port="tcp:$CONTROL_PORT" '$1 == port || $2 == port { found = 1 } END { exit !found }'; then
-    fail "The dedicated AVD already has a reverse mapping for tcp:$CONTROL_PORT; refusing to replace it."
-fi
-control_reverse_added=true
 "$ADB_PATH" -s "$SERIAL" reverse "tcp:$CONTROL_PORT" "tcp:$CONTROL_PORT"
+control_reverse_added=true
 
 cp -- "$NODE_CA" "$host_stage/node-ca.pem"
 cp -- "$ADMIN_CERT" "$host_stage/admin-cert.pem"

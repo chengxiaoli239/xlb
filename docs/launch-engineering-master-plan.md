@@ -24,7 +24,7 @@
 
 **2026-11-27 Node Agent KMS identity 启动诊断收敛（离线）**：AWS KMS 服务端故障只输出安全的 ErrorCode 或错误类型，避免把原始响应消息写入节点日志；identity startup 保留脱敏错误链。`go test -race ./...` 207/5 packages、`go vet`、`go build` 通过。它不证明当前实例具备 KMS 权限或 Agent 已启动；AWS root session 过期后，需用户重新 `aws login` 才能检查实际 `NodeKmsKeyArn` 授权并继续有界复测。
 
-**2026-11-27 M6 remote Android instrumentation runner（离线）**：新增 Android 远端 Node Agent instrumentation runner，强制复用专用 AVD guard，输入 endpoint、expected public egress IPv4 和临时 mTLS 文件，将凭据复制到隔离 app cache 并在退出时清理；脚本语法与缺参拒绝检查通过。该 runner 消除了远端 test class 需要人工手工部署证书/构造 instrumentation extras 的步骤；无 AWS session 时未执行真实节点测试，M6 仍未通过、12 项首发门不变为 5/12。
+**2026-11-27 M6 remote Android instrumentation runner（离线）**：新增 Android 远端 Node Agent instrumentation runner，强制复用专用 AVD guard，通过本机 SSM 转发 origin 与 `adb reverse` 连接管理 API，拒绝覆盖已有 reverse mapping；暂存 mTLS 测试文件只写入 AVD app cache 且在退出时清理。Fake-adb 回归覆盖非法公网出口、控制 origin、node ID 注入与映射冲突，确认冲突时不安装 APK、不改映射；runner/AVD guard 测试通过。该 runner 消除了人工部署证书/构造 instrumentation extras 的步骤；无 AWS session 时未执行真实节点测试，M6 仍未通过、12 项首发门不变为 5/12。
 
 **2026-11-27 M6 Android→隔离节点实测准备未通过**：当前 `xlb-lab-us-20261127-m6member2` 栈为一台 `t3.small`、单一 `/32` TCP 443 入站和 60 分钟 Scheduler TTL；截止时间为 2026-11-26 18:55:28 UTC。实例运行检查通过且 SSM Online；Android AVD instrumentation 的 Debug/AndroidTest/JVM 构建通过，并已编译基于显式预期公网 IPv4 的 VPN 出口断言，Node Agent test service 因 KMS TLS identity 加载失败而停止，未产生该节点的 provisioning receipt、TUN 流量或撤权回执。18:00 UTC 只读 KMS 查询显示签名 key 为 `Enabled`，覆盖较早的 `PendingDeletion` 状态记录；随后 `xlb-ops` STS 返回 `ExpiredToken`，因此尚未确认 `XlbLabSsmRole` 的当前单 key 权限，也未清理 CloudFormation 节点栈。下次用户登录后先只读检查 IAM 参数和资源状态，随后仅在有效授权窗口内继续；不增加首发放行门，整体仍 5/12，Android/M6 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。
 

@@ -4,7 +4,15 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 test_dir="$(mktemp -d "${TMPDIR:-/tmp}/xlb-remote-node-runner-test.XXXXXX")"
-trap 'rm -rf "$test_dir"' EXIT
+ssm_listener_pid=''
+cleanup() {
+    if [[ -n "$ssm_listener_pid" ]]; then
+        kill "$ssm_listener_pid" >/dev/null 2>&1 || true
+        wait "$ssm_listener_pid" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$test_dir"
+}
+trap cleanup EXIT
 
 fake_sdk="$test_dir/sdk"
 fake_adb="$fake_sdk/platform-tools/adb"
@@ -12,6 +20,7 @@ mkdir -p "$(dirname "$fake_adb")"
 cat >"$fake_adb" <<'ADB'
 #!/usr/bin/env bash
 set -euo pipefail
+printf '%s\n' "$*" >>"$FAKE_ADB_LOG"
 
 case "$*" in
     devices)
@@ -26,8 +35,10 @@ case "$*" in
     '-s emulator-5554 shell getprop ro.build.fingerprint')
         printf 'generic/sdk_gphone64_arm64/emulator:15/AP3A.240905.015/1234567:userdebug/test-keys\n'
         ;;
+    '-s emulator-5554 reverse --list')
+        printf 'emulator-5554 tcp:%s tcp:%s\n' "$FAKE_REVERSE_PORT" "$FAKE_REVERSE_PORT"
+        ;;
     *)
-        printf '%s\n' "$*" >>"$FAKE_ADB_LOG"
         exit 97
         ;;
 esac
@@ -80,9 +91,44 @@ if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
 fi
 grep -Fq 'isolated node ID contains unsupported characters' "$invalid_node_output"
 
-if [[ -e "$FAKE_ADB_LOG" ]]; then
+listener_port_file="$test_dir/ssm-listener-port"
+python3 - "$listener_port_file" <<'PY' &
+import socket
+import sys
+import time
+
+listener = socket.socket()
+listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+listener.bind(('127.0.0.1', 0))
+listener.listen()
+with open(sys.argv[1], 'w', encoding='ascii') as port_file:
+    port_file.write(str(listener.getsockname()[1]))
+while True:
+    connection, _ = listener.accept()
+    connection.close()
+PY
+ssm_listener_pid=$!
+for _ in $(seq 1 50); do
+    [[ -s "$listener_port_file" ]] && break
+    sleep 0.1
+done
+[[ -s "$listener_port_file" ]] || { printf 'Local SSM listener fixture did not start.\n' >&2; exit 1; }
+control_port=$(cat "$listener_port_file")
+export FAKE_REVERSE_PORT="$control_port"
+
+reverse_conflict_output="$test_dir/reverse-conflict.log"
+if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
+    emulator-5554 xlb-lab-test "https://127.0.0.1:$control_port" https://54.187.217.237 54.187.217.237 \
+    "$test_dir/node-ca.pem" "$test_dir/admin-cert.pem" "$test_dir/admin-key.pem" \
+    >"$reverse_conflict_output" 2>&1; then
+    printf 'An existing ADB reverse mapping was accepted and replaced.\n' >&2
+    exit 1
+fi
+grep -Fq 'already has a reverse mapping' "$reverse_conflict_output"
+
+if grep -Eq 'install -r|reverse tcp:' "$FAKE_ADB_LOG"; then
     cat "$FAKE_ADB_LOG" >&2
-    printf 'Argument validation contacted adb before rejecting unsafe inputs.\n' >&2
+    printf 'Runner installed an APK or changed an ADB mapping before refusing the conflict.\n' >&2
     exit 1
 fi
 
