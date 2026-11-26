@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-26）
 
-- **PHP Node Agent mTLS credential file protection（2026-11-26，Laravel offline）**：`NodeAccessAgentHttpClient` now rejects symlink/non-regular/empty/oversized credential files, group/other-writable certificate or CA files, and private keys accessible to group/others. It uses `lstat` + open/fstat device/inode comparison to reject file replacement while validating. Unit regression 5/5、Pint passed；PHP Node provisioning/mTLS integration suite is being re-run. It does not prove production credential installation or a live node connection.
+- **PHP Node Agent mTLS credential file protection（2026-11-26，`393d51a`）**：`NodeAccessAgentHttpClient` now rejects symlink/non-regular/empty/oversized credential files, group/other-writable certificate or CA files, and private keys accessible to group/others. It uses `lstat` + open/fstat device/inode comparison to reject file replacement while validating. Focused unit tests 5/5、Node provisioning+client tests 14/14（146 assertions）、Pint passed；CI `45763371527` 全部通过。此项保护本机配置，不证明生产 secret mount、live node connection 或 production release。
 
 - **Node Agent trusted runtime config 文件边界（2026-11-26，离线 Go）**：`readRuntimeConfig` 现在在解析前用 `Lstat` 和打开后 `fstat` 复核，拒绝符号链接、非普通文件、组/其他用户可写文件和替换竞态；isolated-test runtime parser 专项 26/26 通过。此项保护未来 production 配置的信任来源，不让 Node Agent 启动或读取 AWS；完整 race/vet/build 与 Laravel quota integration 本轮结果待本阶段提交后记录。
 
@@ -14,7 +14,7 @@
 
 - **Node Agent quota client → durable data-plane initializer（2026-11-26，离线 Go）**：新增 `NewRuntimeDataPlane`，isolated-test 继续使用不接在线计量的 test plane；validated production-shaped v2 先由 KMS-backed node signer 与 trusted quota CA 构造 HTTPS/TLS 1.3 mTLS authority，再恢复 reservation/settlement durable outboxes，未恢复成功则不返回 data plane。trusted runtime 将单次 quota lease 限制在 1–64 MiB，避免配置意外预留过大额度；正向本机配置构造、server-only certificate 拒绝与隔离模式不启用 quota 三项回归通过。当前 Node Agent TLS identity 证书还用于访问 PHP quota authority，因此签发叶证书必须同时具备 ServerAuth 与 ClientAuth，其 fingerprint 要与 PHP `nodes.agent_client_cert_sha256` 一致，PHP server CA 则由 runtime trust bundle 配置。生产 executable 仍在读取配置前拒绝 production mode，因此未部署/启用该路径，不代表真实 mTLS、商户控制面额度或生产流量计量验收；无实际证书材料时不宣称该映射已验证。
 
-- **当前主线与发布门快照（2026-11-26）**：本轮阶段代码 `7340964c8d5e4ee3c8d877b411cec69dab9c6e8c` 已推送，CI `45757280170` 全部成功，主线工作树干净。AWS `xlb-ops` 本轮复核为 `session expired`，资源状态未读取或推断。受控首发放行门仍为 5/12（42%），Node Agent 配额配置校验不增加放行门数。下一步完成可离线的 quota mTLS client identity 与 durable journal startup 接线审查；恢复会话后先只读盘点 KMS/IAM/节点材料。
+- **当前主线与发布门快照（2026-11-26）**：主线 `main=origin/main=393d51a51c73b383eabaceeec68c8746d8f6de45`，工作树干净，CI `45763371527` 全部成功。AWS `xlb-ops` 本轮复核仍为 `session expired`，资源状态未读取或推断。受控首发放行门仍为 5/12（42%）：Android/M6 2/3、Web/API 与支付 1/2、Node Agent 1/2、发布运维 1/3。下一步继续对 production-shaped quota identity 与 runtime 启动闭合做离线验收；AWS 恢复后先只读盘点 KMS/IAM/节点材料，不推断旧快照为当前状态。
 
 - **Node Agent production-shaped runtime 配额前置契约（2026-11-26，离线 Go，`7340964`）**：runtime v1 现在仅允许 `isolated-test`，不再把仅声明 secure-store 的 v1 `production` 配置误判为受支持输入。runtime v2 要求 trusted HTTPS quota-authority endpoint、有效 CA bundle、正数 lease grant、1–1000 的 outbox recovery batch 和 1–60 秒 timeout；拒绝缺失配置、非 HTTPS/无 hostname、无效证书和越界值，并拒绝在 v1 test 配置里携带 quota authority。production executable 仍拒绝启动，quota descriptor 尚未实例化为 `HTTPQuotaAuthority`，不表示生产在线计量已接通。定向 runtime tests 49 项通过；全套 Node Agent `go test -race ./...` 187 passed/5 packages、`go vet ./...`、`go build ./...` 通过；hosted CI `45757280170` 全部成功。下一步应审查启动器如何在生产 gate 保持关闭时接上持久配额 journal 与启动恢复，再完成 mTLS transport 构造合同；AWS live 盘点仍待用户恢复会话。
 
