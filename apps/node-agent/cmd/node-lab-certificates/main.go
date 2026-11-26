@@ -153,7 +153,7 @@ func writeCertificateBundle(outputDirectory, nodeID, keyARN string, publicIP net
 		NotBefore:    now.Add(-time.Minute),
 		NotAfter:     now.Add(certificateLifetime),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		IPAddresses:  []net.IP{publicIP, net.ParseIP("127.0.0.1")},
 	}
 	serverDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, caCertificate, nodePublicKey, caKey)

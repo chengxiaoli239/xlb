@@ -53,8 +53,10 @@ func TestWriteCertificateBundleMatchesKMSPublicKeyAndSANDomains(t *testing.T) {
 	if err := serverCertificate.VerifyHostname(nodePublicIP.String()); err != nil {
 		t.Fatalf("node certificate does not cover the public bridge endpoint: %v", err)
 	}
-	if len(serverCertificate.ExtKeyUsage) != 1 || serverCertificate.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth {
-		t.Fatalf("node certificate extended key usage = %v, want server auth only", serverCertificate.ExtKeyUsage)
+	if len(serverCertificate.ExtKeyUsage) != 2 ||
+		!containsExtendedKeyUsage(serverCertificate.ExtKeyUsage, x509.ExtKeyUsageServerAuth) ||
+		!containsExtendedKeyUsage(serverCertificate.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
+		t.Fatalf("node certificate extended key usage = %v, want server and client auth", serverCertificate.ExtKeyUsage)
 	}
 	serverPublicKey, ok := serverCertificate.PublicKey.(*ecdsa.PublicKey)
 	if !ok || serverPublicKey.Curve != elliptic.P256() ||
@@ -122,6 +124,15 @@ func TestWriteCertificateBundleMatchesKMSPublicKeyAndSANDomains(t *testing.T) {
 		manifest.NodePublicIPv4 != nodePublicIP.String() || manifest.NodeID != "xlb-lab-us-test" {
 		t.Fatalf("certificate manifest identity is incorrect: %+v", manifest)
 	}
+}
+
+func containsExtendedKeyUsage(usages []x509.ExtKeyUsage, expected x509.ExtKeyUsage) bool {
+	for _, usage := range usages {
+		if usage == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCertificateBundleRejectsUnsafeInputs(t *testing.T) {
