@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -24,18 +25,44 @@ import (
 	agent "xlb/node-agent"
 )
 
-func TestProductionModeRemainsUnavailable(t *testing.T) {
+func TestProductionModeRequiresTrustedStartupConfigurationBeforeAWSAccess(t *testing.T) {
 	t.Setenv("NODE_AGENT_MODE", "production")
-	t.Setenv("NODE_AGENT_TLS_IDENTITY_SOURCE", "aws-kms")
-	t.Setenv("NODE_AGENT_TLS_KMS_KEY_ID", "arn:aws:kms:us-west-2:123456789012:key/not-created-by-test")
 
 	err := run()
-	if err == nil || !strings.Contains(err.Error(), "production mode is not implemented") {
-		t.Fatalf("run() error = %v; want production mode to fail closed", err)
+	if err == nil || !strings.Contains(err.Error(), "identity, runtime config, and state path are required") {
+		t.Fatalf("run() error = %v; want production mode to require trusted startup inputs before AWS access", err)
 	}
 }
 
-func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
+func TestRuntimeEnvironmentForModeAcceptsOnlyExplicitModes(t *testing.T) {
+	tests := []struct {
+		mode        string
+		wantEnv     string
+		wantFailure bool
+	}{
+		{mode: "isolated-test", wantEnv: agent.RuntimeEnvironmentTest},
+		{mode: "production", wantEnv: agent.RuntimeEnvironmentProd},
+		{mode: "", wantFailure: true},
+		{mode: "staging", wantFailure: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.mode, func(t *testing.T) {
+			got, err := runtimeEnvironmentForMode(test.mode)
+			if test.wantFailure {
+				if err == nil {
+					t.Fatalf("runtimeEnvironmentForMode(%q) unexpectedly succeeded", test.mode)
+				}
+				return
+			}
+			if err != nil || got != test.wantEnv {
+				t.Fatalf("runtimeEnvironmentForMode(%q) = %q, %v; want %q", test.mode, got, err, test.wantEnv)
+			}
+		})
+	}
+}
+
+func TestRuntimeConfigMustMatchModeAndAgentIdentity(t *testing.T) {
 	productionConfig, err := json.Marshal(agent.TrustedNodeRuntimeConfig{
 		SchemaVersion: agent.TrustedNodeRuntimeSchemaV2,
 		Environment:   agent.RuntimeEnvironmentProd,
@@ -73,12 +100,12 @@ func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
 			config: `{"schema_version":"xlb-node-runtime/v1","environment":"isolated-test","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"test-file-only"},"profile_renderer":{"status":"unavailable"}}`,
 		},
 		{
-			name:   "production runtime is not enabled",
+			name:   "production schema v1 is invalid",
 			config: `{"schema_version":"xlb-node-runtime/v1","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"unavailable"}}`,
 			want:   agent.ErrInvalidNodeRuntimeConfig,
 		},
 		{
-			name:   "production-shaped v2 renderer is not runnable",
+			name:   "production v2 config is rejected in isolated-test mode",
 			config: string(productionConfig),
 			want:   agent.ErrInvalidNodeRuntimeConfig,
 		},
@@ -94,7 +121,7 @@ func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
 			if err := os.WriteFile(path, []byte(test.config), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			err := validateRuntimeConfig(path, "node-a")
+			err := validateRuntimeConfig(path, "node-a", agent.RuntimeEnvironmentTest)
 			if test.want == nil && err != nil {
 				t.Fatalf("validateRuntimeConfig error = %v", err)
 			}
@@ -129,7 +156,7 @@ func TestRuntimeConfigCanSelectIsolatedMihomoRenderer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded, err := readRuntimeConfig(path, "node-a")
+	decoded, err := readRuntimeConfig(path, "node-a", agent.RuntimeEnvironmentTest)
 	if err != nil {
 		t.Fatalf("readRuntimeConfig error = %v", err)
 	}
@@ -147,6 +174,34 @@ func TestRuntimeConfigCanSelectIsolatedMihomoRenderer(t *testing.T) {
 	if receipt.ConfirmationStatus != "confirmed_test" || receipt.ProfileArtifact == nil {
 		t.Fatalf("renderer receipt status/artifact = %q/%v; want confirmed_test with profile",
 			receipt.ConfirmationStatus, receipt.ProfileArtifact != nil)
+	}
+}
+
+func TestReadRuntimeConfigAcceptsTrustedProductionV2OnlyForProductionMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("production trusted-file ownership validation is not implemented on Windows")
+	}
+	configPayload, err := json.Marshal(productionNodeRuntimeConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "production-runtime.json")
+	if err := os.WriteFile(path, configPayload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := readRuntimeConfig(path, "node-a", agent.RuntimeEnvironmentProd)
+	if err != nil {
+		t.Fatalf("readRuntimeConfig production v2 error = %v", err)
+	}
+	if config.SchemaVersion != agent.TrustedNodeRuntimeSchemaV2 || config.Environment != agent.RuntimeEnvironmentProd {
+		t.Fatalf("runtime config identity = %q/%q; want trusted production v2", config.SchemaVersion, config.Environment)
+	}
+	if _, err := readRuntimeConfig(path, "node-a", agent.RuntimeEnvironmentTest); err == nil {
+		t.Fatal("production runtime config was accepted in isolated-test mode")
+	}
+	if _, err := readRuntimeConfig(path, "node-b", agent.RuntimeEnvironmentProd); err == nil {
+		t.Fatal("production runtime config was accepted for another node identity")
 	}
 }
 
@@ -231,14 +286,37 @@ func TestRuntimeConfigRejectsSymlinkAndGroupWritableFiles(t *testing.T) {
 	if err := os.Symlink(protectedPath, symlinkPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readRuntimeConfig(symlinkPath, "node-a"); err == nil {
+	if _, err := readRuntimeConfig(symlinkPath, "node-a", agent.RuntimeEnvironmentTest); err == nil {
 		t.Fatal("runtime config loader accepted a symlink")
 	}
 	if err := os.Chmod(protectedPath, 0o660); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readRuntimeConfig(protectedPath, "node-a"); err == nil {
+	if _, err := readRuntimeConfig(protectedPath, "node-a", agent.RuntimeEnvironmentTest); err == nil {
 		t.Fatal("runtime config loader accepted a group-writable file")
+	}
+}
+
+func TestProductionModeRejectsUntrustedRuntimeFilesBeforeKMSAccess(t *testing.T) {
+	configPayload, err := json.Marshal(productionNodeRuntimeConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "runtime.json")
+	if err := os.WriteFile(path, configPayload, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o660); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("NODE_AGENT_MODE", "production")
+	t.Setenv("NODE_AGENT_NODE_ID", "node-a")
+	t.Setenv("NODE_AGENT_RUNTIME_CONFIG", path)
+	t.Setenv("NODE_AGENT_STATE_PATH", filepath.Join(t.TempDir(), "state"))
+	t.Setenv("NODE_AGENT_CAPACITY", "4")
+	if err := run(); err == nil || !strings.Contains(err.Error(), "protected regular file") {
+		t.Fatalf("run() error = %v; want untrusted runtime file to fail before KMS access", err)
 	}
 }
 

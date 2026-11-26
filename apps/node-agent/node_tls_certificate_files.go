@@ -91,7 +91,8 @@ func readNodeTLSCertificateFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !fileInfo.Mode().IsRegular() || fileInfo.Mode()&os.ModeSymlink != 0 || fileInfo.Mode().Perm()&0o022 != 0 {
+	if ValidateProtectedNodeRuntimeFile(path) != nil || !fileInfo.Mode().IsRegular() ||
+		fileInfo.Mode()&os.ModeSymlink != 0 || fileInfo.Mode().Perm()&0o022 != 0 {
 		return nil, ErrInvalidKMSNodeTLSIdentity
 	}
 	file, err := os.Open(path)
@@ -103,7 +104,8 @@ func readNodeTLSCertificateFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !os.SameFile(fileInfo, openedInfo) || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0o022 != 0 {
+	if !os.SameFile(fileInfo, openedInfo) || ValidateProtectedNodeRuntimeFile(path) != nil ||
+		!openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0o022 != 0 {
 		return nil, ErrInvalidKMSNodeTLSIdentity
 	}
 	contents, err := io.ReadAll(io.LimitReader(file, maxNodeTLSCertificateFileBytes+1))

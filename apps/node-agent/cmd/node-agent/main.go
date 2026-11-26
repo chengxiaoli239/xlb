@@ -26,8 +26,9 @@ func main() {
 }
 
 func run() error {
-	if os.Getenv("NODE_AGENT_MODE") != "isolated-test" {
-		return errors.New("NODE_AGENT_MODE must be isolated-test; production mode is not implemented")
+	runtimeEnvironment, err := runtimeEnvironmentForMode(os.Getenv("NODE_AGENT_MODE"))
+	if err != nil {
+		return err
 	}
 	nodeID := os.Getenv("NODE_AGENT_NODE_ID")
 	runtimeConfigPath := os.Getenv("NODE_AGENT_RUNTIME_CONFIG")
@@ -38,7 +39,7 @@ func run() error {
 	if nodeID == "" || runtimeConfigPath == "" || statePath == "" {
 		return errors.New("node agent identity, runtime config, and state path are required")
 	}
-	runtimeConfig, err := readRuntimeConfig(runtimeConfigPath, nodeID)
+	runtimeConfig, err := readRuntimeConfig(runtimeConfigPath, nodeID, runtimeEnvironment)
 	if err != nil {
 		return err
 	}
@@ -65,18 +66,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	identity, err := loadNodeTLSIdentity(
-		nodeID,
-		identitySource.source,
-		certificatePath,
-		privateKeyPath,
-		clientCAPath,
-		identitySource.keyARN,
-		identitySource.region,
-	)
-	if err != nil {
-		return err
-	}
 
 	capacity, err := strconv.Atoi(os.Getenv("NODE_AGENT_CAPACITY"))
 	if err != nil || capacity < 1 || capacity > 4096 {
@@ -91,6 +80,19 @@ func run() error {
 		return err
 	}
 	defer processLock.Close()
+
+	identity, err := loadNodeTLSIdentity(
+		nodeID,
+		identitySource.source,
+		certificatePath,
+		privateKeyPath,
+		clientCAPath,
+		identitySource.keyARN,
+		identitySource.region,
+	)
+	if err != nil {
+		return err
+	}
 
 	servers, err := buildRuntimeHTTPServers(context.Background(), runtimeConfig, listeners, store, identity)
 	if err != nil {
@@ -116,6 +118,17 @@ func run() error {
 		return err
 	case <-signals:
 		return shutdownServers(servers)
+	}
+}
+
+func runtimeEnvironmentForMode(mode string) (string, error) {
+	switch mode {
+	case "isolated-test":
+		return agent.RuntimeEnvironmentTest, nil
+	case "production":
+		return agent.RuntimeEnvironmentProd, nil
+	default:
+		return "", errors.New("NODE_AGENT_MODE must be isolated-test or production")
 	}
 }
 
@@ -410,14 +423,15 @@ func shutdownServers(servers []*http.Server) error {
 	return nil
 }
 
-func validateRuntimeConfig(path, nodeID string) error {
-	_, err := readRuntimeConfig(path, nodeID)
+func validateRuntimeConfig(path, nodeID, expectedEnvironment string) error {
+	_, err := readRuntimeConfig(path, nodeID, expectedEnvironment)
 	return err
 }
 
-func readRuntimeConfig(path, nodeID string) (agent.TrustedNodeRuntimeConfig, error) {
+func readRuntimeConfig(path, nodeID, expectedEnvironment string) (agent.TrustedNodeRuntimeConfig, error) {
 	pathInfo, err := os.Lstat(path)
-	if err != nil || !pathInfo.Mode().IsRegular() || pathInfo.Mode()&os.ModeSymlink != 0 || pathInfo.Mode().Perm()&0o022 != 0 {
+	if err != nil || agent.ValidateProtectedNodeRuntimeFile(path) != nil || !pathInfo.Mode().IsRegular() ||
+		pathInfo.Mode()&os.ModeSymlink != 0 || pathInfo.Mode().Perm()&0o022 != 0 {
 		return agent.TrustedNodeRuntimeConfig{}, errors.New("NODE_AGENT_RUNTIME_CONFIG is not a protected regular file")
 	}
 	file, err := os.Open(path)
@@ -426,7 +440,8 @@ func readRuntimeConfig(path, nodeID string) (agent.TrustedNodeRuntimeConfig, err
 	}
 	defer file.Close()
 	openedInfo, err := file.Stat()
-	if err != nil || !os.SameFile(pathInfo, openedInfo) || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0o022 != 0 {
+	if err != nil || !os.SameFile(pathInfo, openedInfo) || agent.ValidateProtectedNodeRuntimeFile(path) != nil ||
+		!openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0o022 != 0 {
 		return agent.TrustedNodeRuntimeConfig{}, errors.New("NODE_AGENT_RUNTIME_CONFIG changed while opening")
 	}
 
@@ -434,7 +449,7 @@ func readRuntimeConfig(path, nodeID string) (agent.TrustedNodeRuntimeConfig, err
 	if err != nil {
 		return agent.TrustedNodeRuntimeConfig{}, err
 	}
-	if config.Environment != agent.RuntimeEnvironmentTest || config.Node.ID != nodeID {
+	if config.Environment != expectedEnvironment || config.Node.ID != nodeID {
 		return agent.TrustedNodeRuntimeConfig{}, agent.ErrInvalidNodeRuntimeConfig
 	}
 

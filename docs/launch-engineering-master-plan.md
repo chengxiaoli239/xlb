@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-27）
 
+**2026-11-27 Node Agent production 启动接线与信任文件权限闭环（离线）**：`cmd/node-agent` 现有显式 production mode，要求可信 `xlb-node-runtime/v2`、匹配 node ID、KMS key ARN、loopback listener 和完整 renderer/quota 配置；容量、本地 peer store 和进程锁在 KMS signer 前验证。Unix 信任文件仅接受 root/服务 UID 所有且路径祖先不可由非特权用户写入的 regular file，Windows 目前 fail closed。Node Agent race 217 项/6 packages、vet/build 通过；当前 checkout 是 macOS，所以 Windows cross-build 被仓库既有 `peerstore.go` 使用 Unix `syscall.Flock` 阻断，本阶段未改 Windows peer-store 支持。生产 server assembly 单测不绑定 socket、不调用 AWS；环境中 `xlb-ops` STS 仍过期，因此没有 live KMS startup 或远端资源盘点。总体 5/12、Node Agent 1/2 不变；未验证 external ingress/TLS passthrough、PHP trust/fingerprint mapping、真实会员 profile 或撤权回执。
+
 **2026-11-27 M6 隔离证书材料离线生成器**：新增 test-only `node-lab-certificates` CLI，将 `ops/aws-cli kms get-public-key` 导出的 P-256 DER 公钥与隔离节点全球 IPv4 绑定，签发短期 Node Agent server chain 与 admin mTLS client cert。Leaf SAN 包含公网 endpoint 与 SSM reverse 使用的 `127.0.0.1`；节点私钥仍留在 KMS，临时 CA 私钥不落盘，admin key 仅写入 mode `0600` 文件，证书有效 2 小时。Go 单测验证 SAN/key match/EKU/文件权限和非法输入，race/vet/build 通过。工具不触达 AWS；真实证书生成和 KMS-backed Agent 启动仍待 session 恢复后验收，首发门不变。
 
 **2026-11-27 Node Agent KMS runtime 分支整合与会话复核**：核对 `codex/aws-kms-node-identity` 的 17 个提交与主线 patch 等效关系，只补入尚未记录的 KMS live acceptance 记录；主线 `a06a9ac`、`bab227d` 已推送，主线 Node Agent 全量 race 209 项/6 packages、vet/build 通过，证书工具定向 race/vet/build 通过。两处过期文档冲突保留了主线较新的 AWS 资源检查点，未覆盖更新信息。再次通过 `ops/aws-cli` 查询 `xlb-ops` STS 仍返回 `session expired`，所以没有查询或修改 AWS；浏览器登录 root 不等于项目包装器已获得可用会话。总体门仍为 5/12，Node Agent 为 1/2；真实 KMS/节点与会员真机验收仍未关闭。
