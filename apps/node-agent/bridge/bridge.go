@@ -309,10 +309,16 @@ func (bridge *Bridge) heartbeatLoop() {
 				continue
 			}
 			response.Body.Close()
+			authorizationRejected := response.StatusCode == http.StatusUnauthorized ||
+				response.StatusCode == http.StatusForbidden
 			if response.StatusCode != http.StatusOK {
 				bridge.transport.CloseIdleConnections()
 			}
 			bridge.heartbeatMu.Unlock()
+			if authorizationRejected {
+				_ = bridge.Close()
+				return
+			}
 		}
 	}
 }

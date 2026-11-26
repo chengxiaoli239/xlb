@@ -58,10 +58,20 @@ func TestSOCKSBridgeKeepsSessionForActiveTunnelsAndReleasesIdleSession(t *testin
 	}
 	serverCertificate, roots := newBridgeTestServerCertificate(t)
 	var heartbeatCount atomic.Int32
+	var rejectHeartbeats atomic.Bool
+	var nextHeartbeatStatus atomic.Int32
 	planeHandler := plane.Handler()
 	serverHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/v1/tunnel/heartbeat" {
 			heartbeatCount.Add(1)
+			if rejectHeartbeats.Load() {
+				writer.WriteHeader(http.StatusForbidden)
+				return
+			}
+			if status := nextHeartbeatStatus.Swap(0); status != 0 {
+				writer.WriteHeader(int(status))
+				return
+			}
 		}
 		planeHandler.ServeHTTP(writer, request)
 	})
@@ -135,6 +145,30 @@ func TestSOCKSBridgeKeepsSessionForActiveTunnelsAndReleasesIdleSession(t *testin
 		t.Fatal(err)
 	}
 	waitForNoActiveSessions(t, store)
+
+	revokedTunnel, _ := openSOCKSTunnel(t, listener.Addr().String(), "revoked bridge stream")
+	waitForActiveSessions(t, store, 1)
+	transientFailureBaseline := heartbeatCount.Load()
+	nextHeartbeatStatus.Store(http.StatusServiceUnavailable)
+	waitForHeartbeatCount(t, &heartbeatCount, transientFailureBaseline)
+	transientFailureObserved := heartbeatCount.Load()
+	waitForHeartbeatCount(t, &heartbeatCount, transientFailureObserved)
+	waitForActiveSessions(t, store, 1)
+
+	rejectHeartbeats.Store(true)
+	lastSuccessfulHeartbeat := heartbeatCount.Load()
+	waitForHeartbeatCount(t, &heartbeatCount, lastSuccessfulHeartbeat)
+	waitForNoActiveSessions(t, store)
+	var probe [1]byte
+	_ = revokedTunnel.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := revokedTunnel.Read(probe[:]); err == nil {
+		t.Fatal("bridge kept an active SOCKS tunnel after the node rejected its heartbeat")
+	}
+	heartbeatsAfterRejection := heartbeatCount.Load()
+	time.Sleep(60 * time.Millisecond)
+	if got := heartbeatCount.Load(); got != heartbeatsAfterRejection {
+		t.Fatalf("bridge continued sending %d heartbeats after authorization was rejected", got-heartbeatsAfterRejection)
+	}
 	if err := proxy.Close(); err != nil {
 		t.Fatal(err)
 	}
