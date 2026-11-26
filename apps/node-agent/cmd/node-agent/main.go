@@ -41,7 +41,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	identitySource, keyARN, err := resolveNodeTLSIdentitySource(
+	identitySource, err := resolveNodeTLSIdentitySource(
 		runtimeConfig,
 		os.Getenv("NODE_AGENT_TLS_IDENTITY_SOURCE"),
 		os.Getenv("NODE_AGENT_TLS_KMS_KEY_ID"),
@@ -51,12 +51,12 @@ func run() error {
 	}
 	identity, err := loadNodeTLSIdentity(
 		nodeID,
-		identitySource,
+		identitySource.source,
 		certificatePath,
 		privateKeyPath,
 		clientCAPath,
-		keyARN,
-		os.Getenv("AWS_REGION"),
+		identitySource.keyARN,
+		identitySource.region,
 	)
 	if err != nil {
 		return err
@@ -142,38 +142,61 @@ func run() error {
 	}
 }
 
+type nodeTLSIdentitySelection struct {
+	source string
+	keyARN string
+	region string
+}
+
 func resolveNodeTLSIdentitySource(
 	runtimeConfig agent.TrustedNodeRuntimeConfig,
 	environmentSource string,
 	environmentKeyARN string,
-) (string, string, error) {
+) (nodeTLSIdentitySelection, error) {
 	switch runtimeConfig.Environment {
 	case agent.RuntimeEnvironmentTest:
 		if runtimeConfig.SchemaVersion != agent.TrustedNodeRuntimeSchemaV1 ||
 			runtimeConfig.NodeTLSIdentity.Source != "" || runtimeConfig.NodeTLSIdentity.KeyARN != "" {
-			return "", "", agent.ErrInvalidNodeRuntimeConfig
+			return nodeTLSIdentitySelection{}, agent.ErrInvalidNodeRuntimeConfig
 		}
 		if environmentSource == "" {
 			environmentSource = "test-files"
 		}
 		if environmentSource == "test-files" && environmentKeyARN == "" {
-			return environmentSource, "", nil
+			return nodeTLSIdentitySelection{source: environmentSource}, nil
 		}
-		if environmentSource == "aws-kms" && agent.ValidKMSKeyARN(environmentKeyARN) {
-			return environmentSource, environmentKeyARN, nil
+		if environmentSource == "aws-kms" && agent.ValidKMSKeyARN(environmentKeyARN) &&
+			kmsKeyARNRegion(environmentKeyARN) == runtimeConfig.Node.Region {
+			return nodeTLSIdentitySelection{
+				source: environmentSource,
+				keyARN: environmentKeyARN,
+				region: runtimeConfig.Node.Region,
+			}, nil
 		}
-		return "", "", agent.ErrInvalidNodeRuntimeConfig
+		return nodeTLSIdentitySelection{}, agent.ErrInvalidNodeRuntimeConfig
 	case agent.RuntimeEnvironmentProd:
 		if runtimeConfig.SchemaVersion != agent.TrustedNodeRuntimeSchemaV2 ||
 			runtimeConfig.NodeTLSIdentity.Source != "aws-kms" ||
 			!agent.ValidKMSKeyARN(runtimeConfig.NodeTLSIdentity.KeyARN) ||
 			environmentSource != "" || environmentKeyARN != "" {
-			return "", "", agent.ErrInvalidNodeRuntimeConfig
+			return nodeTLSIdentitySelection{}, agent.ErrInvalidNodeRuntimeConfig
 		}
-		return runtimeConfig.NodeTLSIdentity.Source, runtimeConfig.NodeTLSIdentity.KeyARN, nil
+		return nodeTLSIdentitySelection{
+			source: runtimeConfig.NodeTLSIdentity.Source,
+			keyARN: runtimeConfig.NodeTLSIdentity.KeyARN,
+			region: runtimeConfig.Node.Region,
+		}, nil
 	default:
-		return "", "", agent.ErrInvalidNodeRuntimeConfig
+		return nodeTLSIdentitySelection{}, agent.ErrInvalidNodeRuntimeConfig
 	}
+}
+
+func kmsKeyARNRegion(keyARN string) string {
+	parts := strings.SplitN(keyARN, ":", 6)
+	if len(parts) != 6 {
+		return ""
+	}
+	return parts[3]
 }
 
 func newDataPlaneProbeServer(address, nodeID string, identity agent.NodeTLSIdentity,

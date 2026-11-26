@@ -18,7 +18,9 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-26）
 
-**2026-11-26 当前 checkout 与外部会话复核**：权威 `main` 与 `origin/main` 同步于 `1865f461c6e1231ad850028427d1258457983c5a`，工作区干净；CI `45751109316` 对应此提交且成功。当前被打开的 `codex/aws-kms-node-identity` worktree 在 `961406d`、无 upstream、落后主线两个提交，未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 本轮返回 `session expired`，所以 AWS 资源状态未复核，未执行任何云写入。12 项首发放行门仍为 5/12（42%），不等价于工时或上线概率。下一项 AI 可控工作仍是离线 Node Agent production runtime/mTLS 与 PHP provisioning 接线审查；恢复 AWS 会话后先只读查找已有 KMS/IAM 及节点材料，若需创建任何计费资源，先单独核成本和授权。
+**2026-11-26 当前 checkout 与外部会话复核**：开工时权威 `main` 与 `origin/main` 同步于 `1865f461c6e1231ad850028427d1258457983c5a`，工作区干净；CI `45751109316` 对应该提交且成功。当前被打开的 `codex/aws-kms-node-identity` worktree 在 `961406d`、无 upstream、落后主线两个提交，未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 本轮返回 `session expired`，所以 AWS 资源状态未复核，未执行任何云写入。12 项首发放行门仍为 5/12（42%），不等价于工时或上线概率。下一项 AI 可控工作仍是离线 Node Agent production runtime/mTLS 与 PHP provisioning 接线审查；恢复 AWS 会话后先只读查找已有 KMS/IAM 及节点材料，若需创建任何计费资源，先单独核成本和授权。
+
+**Node Agent KMS 区域绑定（2026-11-26）**：isolated-test 的 AWS KMS signer ARN 必须匹配 runtime node Region，SDK Region 由 trusted node 配置提供而不采信 `AWS_REGION`；production-shaped v2 同样把 node Region 传入身份选择结果。定向 Node Agent command tests 25/25、全套 race 178/178（5 packages）、vet/build 通过。此项没有访问 AWS 或打开 production executable gate，不增加 5/12 门数。下一项仍为离线 production startup/mTLS 与 PHP provisioning 接线审查。
 
 **2026-11-26 后续检查点**：M5/M6 live harness 已补撤权前后累计流量单调性与最终快照/回执相等断言，并在 `xlb-lab-us-20261126-m5mon` 隔离节点重新运行通过。专用节点/IAM 栈随后回收，资源核验无残留。此轮在主线复跑 Node Agent `go test -race ./...` 178 passed/5 packages、`go vet ./...` 与 `go build ./...` 通过。放行门仍为 5/12（42%）；下一步继续离线推进生产 Node Agent runtime/mTLS 注入契约与 PHP provisioning 接线，真实 profile 和节点身份/CA 材料到位后再做会员真机联验；合成 peer 证据不能外推到真实会员线路。
 

@@ -267,14 +267,15 @@ func TestResolveNodeTLSIdentitySourceUsesTrustedRuntimeARNInProduction(t *testin
 			Source: "aws-kms", KeyARN: keyARN,
 		},
 	}
-	source, resolvedARN, err := resolveNodeTLSIdentitySource(productionConfig, "", "")
+	selection, err := resolveNodeTLSIdentitySource(productionConfig, "", "")
 	if err != nil {
 		t.Fatalf("resolveNodeTLSIdentitySource error = %v", err)
 	}
-	if source != "aws-kms" || resolvedARN != keyARN {
-		t.Fatalf("resolved source/ARN=%q/%q; want aws-kms/%q", source, resolvedARN, keyARN)
+	if selection.source != "aws-kms" || selection.keyARN != keyARN || selection.region != "us-west-2" {
+		t.Fatalf("resolved source/ARN/region=%q/%q/%q; want aws-kms/%q/us-west-2",
+			selection.source, selection.keyARN, selection.region, keyARN)
 	}
-	if _, _, err := resolveNodeTLSIdentitySource(productionConfig, "aws-kms", keyARN); err == nil {
+	if _, err := resolveNodeTLSIdentitySource(productionConfig, "aws-kms", keyARN); err == nil {
 		t.Fatal("production runtime accepted environment overrides for its trusted KMS key")
 	}
 }
@@ -285,14 +286,20 @@ func TestResolveNodeTLSIdentitySourceKeepsIsolatedTestDefaultsAndExplicitKMSSele
 		Environment:   agent.RuntimeEnvironmentTest,
 		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
 	}
-	source, keyARN, err := resolveNodeTLSIdentitySource(isolatedConfig, "", "")
-	if err != nil || source != "test-files" || keyARN != "" {
-		t.Fatalf("default isolated-test source=%q/%q err=%v", source, keyARN, err)
+	selection, err := resolveNodeTLSIdentitySource(isolatedConfig, "", "")
+	if err != nil || selection.source != "test-files" || selection.keyARN != "" || selection.region != "" {
+		t.Fatalf("default isolated-test source=%q/%q/%q err=%v",
+			selection.source, selection.keyARN, selection.region, err)
 	}
-	keyARN = "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
-	source, resolvedARN, err := resolveNodeTLSIdentitySource(isolatedConfig, "aws-kms", keyARN)
-	if err != nil || source != "aws-kms" || resolvedARN != keyARN {
-		t.Fatalf("explicit isolated-test KMS source=%q/%q err=%v", source, resolvedARN, err)
+	keyARN := "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"
+	selection, err = resolveNodeTLSIdentitySource(isolatedConfig, "aws-kms", keyARN)
+	if err != nil || selection.source != "aws-kms" || selection.keyARN != keyARN || selection.region != "us-west-2" {
+		t.Fatalf("explicit isolated-test KMS source=%q/%q/%q err=%v",
+			selection.source, selection.keyARN, selection.region, err)
+	}
+	wrongRegionARN := "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
+	if _, err := resolveNodeTLSIdentitySource(isolatedConfig, "aws-kms", wrongRegionARN); err == nil {
+		t.Fatal("isolated-test KMS source accepted a key ARN from another node region")
 	}
 }
 
