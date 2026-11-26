@@ -337,6 +337,12 @@ jobs:
         with:
           packages: platform-tools
 
+      - name: Test isolated Android instrumentation guards
+        working-directory: apps/android
+        run: |
+          bash scripts/test-validate-disposable-avd.sh
+          bash scripts/test-remote-node-runner-inputs.sh
+
       - name: Install pinned Android SDK and NDK
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;29.0.14206865'
 
