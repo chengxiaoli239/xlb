@@ -22,7 +22,7 @@
 
 **Q2 运维诊断增量（2026-11-26）**：设备授权 API 的服务端 `X-Request-Id` 已持久关联到 provisioning outbox；异步 worker 带该 ID 与稳定 `node_operation_id`/peer ID 写安全日志并清理上下文，重复请求仍只复用原 operation。Laravel 全套 275 passed、1 skipped、2,457 assertions，Pint 通过。该改进不改变首发放行门计数，也不代替 production runtime、节点回执或 staging 验收。
 
-**Node Agent mTLS 离线接线增量（2026-11-26）**：已接入 AWS SDK v2 KMS public-key/sign API adapter 与只含 public cert/CA 的 PEM provider，并允许 isolated-test 启动器通过显式 `NODE_AGENT_TLS_IDENTITY_SOURCE=aws-kms` 使用默认 credential chain 和 node-scoped key ARN；trusted runtime v2 要求该 key ARN 绑定到节点配置且 Region 与 node region 一致，支持 standard/Multi-Region key ARN。管理/数据/探针 server 共用 opaque signer identity。Go race 176 passed/5 packages、vet/build 通过，fake KMS API 与本地 TLS 1.3/HTTP2 回归通过。生产 mode 仍在加载配置或访问 AWS 前拒绝启动；没有实际 KMS key、IAM policy、签发/部署的节点证书，也没有调用 AWS 资源 API 或产生资源费用。上线门仍为 5/12（42%），这些离线/fake KMS 结果不计 production mTLS 放行证据。
+**Node Agent mTLS 离线接线增量（2026-11-26）**：已接入 AWS SDK v2 KMS public-key/sign API adapter 与只含 public cert/CA 的 PEM provider，并允许 isolated-test 启动器通过显式 `NODE_AGENT_TLS_IDENTITY_SOURCE=aws-kms` 使用默认 credential chain 和 node-scoped key ARN；trusted runtime v2 要求该 key ARN 与 node Region 一致并支持 standard/Multi-Region key ARN。source resolver 单测确认 production-shape config 使用 trusted key ARN 并拒绝环境覆盖，但 production executable gate 仍关闭。管理/数据/探针 server 共用 opaque signer identity。Go race 176 passed/5 packages、vet/build 通过，fake KMS API 与本地 TLS 1.3/HTTP2 回归通过。生产 mode 仍在加载配置或访问 AWS 前拒绝启动；没有实际 KMS key、IAM policy、签发/部署的节点证书，也没有调用 AWS 资源 API 或产生资源费用。上线门仍为 5/12（42%），这些离线/fake KMS 结果不计 production mTLS 放行证据。
 
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
