@@ -20,6 +20,8 @@
 
 **2026-11-26 后续检查点**：M5/M6 live harness 已补撤权前后累计流量单调性与最终快照/回执相等断言，并在 `xlb-lab-us-20261126-m5mon` 隔离节点重新运行通过。专用节点/IAM 栈随后回收，资源核验无残留。Node Agent 离线 race/vet/build 检查通过。放行门仍为 5/12（42%）；下一步继续离线推进生产 Node Agent runtime/mTLS 注入契约与 PHP provisioning 接线，真实 profile 和节点身份/CA 材料到位后再做会员真机联验；合成 peer 证据不能外推到真实会员线路。
 
+**Q2 运维诊断增量（2026-11-26）**：设备授权 API 的服务端 `X-Request-Id` 已持久关联到 provisioning outbox；异步 worker 带该 ID 与稳定 `node_operation_id`/peer ID 写安全日志并清理上下文，重复请求仍只复用原 operation。Laravel 全套 275 passed、1 skipped、2,457 assertions，Pint 通过。该改进不改变首发放行门计数，也不代替 production runtime、节点回执或 staging 验收。
+
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
 | M1–M2 产品与盘点 | PRD、边界、账号/节点/支付现状盘点已固化 | 随新实现继续维护，不代表发布审查完成 |

@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -35,10 +36,26 @@ class NodePeerProvisioningProcessor
             }
             $processed++;
 
+            $logContext = [
+                'node_operation_id' => (string) $job->id,
+                'node_peer_id' => (string) $job->peer_id,
+            ];
+            if (is_string($job->request_correlation_id) && $job->request_correlation_id !== '') {
+                $logContext['request_id'] = $job->request_correlation_id;
+            }
+            Log::shareContext($logContext);
+
             try {
+                Log::info('Processing node peer provisioning outbox item.');
                 $this->provision($job);
-            } catch (Throwable) {
+                Log::info('Node peer provisioning outbox item processed.');
+            } catch (Throwable $exception) {
                 $this->scheduleRetry($job);
+                Log::warning('Node peer provisioning attempt failed.', [
+                    'exception_class' => $exception::class,
+                ]);
+            } finally {
+                Log::withoutContext(array_keys($logContext));
             }
         }
 

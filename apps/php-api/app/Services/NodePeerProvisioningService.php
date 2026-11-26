@@ -20,8 +20,15 @@ class NodePeerProvisioningService
      *
      * @return array{status:string,message:string,node_operation_id?:string,peer_id?:string,node_id?:string,peer_generation?:int,device_binding_generation?:int,bridge_endpoint?:string,bridge_server_ca_pem?:string,profile_sha256?:string,profile_renderer_id?:string,profile_renderer_version?:string,bridge_protocol?:string,connectable?:bool,peer_credential?:string,profile?:string}
      */
-    public function ensureForProvenDevice(string $userId, string $deviceId, string $proofFingerprint): array
-    {
+    public function ensureForProvenDevice(
+        string $userId,
+        string $deviceId,
+        string $proofFingerprint,
+        ?string $requestCorrelationId = null,
+    ): array {
+        $requestCorrelationId = is_string($requestCorrelationId) && Str::isUuid($requestCorrelationId)
+            ? $requestCorrelationId
+            : null;
         if (! config('node_access.provisioning_enabled')
             || $this->driver instanceof DisabledNodePeerProvisioningDriver) {
             return $this->unavailable();
@@ -51,7 +58,14 @@ class NodePeerProvisioningService
             return $this->unavailable();
         }
 
-        $reserved = DB::transaction(function () use ($userId, $deviceId, $device, $proofFingerprint, $candidateIds): ?object {
+        $reserved = DB::transaction(function () use (
+            $userId,
+            $deviceId,
+            $device,
+            $proofFingerprint,
+            $candidateIds,
+            $requestCorrelationId,
+        ): ?object {
             DB::table('users')->where('id', $userId)->lockForUpdate()->first();
             $memberDevice = DB::table('member_devices')->where('id', $deviceId)->where('user_id', $userId)
                 ->where('status', 'registered')->whereNull('remove_requested_at')->lockForUpdate()->first();
@@ -95,6 +109,7 @@ class NodePeerProvisioningService
             DB::table('node_access_provisioning_outbox')->insert([
                 'id' => $requestId, 'peer_id' => $peerId, 'status' => 'pending', 'generation' => 1,
                 'attempts' => 0, 'next_attempt_at' => $at, 'created_at' => $at, 'updated_at' => $at,
+                'request_correlation_id' => $requestCorrelationId,
             ]);
             DB::table('nodes')->where('id', $node->id)->increment('active_sessions', 1, ['updated_at' => $at]);
             DB::table('audit_logs')->insert([

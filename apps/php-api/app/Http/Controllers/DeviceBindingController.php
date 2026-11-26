@@ -156,10 +156,12 @@ class DeviceBindingController extends Controller
             return $this->error($result['error']['code'], $result['error']['message'], $status);
         }
 
+        $requestCorrelationId = $request->attributes->get('request_id');
         $nodeAuthorization = $provisioning->ensureForProvenDevice(
             $userId,
             $result['device']['id'],
             $result['proof_fingerprint'],
+            is_string($requestCorrelationId) ? $requestCorrelationId : null,
         );
 
         return response()->json(['data' => [

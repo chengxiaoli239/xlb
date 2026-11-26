@@ -10,6 +10,8 @@ use App\Services\SandboxNodePeerProvisioningDriver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Mockery;
 use Tests\TestCase;
 
 class NodePeerProvisioningTest extends TestCase
@@ -23,14 +25,19 @@ class NodePeerProvisioningTest extends TestCase
         config(['node_access.provisioning_enabled' => true]);
     }
 
-    public function test_duplicate_provision_requests_reuse_the_same_peer_and_request_id(): void
+    public function test_duplicate_provision_requests_keep_the_operation_and_original_request_correlation_ids(): void
     {
         $this->prepareProductionRouteAndDevice();
         $this->mock(NodePeerProvisioningDriver::class);
         $service = app(NodePeerProvisioningService::class);
+        $requestCorrelationId = '11111111-1111-4111-8111-111111111111';
 
-        $first = $service->ensureForProvenDevice('user-member', 'device-provision-1', str_repeat('d', 64));
-        $second = $service->ensureForProvenDevice('user-member', 'device-provision-1', str_repeat('d', 64));
+        $first = $service->ensureForProvenDevice(
+            'user-member', 'device-provision-1', str_repeat('d', 64), $requestCorrelationId,
+        );
+        $second = $service->ensureForProvenDevice(
+            'user-member', 'device-provision-1', str_repeat('d', 64), '22222222-2222-4222-8222-222222222222',
+        );
 
         $this->assertSame('provisioning', $first['status']);
         $this->assertSame('provisioning', $second['status']);
@@ -41,6 +48,7 @@ class NodePeerProvisioningTest extends TestCase
         $this->assertSame(1, (int) $peer->device_binding_generation);
         $this->assertSame(str_repeat('d', 64), $peer->device_key_fingerprint);
         $this->assertSame($peer->provision_request_id, $job->id);
+        $this->assertSame($requestCorrelationId, $job->request_correlation_id);
         $this->assertSame($job->id, $first['node_operation_id']);
         $this->assertSame($job->id, $second['node_operation_id']);
         $this->assertSame(13, (int) DB::table('nodes')->where('id', 'node-test-1')->value('active_sessions'));
@@ -84,6 +92,41 @@ class NodePeerProvisioningTest extends TestCase
         $this->assertSame('confirmed_test', $first['confirmation_status']);
         $this->assertFalse(json_decode($first['profile'], true, 512, JSON_THROW_ON_ERROR)['connectable']);
         $this->assertSame('stable-request-id', $first['request_id']);
+    }
+
+    public function test_worker_logs_request_and_operation_ids_without_logging_provisioning_credentials(): void
+    {
+        $this->prepareProductionRouteAndDevice();
+        $requestCorrelationId = '33333333-3333-4333-8333-333333333333';
+        $peerId = $this->insertProvisioningPeerAndJob($requestCorrelationId);
+        $job = DB::table('node_access_provisioning_outbox')->where('peer_id', $peerId)->first();
+        $this->mock(NodePeerProvisioningDriver::class)
+            ->shouldReceive('provision')
+            ->once()
+            ->andThrow(new \RuntimeException('private endpoint and credential'));
+
+        Log::shouldReceive('shareContext')
+            ->once()
+            ->with(Mockery::on(static fn (array $context): bool => ($context['request_id'] ?? null) === $requestCorrelationId
+                && ($context['node_operation_id'] ?? null) === $job->id
+                && ($context['node_peer_id'] ?? null) === $peerId));
+        Log::shouldReceive('info')
+            ->once()
+            ->with('Processing node peer provisioning outbox item.');
+        Log::shouldReceive('warning')
+            ->once()
+            ->with('Node peer provisioning attempt failed.', ['exception_class' => \RuntimeException::class]);
+        Log::shouldReceive('withoutContext')
+            ->once()
+            ->with(['node_operation_id', 'node_peer_id', 'request_id']);
+
+        $this->assertSame(1, app(NodePeerProvisioningProcessor::class)->processDue());
+        $this->assertDatabaseHas('node_access_provisioning_outbox', [
+            'id' => $job->id,
+            'status' => 'retry',
+            'request_correlation_id' => $requestCorrelationId,
+            'last_error_code' => 'node_agent_error',
+        ]);
     }
 
     public function test_http_provisioning_interoperates_with_go_node_agent_over_tls_13_mtls(): void
@@ -417,7 +460,7 @@ class NodePeerProvisioningTest extends TestCase
         ]);
     }
 
-    private function insertProvisioningPeerAndJob(): string
+    private function insertProvisioningPeerAndJob(?string $requestCorrelationId = null): string
     {
         $now = now()->utc()->toIso8601String();
         DB::table('node_access_peers')->insert([
@@ -435,6 +478,7 @@ class NodePeerProvisioningTest extends TestCase
         DB::table('node_access_provisioning_outbox')->insert([
             'id' => 'request-provision-1', 'peer_id' => 'peer-provision-1', 'status' => 'pending',
             'generation' => 1, 'attempts' => 0, 'next_attempt_at' => $now,
+            'request_correlation_id' => $requestCorrelationId,
             'created_at' => $now, 'updated_at' => $now,
         ]);
 

@@ -113,11 +113,23 @@ class MemberDeviceApiTest extends TestCase
         $this->actingAs(User::findOrFail('user-member'));
         $keyPair = $this->deviceKeyPair();
         $profile = "mode: global\nproxies:\n  - name: XLB\n    type: socks5\n";
+        $requestCorrelationId = null;
         $this->mock(NodePeerProvisioningService::class)
             ->shouldReceive('ensureForProvenDevice')
             ->once()
-            ->withArgs(function (string $userId, string $deviceId, string $fingerprint) use ($keyPair): bool {
-                return $userId === 'user-member'
+            ->withArgs(function (string $userId, string $deviceId, string $fingerprint, string $correlationId) use (
+                $keyPair,
+                &$requestCorrelationId,
+            ): bool {
+                $validCorrelationId = preg_match(
+                    '/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/i',
+                    $correlationId,
+                ) === 1;
+                if ($validCorrelationId) {
+                    $requestCorrelationId = $correlationId;
+                }
+
+                return $validCorrelationId && $userId === 'user-member'
                     && DB::table('member_devices')->where('id', $deviceId)->exists()
                     && hash_equals(hash('sha256', $keyPair['public_key_der']), $fingerprint);
             })
@@ -145,6 +157,7 @@ class MemberDeviceApiTest extends TestCase
             ->assertJsonPath('data.node_authorization.bridge_protocol', 'xlb-proof-v1')
             ->assertJsonPath('data.node_authorization.connectable', true)
             ->assertHeader('Cache-Control', 'no-store, private');
+        $this->assertSame($response->headers->get('X-Request-Id'), $requestCorrelationId);
         $this->assertSame('test-only CA fixture', $response->json('data.node_authorization.bridge_server_ca_pem'));
     }
 
