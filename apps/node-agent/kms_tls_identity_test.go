@@ -11,8 +11,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/pem"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -209,6 +212,127 @@ func TestKMSNodeTLSIdentitySourceRejectsUnsupportedKMSKeyMetadata(t *testing.T) 
 	source.client = client
 	if _, err := source.LoadNodeTLSIdentity(context.Background(), "node-kms-test"); err == nil {
 		t.Fatal("identity source accepted unsupported KMS key metadata")
+	}
+}
+
+func TestPEMNodeTLSCertificateProviderLoadsPublicCertificateAndCAOnly(t *testing.T) {
+	serverCertificate, _, clientCAPEM := createTestCertificates(t)
+	directory := t.TempDir()
+	certificateChainPath := filepath.Join(directory, "node-chain.pem")
+	clientCAPath := filepath.Join(directory, "client-ca.pem")
+	chainPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCertificate.Certificate[0]})
+	if len(serverCertificate.Certificate) > 1 {
+		chainPEM = append(chainPEM, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCertificate.Certificate[1]})...)
+	}
+	if err := os.WriteFile(certificateChainPath, chainPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clientCAPath, clientCAPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := NewPEMNodeTLSCertificateProvider(map[string]NodeTLSCertificateFiles{
+		"node-kms-test": {CertificateChainPath: certificateChainPath, ClientCAPEMPath: clientCAPath},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := provider.LoadNodeTLSCertificate(context.Background(), "node-kms-test")
+	if err != nil {
+		t.Fatalf("LoadNodeTLSCertificate error = %v", err)
+	}
+	if len(identity.Certificate.Certificate) != len(serverCertificate.Certificate) {
+		t.Fatalf("loaded certificate chain has %d certificates; want %d",
+			len(identity.Certificate.Certificate), len(serverCertificate.Certificate))
+	}
+	if identity.Certificate.PrivateKey != nil {
+		t.Fatal("certificate provider unexpectedly loaded a private key")
+	}
+	if identity.ClientCAs == nil || len(identity.ClientCAs.Subjects()) == 0 {
+		t.Fatal("certificate provider did not load the client CA trust bundle")
+	}
+}
+
+func TestPEMNodeTLSCertificateProviderRejectsSymlinkAndWritableFiles(t *testing.T) {
+	serverCertificate, _, clientCAPEM := createTestCertificates(t)
+	directory := t.TempDir()
+	certificateChainPath := filepath.Join(directory, "node-chain.pem")
+	clientCAPath := filepath.Join(directory, "client-ca.pem")
+	chainPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCertificate.Certificate[0]})
+	if err := os.WriteFile(certificateChainPath, chainPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clientCAPath, clientCAPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := NewPEMNodeTLSCertificateProvider(map[string]NodeTLSCertificateFiles{
+		"node-kms-test": {CertificateChainPath: certificateChainPath, ClientCAPEMPath: clientCAPath},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(directory, "node-chain-link.pem")
+	if err := os.Symlink(certificateChainPath, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+	provider.files["node-kms-test"] = NodeTLSCertificateFiles{
+		CertificateChainPath: symlinkPath,
+		ClientCAPEMPath:      clientCAPath,
+	}
+	if _, err := provider.LoadNodeTLSCertificate(context.Background(), "node-kms-test"); err == nil {
+		t.Fatal("certificate provider accepted a symlink")
+	}
+	provider.files["node-kms-test"] = NodeTLSCertificateFiles{
+		CertificateChainPath: certificateChainPath,
+		ClientCAPEMPath:      clientCAPath,
+	}
+	if err := os.Chmod(certificateChainPath, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.LoadNodeTLSCertificate(context.Background(), "node-kms-test"); err == nil {
+		t.Fatal("certificate provider accepted a group/world-writable file")
+	}
+}
+
+func TestPEMNodeTLSCertificateProviderRejectsNonCertificateCABlocks(t *testing.T) {
+	serverCertificate, _, clientCAPEM := createTestCertificates(t)
+	directory := t.TempDir()
+	certificateChainPath := filepath.Join(directory, "node-chain.pem")
+	clientCAPath := filepath.Join(directory, "client-ca.pem")
+	chainPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCertificate.Certificate[0]})
+	if err := os.WriteFile(certificateChainPath, chainPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := NewPEMNodeTLSCertificateProvider(map[string]NodeTLSCertificateFiles{
+		"node-kms-test": {CertificateChainPath: certificateChainPath, ClientCAPEMPath: clientCAPath},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKeyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := map[string][]byte{
+		"private key block": append(append([]byte(nil), clientCAPEM...),
+			pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER})...),
+		"unknown PEM block": append(append([]byte(nil), clientCAPEM...),
+			pem.EncodeToMemory(&pem.Block{Type: "XLB UNKNOWN", Bytes: []byte("data")})...),
+		"trailing junk": append(append([]byte(nil), clientCAPEM...), []byte("unexpected trailing content")...),
+	}
+	for name, contents := range inputs {
+		t.Run(name, func(t *testing.T) {
+			if err := os.WriteFile(clientCAPath, contents, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := provider.LoadNodeTLSCertificate(context.Background(), "node-kms-test"); err == nil {
+				t.Fatal("certificate provider accepted a non-certificate CA bundle block")
+			}
+		})
 	}
 }
 
