@@ -58,22 +58,27 @@ func TestSOCKSBridgeKeepsSessionForActiveTunnelsAndReleasesIdleSession(t *testin
 	}
 	serverCertificate, roots := newBridgeTestServerCertificate(t)
 	var heartbeatCount atomic.Int32
+	var successfulHeartbeatCount atomic.Int32
 	var rejectHeartbeats atomic.Bool
 	var nextHeartbeatStatus atomic.Int32
 	planeHandler := plane.Handler()
 	serverHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		tracker := &statusTrackingResponseWriter{ResponseWriter: writer}
 		if request.URL.Path == "/v1/tunnel/heartbeat" {
 			heartbeatCount.Add(1)
 			if rejectHeartbeats.Load() {
-				writer.WriteHeader(http.StatusForbidden)
+				tracker.WriteHeader(http.StatusForbidden)
 				return
 			}
 			if status := nextHeartbeatStatus.Swap(0); status != 0 {
-				writer.WriteHeader(int(status))
+				tracker.WriteHeader(int(status))
 				return
 			}
 		}
-		planeHandler.ServeHTTP(writer, request)
+		planeHandler.ServeHTTP(tracker, request)
+		if request.URL.Path == "/v1/tunnel/heartbeat" && tracker.statusCode == http.StatusOK {
+			successfulHeartbeatCount.Add(1)
+		}
 	})
 	server := httptest.NewUnstartedServer(serverHandler)
 	server.EnableHTTP2 = true
@@ -149,10 +154,10 @@ func TestSOCKSBridgeKeepsSessionForActiveTunnelsAndReleasesIdleSession(t *testin
 	revokedTunnel, _ := openSOCKSTunnel(t, listener.Addr().String(), "revoked bridge stream")
 	waitForActiveSessions(t, store, 1)
 	transientFailureBaseline := heartbeatCount.Load()
+	successfulHeartbeatBaseline := successfulHeartbeatCount.Load()
 	nextHeartbeatStatus.Store(http.StatusServiceUnavailable)
 	waitForHeartbeatCount(t, &heartbeatCount, transientFailureBaseline)
-	transientFailureObserved := heartbeatCount.Load()
-	waitForHeartbeatCount(t, &heartbeatCount, transientFailureObserved)
+	waitForCounterValue(t, &successfulHeartbeatCount, successfulHeartbeatBaseline)
 	waitForActiveSessions(t, store, 1)
 	probePayload := []byte("tunnel remains usable after transient heartbeat failure")
 	if _, err := revokedTunnel.Write(probePayload); err != nil {
@@ -242,6 +247,41 @@ func waitForHeartbeatCount(t *testing.T, count *atomic.Int32, before int32) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("bridge heartbeat count did not exceed %d", before)
+}
+
+func waitForCounterValue(t *testing.T, count *atomic.Int32, before int32) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if count.Load() > before {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("counter did not exceed %d", before)
+}
+
+type statusTrackingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (writer *statusTrackingResponseWriter) WriteHeader(statusCode int) {
+	writer.statusCode = statusCode
+	writer.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (writer *statusTrackingResponseWriter) Write(content []byte) (int, error) {
+	if writer.statusCode == 0 {
+		writer.WriteHeader(http.StatusOK)
+	}
+	return writer.ResponseWriter.Write(content)
+}
+
+func (writer *statusTrackingResponseWriter) Flush() {
+	if flusher, ok := writer.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func waitForActiveSessions(t *testing.T, store *agent.PeerStore, want int) {
