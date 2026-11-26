@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-26）
 
+- **M7 entitlement quota reservation 并发幂等重试防重（2026-11-26，本地多进程 Laravel）**：reserve 在 peer 行锁后再次读取 request ID，令并发重试在排队获取 peer 锁后复用首个 reservation；相同 id 不同 entitlement/node/peer/generation/grant 仍返回冲突。新增 8 个 worker 竞争同一 peer/request ID 的回归，验证所有调用返回同一 reservation ID，预算只预留一次且数据库只保留一行。配额定向 suite 14/14、137 assertions，Laravel 全套 282 项（281 passed、1 skipped，2,509 assertions），Pint 通过。测试使用本地 SQLite `IMMEDIATE` 事务，不等同 MySQL/PostgreSQL 并发压力或生产部署；不改变额度、receipt/设备限制语义，首发门仍为 5/12（42%）。下一步在 hosted MySQL/PostgreSQL 全套 CI 确认兼容，并继续生产 mTLS/runtime 与真实会员数据面放行缺口。
+
 - **M8/M10 proof bridge 活动会话与 heartbeat 错误恢复/失败关闭（2026-11-26，本地 Go race）**：bridge 按活动 SOCKS TCP 隧道数维护 peer session；最后一条流结束后发送 disconnect 并释放 session，空闲后可重新建连。若 Agent heartbeat 返回 401/403，bridge 关闭活动 SOCKS 隧道并停止续租；瞬时 transport error 和非授权 HTTP 状态继续按 20 秒周期重试。本地回归注入一次 503，确认仍有活动 session、既有 TCP echo 继续成功且随后 heartbeat 明确返回 200，再注入 403 并核对活动流关闭、session 释放且无后续 heartbeat。`go test -race ./...` 192 项/5 packages、`go vet ./...`、`go build ./...` 通过，完整生命周期定向 race case 连续 20 次通过。503/403 均由本地测试 handler 合成，不是生产异常、会员撤权回执或生产断流证据；首发放行门仍为 5/12（42%）。下一步按真实网络复现补充分层错误观测，并等待真实 endpoint、CA/mTLS 与会员 profile 完成双机验收。
 
 - **隔离验收资源成本与回收原则（2026-11-26）**：用户确认必要的多日隔离测试资源费用可以接受，并要求把需要云资源的验证集中到同一窗口、优先复用已有实验 IAM/其他仍可使用的资源，避免无必要的重复创建和释放；业务服务器不得纳入测试资源或回收范围。新建资源仍须先核对专用标签、账号/区域、实例范围、TTL、回收对象及费用归属，测试后按资源清单核验回收。该原则用于排期和成本管理，不把隔离资源测试记作生产上线验收。

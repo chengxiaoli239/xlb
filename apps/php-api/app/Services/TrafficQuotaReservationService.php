@@ -34,16 +34,20 @@ final class TrafficQuotaReservationService
         return DB::transaction(function () use ($entitlementId, $nodeId, $peerId, $generation, $requestId, $grantBytes, $leaseSeconds): array {
             $existing = DB::table('node_traffic_reservations')->where('request_id', $requestId)->lockForUpdate()->first();
             if ($existing) {
-                if ($existing->entitlement_id !== $entitlementId || $existing->node_id !== $nodeId
-                    || $existing->peer_id !== $peerId || (int) $existing->peer_generation !== $generation
-                    || (int) $existing->grant_bytes !== $grantBytes) {
-                    throw new TrafficQuotaReservationConflict('Reservation request ID was reused with different fields.');
-                }
-
-                return $this->reservationResponse($existing);
+                return $this->existingReservationResponse(
+                    $existing, $entitlementId, $nodeId, $peerId, $generation, $grantBytes,
+                );
             }
 
             $peer = DB::table('node_access_peers')->where('id', $peerId)->lockForUpdate()->first();
+            // Recheck after the peer lock so concurrent retries reuse the row created by the first request.
+            $existing = DB::table('node_traffic_reservations')->where('request_id', $requestId)->lockForUpdate()->first();
+            if ($existing) {
+                return $this->existingReservationResponse(
+                    $existing, $entitlementId, $nodeId, $peerId, $generation, $grantBytes,
+                );
+            }
+
             if (! $peer || $peer->node_id !== $nodeId || $peer->entitlement_id !== $entitlementId
                 || (int) $peer->generation !== $generation || $peer->status !== 'active'
                 || $peer->provision_confirmation_status !== 'confirmed' || ! $this->isFuture($peer->expires_at)) {
@@ -290,6 +294,24 @@ final class TrafficQuotaReservationService
         }
 
         return $budget;
+    }
+
+    /** @return array{id:string,request_id:string,entitlement_id:string,node_id:string,peer_id:string,generation:int,grant_bytes:int,status:string,lease_expires_at:string} */
+    private function existingReservationResponse(
+        object $reservation,
+        string $entitlementId,
+        string $nodeId,
+        string $peerId,
+        int $generation,
+        int $grantBytes,
+    ): array {
+        if ($reservation->entitlement_id !== $entitlementId || $reservation->node_id !== $nodeId
+            || $reservation->peer_id !== $peerId || (int) $reservation->peer_generation !== $generation
+            || (int) $reservation->grant_bytes !== $grantBytes) {
+            throw new TrafficQuotaReservationConflict('Reservation request ID was reused with different fields.');
+        }
+
+        return $this->reservationResponse($reservation);
     }
 
     private function activeEntitlement(string $entitlementId, bool $requireActive = true): ?object

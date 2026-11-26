@@ -71,6 +71,68 @@ final class NodePeerTrafficQuotaTest extends TestCase
         $service->reserve('entitlement-member-annual', 'node-test-1', 'peer-quota-1', 1, 'quota-request-2', 325);
     }
 
+    public function test_reservation_retry_returns_original_result_even_if_peer_changed_after_creation(): void
+    {
+        $service = app(TrafficQuotaReservationService::class);
+        $first = $service->reserve('entitlement-member-annual', 'node-test-1', 'peer-quota-1', 1, 'quota-request-peer-change', 128);
+        DB::table('node_access_peers')->where('id', 'peer-quota-1')->update(['status' => 'revoked']);
+
+        $retry = $service->reserve('entitlement-member-annual', 'node-test-1', 'peer-quota-1', 1, 'quota-request-peer-change', 128);
+
+        $this->assertSame($first, $retry);
+        $this->assertSame(128, (int) DB::table('entitlement_traffic_budgets')->where('entitlement_id', 'entitlement-member-annual')->value('reserved_bytes'));
+        $this->assertSame(1, DB::table('node_traffic_reservations')->where('request_id', 'quota-request-peer-change')->count());
+    }
+
+    public function test_concurrent_retries_with_the_same_request_id_share_one_reservation(): void
+    {
+        if (! function_exists('pcntl_fork')) {
+            $this->markTestSkipped('pcntl is required for the isolated multi-process reservation proof.');
+        }
+
+        $workerCount = 8;
+        $resultPaths = [];
+        $children = [];
+        for ($index = 0; $index < $workerCount; $index++) {
+            $resultPath = tempnam(sys_get_temp_dir(), 'xlb-quota-idempotency-');
+            $this->assertNotFalse($resultPath);
+            $resultPaths[] = $resultPath;
+            $pid = pcntl_fork();
+            $this->assertNotSame(-1, $pid);
+            if ($pid === 0) {
+                DB::purge('sqlite');
+                try {
+                    $reservation = app(TrafficQuotaReservationService::class)->reserve(
+                        'entitlement-member-annual', 'node-test-1', 'peer-quota-1', 1,
+                        'quota-request-concurrent-retry', 128,
+                    );
+                    file_put_contents($resultPath, $reservation['id']);
+                    exit(0);
+                } catch (\Throwable $exception) {
+                    file_put_contents($resultPath, 'error:'.$exception::class.':'.$exception->getMessage());
+                    exit(1);
+                }
+            }
+            $children[] = $pid;
+        }
+
+        $exitCodes = [];
+        foreach ($children as $pid) {
+            pcntl_waitpid($pid, $status);
+            $exitCodes[] = pcntl_wexitstatus($status);
+        }
+        DB::purge('sqlite');
+        $results = array_map(static fn (string $path): string => (string) file_get_contents($path), $resultPaths);
+        foreach ($resultPaths as $path) {
+            unlink($path);
+        }
+
+        $this->assertSame(array_fill(0, $workerCount, 0), $exitCodes, implode('; ', $results));
+        $this->assertCount(1, array_unique($results));
+        $this->assertSame(128, (int) DB::table('entitlement_traffic_budgets')->where('entitlement_id', 'entitlement-member-annual')->value('reserved_bytes'));
+        $this->assertSame(1, DB::table('node_traffic_reservations')->where('request_id', 'quota-request-concurrent-retry')->count());
+    }
+
     public function test_reservation_request_id_must_be_a_safe_url_segment(): void
     {
         $this->expectException(\RuntimeException::class);
