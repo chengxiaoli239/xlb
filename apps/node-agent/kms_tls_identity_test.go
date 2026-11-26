@@ -366,7 +366,7 @@ func nodeTLSCertificateForKey(t *testing.T, key *ecdsa.PrivateKey) (tls.Certific
 		SerialNumber: big.NewInt(101), Subject: pkix.Name{CommonName: "node-kms-test"},
 		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 	}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCertificate, &key.PublicKey, caKey)
 	if err != nil {
