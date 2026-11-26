@@ -18,7 +18,7 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-26）
 
-**2026-11-26 当前 checkout 与外部会话复核**：开工时权威 `main` 与 `origin/main` 同步于 `1865f461c6e1231ad850028427d1258457983c5a`，工作区干净；CI `45751109316` 对应该提交且成功。当前被打开的 `codex/aws-kms-node-identity` worktree 在 `961406d`、无 upstream、落后主线两个提交，未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 本轮返回 `session expired`，所以 AWS 资源状态未复核，未执行任何云写入。12 项首发放行门仍为 5/12（42%），不等价于工时或上线概率。下一项 AI 可控工作仍是离线 Node Agent production runtime/mTLS 与 PHP provisioning 接线审查；恢复 AWS 会话后先只读查找已有 KMS/IAM 及节点材料，若需创建任何计费资源，先单独核成本和授权。
+**2026-11-26 当前 checkout 与外部会话复核**：本轮起始主线 `5f37bda` 与 `origin/main` 同步，随后阶段提交 `7340964c8d5e4ee3c8d877b411cec69dab9c6e8c` 已推送，CI `45757280170` success，当前主线工作区干净。打开的 `codex/aws-kms-node-identity` worktree 在 `961406d`、无 upstream、落后主线多个提交，未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 本轮返回 `session expired`，所以 AWS 资源状态未复核，未执行任何云写入。12 项首发放行门仍为 5/12（42%），不等价于工时或上线概率。下一项 AI 可控工作是离线 Node Agent quota mTLS identity 与 durable startup/recovery 接线审查；恢复 AWS 会话后先只读查找已有 KMS/IAM 及节点材料，若需创建任何计费资源，先单独核成本和授权。
 
 **Node Agent 配额前置配置校验（2026-11-26，离线 Go）**：runtime v1 只允许隔离测试环境，production-shaped v2 则必须携带 quota authority HTTPS endpoint/CA、byte grant、有限 recovery batch 和有界 timeout。测试覆盖缺失/不安全端点、非法 CA、额度与上限越界。定向 runtime tests 49 项通过；Node Agent 全套 race 187 passed/5 packages、vet/build 通过。该阶段只校验未来接线的必需配置，尚未在 Agent executable 构造线上 quota authority 或 journal，也不打开 production mode；首发仍 5/12。
 
