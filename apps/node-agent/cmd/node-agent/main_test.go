@@ -24,6 +24,8 @@ import (
 
 func TestProductionModeRemainsUnavailable(t *testing.T) {
 	t.Setenv("NODE_AGENT_MODE", "production")
+	t.Setenv("NODE_AGENT_TLS_IDENTITY_SOURCE", "aws-kms")
+	t.Setenv("NODE_AGENT_TLS_KMS_KEY_ID", "arn:aws:kms:us-west-2:123456789012:key/not-created-by-test")
 
 	err := run()
 	if err == nil || !strings.Contains(err.Error(), "production mode is not implemented") {
@@ -189,8 +191,63 @@ func TestRuntimeConfigPathIsRequiredAtStartup(t *testing.T) {
 	t.Setenv("NODE_AGENT_RUNTIME_CONFIG", "")
 
 	err := run()
-	if err == nil || !strings.Contains(err.Error(), "identity, state, and mTLS files are required") {
+	if err == nil || !strings.Contains(err.Error(), "identity, runtime config, and state path are required") {
 		t.Fatalf("run() error = %v; want required runtime config error", err)
+	}
+}
+
+func TestLoadNodeTLSIdentityUsesFileProviderOnlyForIsolatedTestMode(t *testing.T) {
+	now := time.Now()
+	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverCertificateDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: big.NewInt(55), Subject: pkix.Name{CommonName: "localhost"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames: []string{"localhost"},
+	}, &x509.Certificate{
+		SerialNumber: big.NewInt(55), Subject: pkix.Name{CommonName: "localhost"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames: []string{"localhost"},
+	}, &serverKey.PublicKey, serverKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientCAPEM := []byte(testRuntimeRendererCA(t))
+	directory := t.TempDir()
+	certificatePath := filepath.Join(directory, "node.crt")
+	privateKeyPath := filepath.Join(directory, "node.key")
+	clientCAPath := filepath.Join(directory, "client-ca.crt")
+	if err := os.WriteFile(certificatePath, pem.EncodeToMemory(&pem.Block{
+		Type: "CERTIFICATE", Bytes: serverCertificateDER,
+	}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	privateDER, err := x509.MarshalPKCS8PrivateKey(serverKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(privateKeyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(clientCAPath, clientCAPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := loadNodeTLSIdentity("node-a", "test-files", certificatePath, privateKeyPath, clientCAPath, "", "")
+	if err != nil {
+		t.Fatalf("test file identity load error = %v", err)
+	}
+	if identity.Certificate.PrivateKey == nil {
+		t.Fatal("isolated test identity did not load its file-backed private key")
+	}
+	if _, err := loadNodeTLSIdentity("node-a", "aws-kms", certificatePath, privateKeyPath, clientCAPath, "key", "us-west-2"); err == nil {
+		t.Fatal("AWS KMS source accepted a private-key file path")
+	}
+	if _, err := loadNodeTLSIdentity("node-a", "unknown", certificatePath, privateKeyPath, clientCAPath, "", ""); err == nil {
+		t.Fatal("unknown node identity source was accepted")
 	}
 }
 
@@ -226,7 +283,7 @@ func TestProbeListenerMustBeDistinctLoopback(t *testing.T) {
 }
 
 func TestProbeServerIsNotConstructedWhenDisabled(t *testing.T) {
-	server, err := newDataPlaneProbeServer("", "node-a", "", "", "", agent.DataPlaneProbeRuntimeConfig{})
+	server, err := newDataPlaneProbeServer("", "node-a", agent.NodeTLSIdentity{}, agent.DataPlaneProbeRuntimeConfig{})
 	if err != nil {
 		t.Fatalf("disabled probe listener returned error: %v", err)
 	}
@@ -237,7 +294,7 @@ func TestProbeServerIsNotConstructedWhenDisabled(t *testing.T) {
 
 func TestConfiguredCanaryRequiresExplicitProbeListener(t *testing.T) {
 	config := agent.DataPlaneProbeRuntimeConfig{Status: agent.RuntimeProbeHTTPSCanary}
-	if _, err := newDataPlaneProbeServer("", "node-a", "", "", "", config); err == nil ||
+	if _, err := newDataPlaneProbeServer("", "node-a", agent.NodeTLSIdentity{}, config); err == nil ||
 		!strings.Contains(err.Error(), "requires NODE_AGENT_PROBE_LISTEN") {
 		t.Fatalf("newDataPlaneProbeServer error = %v; want explicit probe-listener requirement", err)
 	}

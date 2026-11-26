@@ -80,7 +80,9 @@ func (source *KMSNodeTLSIdentitySource) LoadNodeTLSIdentity(
 	if !exists {
 		return NodeTLSIdentity{}, ErrInvalidKMSNodeTLSIdentity
 	}
-	publicKey, err := source.client.GetPublicKey(ctx, keyID)
+	requestContext, cancel := context.WithTimeout(ctx, source.timeout)
+	defer cancel()
+	publicKey, err := source.client.GetPublicKey(requestContext, keyID)
 	if err != nil {
 		return NodeTLSIdentity{}, fmt.Errorf("load KMS public key for node %q: %w", nodeID, err)
 	}

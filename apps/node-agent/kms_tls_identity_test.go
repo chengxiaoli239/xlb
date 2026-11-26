@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -18,6 +19,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/kms"
+	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 )
 
 type fakeKMSClient struct {
@@ -56,6 +60,33 @@ func (client fakeKMSClient) Sign(_ context.Context, _ string, digest []byte) ([]
 type fakeNodeTLSCertificateProvider struct {
 	identity NodeTLSIdentity
 	err      error
+}
+
+type fakeAWSKMSAPI struct {
+	getPublicKeyInput *kms.GetPublicKeyInput
+	signInput         *kms.SignInput
+	publicKeyOutput   *kms.GetPublicKeyOutput
+	signOutput        *kms.SignOutput
+	getPublicKeyErr   error
+	signErr           error
+}
+
+func (api *fakeAWSKMSAPI) GetPublicKey(
+	_ context.Context,
+	input *kms.GetPublicKeyInput,
+	_ ...func(*kms.Options),
+) (*kms.GetPublicKeyOutput, error) {
+	api.getPublicKeyInput = input
+	return api.publicKeyOutput, api.getPublicKeyErr
+}
+
+func (api *fakeAWSKMSAPI) Sign(
+	_ context.Context,
+	input *kms.SignInput,
+	_ ...func(*kms.Options),
+) (*kms.SignOutput, error) {
+	api.signInput = input
+	return api.signOutput, api.signErr
 }
 
 func (provider fakeNodeTLSCertificateProvider) LoadNodeTLSCertificate(
@@ -104,6 +135,60 @@ func TestKMSNodeTLSIdentitySourceLoadsMatchingP256Signer(t *testing.T) {
 	}
 	if !ecdsa.VerifyASN1(&key.PublicKey, digest[:], signature) {
 		t.Fatal("KMS signer returned a signature that does not match its public key")
+	}
+}
+
+func TestAWSKMSAsymmetricKeyClientUsesDigestSigningAndMapsKeyMetadata(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKeyDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("aws kms signer adapter"))
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := asn1.Marshal(ecdsaSignature{R: r, S: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAWSKMSAPI{
+		publicKeyOutput: &kms.GetPublicKeyOutput{
+			PublicKey: publicKeyDER, KeySpec: types.KeySpecEccNistP256,
+			KeyUsage:          types.KeyUsageTypeSignVerify,
+			SigningAlgorithms: []types.SigningAlgorithmSpec{types.SigningAlgorithmSpecEcdsaSha256},
+		},
+		signOutput: &kms.SignOutput{
+			Signature: signature, SigningAlgorithm: types.SigningAlgorithmSpecEcdsaSha256,
+		},
+	}
+	client, err := newAWSKMSAsymmetricKeyClient(api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey, err := client.GetPublicKey(context.Background(), "arn:aws:kms:us-west-2:123456789012:key/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publicKey.KeySpec != "ECC_NIST_P256" || publicKey.KeyUsage != "SIGN_VERIFY" ||
+		len(publicKey.SigningAlgorithms) != 1 || publicKey.SigningAlgorithms[0] != "ECDSA_SHA_256" {
+		t.Fatalf("mapped KMS public key metadata=%+v", publicKey)
+	}
+	gotSignature, err := client.Sign(context.Background(), *api.getPublicKeyInput.KeyId, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.signInput.MessageType != types.MessageTypeDigest ||
+		api.signInput.SigningAlgorithm != types.SigningAlgorithmSpecEcdsaSha256 ||
+		!bytes.Equal(api.signInput.Message, digest[:]) {
+		t.Fatalf("KMS Sign input does not use the expected digest contract: %+v", api.signInput)
+	}
+	if !bytes.Equal(gotSignature, signature) {
+		t.Fatal("KMS adapter changed the returned signature bytes")
 	}
 }
 

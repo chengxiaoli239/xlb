@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"log"
 	"net"
@@ -32,10 +34,22 @@ func run() error {
 	certificatePath := os.Getenv("NODE_AGENT_SERVER_CERT")
 	privateKeyPath := os.Getenv("NODE_AGENT_SERVER_KEY")
 	clientCAPath := os.Getenv("NODE_AGENT_CLIENT_CA")
-	if nodeID == "" || runtimeConfigPath == "" || statePath == "" || certificatePath == "" || privateKeyPath == "" || clientCAPath == "" {
-		return errors.New("node agent identity, state, and mTLS files are required")
+	if nodeID == "" || runtimeConfigPath == "" || statePath == "" {
+		return errors.New("node agent identity, runtime config, and state path are required")
 	}
 	runtimeConfig, err := readRuntimeConfig(runtimeConfigPath, nodeID)
+	if err != nil {
+		return err
+	}
+	identity, err := loadNodeTLSIdentity(
+		nodeID,
+		os.Getenv("NODE_AGENT_TLS_IDENTITY_SOURCE"),
+		certificatePath,
+		privateKeyPath,
+		clientCAPath,
+		os.Getenv("NODE_AGENT_TLS_KMS_KEY_ID"),
+		os.Getenv("AWS_REGION"),
+	)
 	if err != nil {
 		return err
 	}
@@ -76,16 +90,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	server, err := agent.NewMTLSServer(address, certificatePath, privateKeyPath, clientCAPath, agent.NewHTTPHandler(store, dataPlane))
+	server, err := agent.NewMTLSServerWithNodeTLSIdentity(
+		address, identity, agent.NewHTTPHandler(store, dataPlane),
+	)
 	if err != nil {
 		return err
 	}
-	dataServer, err := agent.NewDataPlaneServer(dataAddress, certificatePath, privateKeyPath, dataPlane)
+	dataServer, err := agent.NewDataPlaneServerWithNodeTLSIdentity(dataAddress, identity.Certificate, dataPlane)
 	if err != nil {
 		return err
 	}
 	probeServer, err := newDataPlaneProbeServer(
-		probeAddress, nodeID, certificatePath, privateKeyPath, clientCAPath, runtimeConfig.DataPlaneProbe,
+		probeAddress, nodeID, identity, runtimeConfig.DataPlaneProbe,
 	)
 	if err != nil {
 		return err
@@ -118,7 +134,7 @@ func run() error {
 	}
 }
 
-func newDataPlaneProbeServer(address, nodeID, certificatePath, privateKeyPath, clientCAPath string,
+func newDataPlaneProbeServer(address, nodeID string, identity agent.NodeTLSIdentity,
 	probeConfig agent.DataPlaneProbeRuntimeConfig) (*http.Server, error) {
 	if strings.TrimSpace(address) == "" {
 		if probeConfig.Status == agent.RuntimeProbeHTTPSCanary {
@@ -137,8 +153,56 @@ func newDataPlaneProbeServer(address, nodeID, certificatePath, privateKeyPath, c
 			return nil, errors.New("configure node data-plane HTTPS canary")
 		}
 	}
-	return agent.NewMTLSServer(address, certificatePath, privateKeyPath, clientCAPath,
+	return agent.NewMTLSServerWithNodeTLSIdentity(address, identity,
 		agent.NewDataPlaneProbeHandler(nodeID, executor))
+}
+
+func loadNodeTLSIdentity(nodeID, source, certificatePath, privateKeyPath, clientCAPath, kmsKeyID, region string) (agent.NodeTLSIdentity, error) {
+	if source == "" || source == "test-files" {
+		if certificatePath == "" || privateKeyPath == "" || clientCAPath == "" {
+			return agent.NodeTLSIdentity{}, errors.New("isolated-test file-backed mTLS certificate and client CA are required")
+		}
+		certificate, err := tls.LoadX509KeyPair(certificatePath, privateKeyPath)
+		if err != nil {
+			return agent.NodeTLSIdentity{}, errors.New("load isolated-test node certificate")
+		}
+		clientCAPEM, err := os.ReadFile(clientCAPath)
+		if err != nil {
+			return agent.NodeTLSIdentity{}, errors.New("load isolated-test client CA bundle")
+		}
+		clientCAs := x509.NewCertPool()
+		if !clientCAs.AppendCertsFromPEM(clientCAPEM) {
+			return agent.NodeTLSIdentity{}, errors.New("isolated-test client CA bundle is invalid")
+		}
+		return agent.NodeTLSIdentity{Certificate: certificate, ClientCAs: clientCAs}, nil
+	}
+	if source != "aws-kms" || kmsKeyID == "" || certificatePath == "" || clientCAPath == "" || privateKeyPath != "" {
+		return agent.NodeTLSIdentity{}, errors.New("node TLS identity source configuration is invalid")
+	}
+	client, err := agent.NewAWSKMSAsymmetricKeyClient(context.Background(), region)
+	if err != nil {
+		return agent.NodeTLSIdentity{}, errors.New("initialize AWS KMS node identity client")
+	}
+	certificates, err := agent.NewPEMNodeTLSCertificateProvider(map[string]agent.NodeTLSCertificateFiles{
+		nodeID: {CertificateChainPath: certificatePath, ClientCAPEMPath: clientCAPath},
+	})
+	if err != nil {
+		return agent.NodeTLSIdentity{}, errors.New("configure public node TLS certificate files")
+	}
+	identitySource, err := agent.NewKMSNodeTLSIdentitySource(
+		client,
+		certificates,
+		map[string]string{nodeID: kmsKeyID},
+		5*time.Second,
+	)
+	if err != nil {
+		return agent.NodeTLSIdentity{}, errors.New("configure AWS KMS node TLS identity")
+	}
+	identity, err := agent.LoadNodeTLSIdentity(context.Background(), nodeID, identitySource)
+	if err != nil {
+		return agent.NodeTLSIdentity{}, errors.New("load AWS KMS node TLS identity")
+	}
+	return identity, nil
 }
 
 func validateProbeListenerAddress(address, managementAddress, dataAddress string) error {
