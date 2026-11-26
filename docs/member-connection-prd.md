@@ -4,7 +4,7 @@
 
 ## 开发进度（2026-11-27）
 
-- **M6 KMS 对应短期节点/管理端测试证书生成器（2026-11-27，离线验收）**：新增 `apps/node-agent/cmd/node-lab-certificates`，将经 `ops/aws-cli kms get-public-key` 导出的 P-256 DER 公钥与全球公网 IPv4 绑定，生成 CA 签发的 Node Agent server chain（SAN 包含公网 endpoint 与 `127.0.0.1`）、临时 admin client certificate/key 及身份 manifest。KMS 节点私钥由 KMS 持有不导出；CA 私钥只留内存，输出目录 mode `0700`、admin client key mode `0600`、证书有效期 2 小时。`go test -race ./cmd/node-lab-certificates`、`go vet`、`go build` 通过，覆盖证书链、SAN、key-match、EKU、权限和错误输入。此生成器不调用 AWS；实际 KMS 公钥导出和 Node Agent Sign 首次运行仍依赖恢复的 xlb-ops 会话，未生成、使用或提交任何证书私钥，也未关闭 M6/上线门。
+- **M6 KMS 对应短期节点/管理端测试证书生成器（2026-11-27，离线验收并已推送）**：新增 `apps/node-agent/cmd/node-lab-certificates`，将经 `ops/aws-cli kms get-public-key` 导出的 P-256 DER 公钥与全球公网 IPv4 绑定，生成 CA 签发的 Node Agent server chain（SAN 包含公网 endpoint 与 `127.0.0.1`）、临时 admin client certificate/key 及身份 manifest。KMS 节点私钥由 KMS 持有不导出；CA 私钥只留内存，输出目录 mode `0700`、admin client key mode `0600`、证书有效期 2 小时。证书工具定向 race/vet/build 通过；主线 Node Agent 全量 `go test -race ./...` 209 项/6 packages、`go vet ./...`、`go build ./...` 通过。提交 `a06a9ac` 与 KMS live acceptance 状态记录 `bab227d` 已推送到 `origin/main`。本轮 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 实测仍返回 `session expired`，与用户报告浏览器已登录 root 不一致，因此没有确认当前 AWS 资源状态或执行云端操作；本工具不调用 AWS，也没有生成、使用或提交证书私钥。该离线阶段不关闭 M6/上线门，首发放行门仍为 5/12。
 
 - **M6 Android remote-runner 输入守卫回归（2026-11-27，离线与 hosted CI）**：新增 fake-adb 测试，验证非公网预期出口地址、非 HTTPS control origin 与注入型 node ID 均在联系 ADB 前失败；复用的 disposable AVD guard 同时回归缺少 serial、多设备、offline 物理设备、错误 serial、非专用 AVD 和伪装硬件身份。两组脚本在本机通过；主线 CI `45886280116` 全绿，Android job 实际执行这些 guard 后再构建 APK/AndroidTest、JVM、lint。该项只证明测试启动参数与设备选择失败关闭，不建立隧道、不调用 AWS，也不增加首发门，仍为 5/12。
 
