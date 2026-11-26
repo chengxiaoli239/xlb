@@ -56,7 +56,7 @@
 
 **CI / AWS 检查点（2026-11-26）**：Node Agent AWS SDK 依赖缺少 Android 本地替换模块 sums 已补入，hosted CI `45749846197` 全绿（Android native build、PHP/MySQL/PostgreSQL、Node Agent 与 provenance 均通过）。本机完整 Gradle 因 Temurin 26.0.1 与当前 Kotlin Gradle compiler 不兼容未通过；CI JDK 21 构建已通过。随后 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 session expired，因此真实 KMS/IAM 只读盘点未完成，无云资源写入。下一轮需本人重新 `aws login` 后先只读盘点现有 KMS key 与 IAM role；无现成获批 key 时，KMS key 创建与持续费用必须先明确核定。
 
-**后续 AWS/KMS 只读复核（2026-11-26）**：随后登录已恢复，`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 root principal。KMS key `dd29fe54-38e5-4094-8dde-0c1a1cd8c872` 当前为 `PendingDeletion`，预计 2026-12-03 16:11 +08 删除；隔离节点栈已不存在且没有运行中的 `ManagedBy=xlb-node-lab` 实例。为避免重复创建，`xlb-lab-access-usw2` IAM 栈保留，其中 KMS policy 只允许对显式单一 key ARN 执行 `kms:GetPublicKey` 和 `kms:Sign`；业务服务器和 `xlb-node-manager-access-usw2` 未改动。账单尚未最终结算。用户确认必要的多日隔离测试资源费用可以接受，要求集中安排资源阶段、优先复用并避免无必要的重复建删；后续如需 KMS live 测试，先核查现有 key 的可复用状态及等待删除期限，再决定是否恢复使用或申请新资源。
+**后续 AWS/KMS 只读复核（2026-11-26）**：随后登录已恢复，`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 root principal。KMS key `dd29fe54-38e5-4094-8dde-0c1a1cd8c872` 当前为 `PendingDeletion`，预计 2026-12-03 16:11 +08 删除；隔离节点栈已不存在且没有运行中的 `ManagedBy=xlb-node-lab` 实例。为避免重复创建，`xlb-lab-access-usw2` IAM 栈保留，其中 KMS policy 只允许对显式单一 key ARN 执行 `kms:GetPublicKey` 和 `kms:Sign`；业务服务器和 `xlb-node-manager-access-usw2` 未改动。Cost Explorer 对 2026-11-01 至 2026-11-27（结束日期不含）报告 AWS KMS `us-west-2` 月度区域/服务汇总约 USD 0.000048；该值有延迟，不是单 key 计费明细或最终账单。用户确认必要的多日隔离测试资源费用可以接受，要求集中安排资源阶段、优先复用并避免无必要的重复建删；后续如需 KMS live 测试，先核查现有 key 的可复用状态及等待删除期限，再决定是否恢复使用或申请新资源。
 
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
