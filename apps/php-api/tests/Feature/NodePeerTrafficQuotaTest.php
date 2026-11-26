@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Services\TrafficQuotaExceeded;
 use App\Services\TrafficQuotaReservationConflict;
 use App\Services\TrafficQuotaReservationService;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -12,39 +13,54 @@ use Tests\TestCase;
 
 final class NodePeerTrafficQuotaTest extends TestCase
 {
-    private string $databasePath;
+    private ?string $databasePath = null;
 
     private string $defaultDatabaseConnection;
+
+    private string $testDatabaseConnection;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $path = tempnam(sys_get_temp_dir(), 'xlb-quota-');
-        $this->assertNotFalse($path);
-        $this->databasePath = $path;
         $this->defaultDatabaseConnection = (string) config('database.default');
-        config([
-            'database.default' => 'sqlite',
-            'database.connections.sqlite.database' => $path,
-            'database.connections.sqlite.busy_timeout' => 15000,
-            'database.connections.sqlite.transaction_mode' => 'IMMEDIATE',
-        ]);
-        DB::setDefaultConnection('sqlite');
-        DB::purge('sqlite');
-        Artisan::call('migrate:fresh', ['--database' => 'sqlite', '--force' => true]);
+        $databaseRaceTest = $this->name() === 'test_concurrent_request_id_reuse_by_another_peer_returns_conflict';
+        $databaseName = (string) config('database.connections.'.$this->defaultDatabaseConnection.'.database');
+        $this->testDatabaseConnection = $databaseRaceTest
+            && env('XLB_RUN_QUOTA_DB_RACE_TEST') === '1'
+            && app()->environment('testing')
+            && in_array($this->defaultDatabaseConnection, ['mysql', 'pgsql'], true)
+            && $databaseName === 'xlb_test'
+            ? $this->defaultDatabaseConnection
+            : 'sqlite';
+        if ($this->testDatabaseConnection === 'sqlite') {
+            $path = tempnam(sys_get_temp_dir(), 'xlb-quota-');
+            $this->assertNotFalse($path);
+            $this->databasePath = $path;
+            config([
+                'database.default' => 'sqlite',
+                'database.connections.sqlite.database' => $path,
+                'database.connections.sqlite.busy_timeout' => 15000,
+                'database.connections.sqlite.transaction_mode' => 'IMMEDIATE',
+            ]);
+        }
+        DB::setDefaultConnection($this->testDatabaseConnection);
+        DB::purge($this->testDatabaseConnection);
+        Artisan::call('migrate:fresh', ['--database' => $this->testDatabaseConnection, '--force' => true]);
         $this->seed();
         $this->createPeer(1024);
     }
 
     protected function tearDown(): void
     {
-        DB::purge('sqlite');
-        if (isset($this->databasePath) && is_file($this->databasePath)) {
+        DB::purge($this->testDatabaseConnection);
+        if ($this->databasePath !== null && is_file($this->databasePath)) {
             unlink($this->databasePath);
         }
-        foreach (glob($this->databasePath.'-*') ?: [] as $path) {
-            if (is_file($path)) {
-                unlink($path);
+        if ($this->databasePath !== null) {
+            foreach (glob($this->databasePath.'-*') ?: [] as $path) {
+                if (is_file($path)) {
+                    unlink($path);
+                }
             }
         }
         config(['database.default' => $this->defaultDatabaseConnection]);
@@ -121,7 +137,7 @@ final class NodePeerTrafficQuotaTest extends TestCase
             pcntl_waitpid($pid, $status);
             $exitCodes[] = pcntl_wexitstatus($status);
         }
-        DB::purge('sqlite');
+        DB::purge($this->testDatabaseConnection);
         $results = array_map(static fn (string $path): string => (string) file_get_contents($path), $resultPaths);
         foreach ($resultPaths as $path) {
             unlink($path);
@@ -131,6 +147,117 @@ final class NodePeerTrafficQuotaTest extends TestCase
         $this->assertCount(1, array_unique($results));
         $this->assertSame(128, (int) DB::table('entitlement_traffic_budgets')->where('entitlement_id', 'entitlement-member-annual')->value('reserved_bytes'));
         $this->assertSame(1, DB::table('node_traffic_reservations')->where('request_id', 'quota-request-concurrent-retry')->count());
+    }
+
+    public function test_concurrent_request_id_reuse_by_another_peer_returns_conflict(): void
+    {
+        if (! function_exists('pcntl_fork')) {
+            $this->markTestSkipped('pcntl is required for the isolated multi-process reservation proof.');
+        }
+        if (! in_array($this->testDatabaseConnection, ['mysql', 'pgsql'], true)) {
+            $this->markTestSkipped('A row-locking database is required to exercise the unique request race.');
+        }
+
+        $this->createPeerOnNode('node-quota-2', 'peer-quota-2', 'device-quota-2');
+        $firstGatePath = tempnam(sys_get_temp_dir(), 'xlb-quota-conflict-first-gate-');
+        $secondGatePath = tempnam(sys_get_temp_dir(), 'xlb-quota-conflict-second-gate-');
+        $this->assertNotFalse($firstGatePath);
+        $this->assertNotFalse($secondGatePath);
+        unlink($firstGatePath);
+        unlink($secondGatePath);
+        $resultPaths = [];
+        $firstLookupReadyPaths = [];
+        $secondLookupReadyPaths = [];
+        $children = [];
+        $peers = [
+            ['node_id' => 'node-test-1', 'peer_id' => 'peer-quota-1'],
+            ['node_id' => 'node-quota-2', 'peer_id' => 'peer-quota-2'],
+        ];
+
+        foreach ($peers as $index => $peer) {
+            $resultPath = tempnam(sys_get_temp_dir(), 'xlb-quota-conflict-result-');
+            $this->assertNotFalse($resultPath);
+            $resultPaths[] = $resultPath;
+            $firstLookupReadyPaths[] = $resultPath.'.lookup.1';
+            $secondLookupReadyPaths[] = $resultPath.'.lookup.2';
+            $pid = pcntl_fork();
+            $this->assertNotSame(-1, $pid);
+            if ($pid === 0) {
+                DB::purge($this->testDatabaseConnection);
+                $requestLookups = 0;
+                DB::listen(function (QueryExecuted $query) use (
+                    &$requestLookups, $resultPath, $firstGatePath, $secondGatePath,
+                ): void {
+                    $sql = strtolower($query->sql);
+                    if (! str_contains($sql, 'node_traffic_reservations')
+                        || ! str_contains($sql, 'where') || ! str_contains($sql, 'request_id')) {
+                        return;
+                    }
+
+                    $requestLookups++;
+                    if ($requestLookups > 2) {
+                        return;
+                    }
+                    file_put_contents($resultPath.'.lookup.'.$requestLookups, 'ready');
+                    $gatePath = $requestLookups === 1 ? $firstGatePath : $secondGatePath;
+                    $deadline = microtime(true) + 10;
+                    while (! file_exists($gatePath) && microtime(true) < $deadline) {
+                        usleep(1000);
+                    }
+                    if (! file_exists($gatePath)) {
+                        throw new \RuntimeException('Timed out waiting for the concurrent request lookup barrier.');
+                    }
+                });
+                try {
+                    $reservation = app(TrafficQuotaReservationService::class)->reserve(
+                        'entitlement-member-annual', $peer['node_id'], $peer['peer_id'], 1,
+                        'quota-request-cross-peer-race', 128,
+                    );
+                    file_put_contents($resultPath, 'reserved:'.$reservation['id']);
+                    exit(0);
+                } catch (TrafficQuotaReservationConflict) {
+                    file_put_contents($resultPath, 'conflict');
+                    exit(0);
+                } catch (\Throwable $exception) {
+                    file_put_contents($resultPath, 'error:'.$exception::class.':'.$exception->getMessage());
+                    exit(1);
+                }
+            }
+            $children[] = $pid;
+        }
+
+        $deadline = microtime(true) + 10;
+        while (count(array_filter($firstLookupReadyPaths, 'file_exists')) < count($firstLookupReadyPaths)
+            && microtime(true) < $deadline) {
+            usleep(1000);
+        }
+        touch($firstGatePath);
+        $deadline = microtime(true) + 10;
+        while (count(array_filter($secondLookupReadyPaths, 'file_exists')) < count($secondLookupReadyPaths)
+            && microtime(true) < $deadline) {
+            usleep(1000);
+        }
+        touch($secondGatePath);
+        $exitCodes = [];
+        foreach ($children as $pid) {
+            pcntl_waitpid($pid, $status);
+            $exitCodes[] = pcntl_wexitstatus($status);
+        }
+        DB::purge($this->testDatabaseConnection);
+        $results = array_map(static fn (string $path): string => (string) file_get_contents($path), $resultPaths);
+        unlink($firstGatePath);
+        unlink($secondGatePath);
+        foreach (array_merge($resultPaths, $firstLookupReadyPaths, $secondLookupReadyPaths) as $path) {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+
+        $this->assertSame(array_fill(0, count($children), 0), $exitCodes, implode('; ', $results));
+        $this->assertCount(1, array_filter($results, static fn (string $result): bool => str_starts_with($result, 'reserved:')));
+        $this->assertCount(1, array_filter($results, static fn (string $result): bool => $result === 'conflict'));
+        $this->assertSame(128, (int) DB::table('entitlement_traffic_budgets')->where('entitlement_id', 'entitlement-member-annual')->value('reserved_bytes'));
+        $this->assertSame(1, DB::table('node_traffic_reservations')->where('request_id', 'quota-request-cross-peer-race')->count());
     }
 
     public function test_reservation_request_id_must_be_a_safe_url_segment(): void

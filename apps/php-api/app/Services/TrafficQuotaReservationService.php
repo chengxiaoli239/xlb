@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -31,63 +32,74 @@ final class TrafficQuotaReservationService
             throw new RuntimeException('Traffic reservation request is invalid.');
         }
 
-        return DB::transaction(function () use ($entitlementId, $nodeId, $peerId, $generation, $requestId, $grantBytes, $leaseSeconds): array {
-            $existing = DB::table('node_traffic_reservations')->where('request_id', $requestId)->lockForUpdate()->first();
-            if ($existing) {
-                return $this->existingReservationResponse(
-                    $existing, $entitlementId, $nodeId, $peerId, $generation, $grantBytes,
-                );
+        try {
+            return DB::transaction(function () use ($entitlementId, $nodeId, $peerId, $generation, $requestId, $grantBytes, $leaseSeconds): array {
+                $existing = DB::table('node_traffic_reservations')->where('request_id', $requestId)->lockForUpdate()->first();
+                if ($existing) {
+                    return $this->existingReservationResponse(
+                        $existing, $entitlementId, $nodeId, $peerId, $generation, $grantBytes,
+                    );
+                }
+
+                $peer = DB::table('node_access_peers')->where('id', $peerId)->lockForUpdate()->first();
+                // Recheck after the peer lock so concurrent retries reuse the row created by the first request.
+                $existing = DB::table('node_traffic_reservations')->where('request_id', $requestId)->lockForUpdate()->first();
+                if ($existing) {
+                    return $this->existingReservationResponse(
+                        $existing, $entitlementId, $nodeId, $peerId, $generation, $grantBytes,
+                    );
+                }
+
+                if (! $peer || $peer->node_id !== $nodeId || $peer->entitlement_id !== $entitlementId
+                    || (int) $peer->generation !== $generation || $peer->status !== 'active'
+                    || $peer->provision_confirmation_status !== 'confirmed' || ! $this->isFuture($peer->expires_at)) {
+                    throw new RuntimeException('Traffic reservation peer is not active for this entitlement.');
+                }
+
+                $entitlement = $this->activeEntitlement($entitlementId);
+                if (! $entitlement || $entitlement->user_id !== $peer->user_id) {
+                    throw new RuntimeException('Traffic reservation entitlement is not active.');
+                }
+
+                $node = DB::table('nodes')->where('id', $nodeId)->lockForUpdate()
+                    ->first(['is_test', 'status', 'health_status']);
+                if (! $node || (bool) $node->is_test || $node->status !== 'available' || $node->health_status !== 'healthy') {
+                    throw new RuntimeException('Traffic reservation node is not eligible.');
+                }
+
+                $this->ensureBudget($entitlement);
+                $at = now()->utc();
+                $reserved = DB::table('entitlement_traffic_budgets')->where('entitlement_id', $entitlementId)
+                    ->whereRaw('used_bytes <= quota_bytes')
+                    ->whereRaw('reserved_bytes <= quota_bytes - used_bytes')
+                    ->whereRaw('? <= quota_bytes - used_bytes - reserved_bytes', [$grantBytes])
+                    ->increment('reserved_bytes', $grantBytes, ['updated_at' => $at->toIso8601String()]);
+                if ($reserved !== 1) {
+                    throw new TrafficQuotaExceeded('The shared entitlement traffic quota is fully used or reserved.');
+                }
+
+                $reservationId = (string) Str::uuid();
+                $expiresAt = $at->copy()->addSeconds($leaseSeconds)->toIso8601String();
+                DB::table('node_traffic_reservations')->insert([
+                    'id' => $reservationId, 'request_id' => $requestId, 'entitlement_id' => $entitlementId,
+                    'node_id' => $nodeId, 'peer_id' => $peerId, 'peer_generation' => $generation,
+                    'grant_bytes' => $grantBytes, 'settled_upload_bytes' => 0, 'settled_download_bytes' => 0,
+                    'status' => 'reserved', 'lease_expires_at' => $expiresAt, 'acknowledgement_id' => null,
+                    'final_at' => null, 'created_at' => $at->toIso8601String(), 'updated_at' => $at->toIso8601String(),
+                ]);
+
+                return $this->reservationResponse(DB::table('node_traffic_reservations')->where('id', $reservationId)->first());
+            }, 10);
+        } catch (QueryException $exception) {
+            $existing = DB::table('node_traffic_reservations')->where('request_id', $requestId)->first();
+            if (! $existing) {
+                throw $exception;
             }
 
-            $peer = DB::table('node_access_peers')->where('id', $peerId)->lockForUpdate()->first();
-            // Recheck after the peer lock so concurrent retries reuse the row created by the first request.
-            $existing = DB::table('node_traffic_reservations')->where('request_id', $requestId)->lockForUpdate()->first();
-            if ($existing) {
-                return $this->existingReservationResponse(
-                    $existing, $entitlementId, $nodeId, $peerId, $generation, $grantBytes,
-                );
-            }
-
-            if (! $peer || $peer->node_id !== $nodeId || $peer->entitlement_id !== $entitlementId
-                || (int) $peer->generation !== $generation || $peer->status !== 'active'
-                || $peer->provision_confirmation_status !== 'confirmed' || ! $this->isFuture($peer->expires_at)) {
-                throw new RuntimeException('Traffic reservation peer is not active for this entitlement.');
-            }
-
-            $entitlement = $this->activeEntitlement($entitlementId);
-            if (! $entitlement || $entitlement->user_id !== $peer->user_id) {
-                throw new RuntimeException('Traffic reservation entitlement is not active.');
-            }
-
-            $node = DB::table('nodes')->where('id', $nodeId)->lockForUpdate()
-                ->first(['is_test', 'status', 'health_status']);
-            if (! $node || (bool) $node->is_test || $node->status !== 'available' || $node->health_status !== 'healthy') {
-                throw new RuntimeException('Traffic reservation node is not eligible.');
-            }
-
-            $this->ensureBudget($entitlement);
-            $at = now()->utc();
-            $reserved = DB::table('entitlement_traffic_budgets')->where('entitlement_id', $entitlementId)
-                ->whereRaw('used_bytes <= quota_bytes')
-                ->whereRaw('reserved_bytes <= quota_bytes - used_bytes')
-                ->whereRaw('? <= quota_bytes - used_bytes - reserved_bytes', [$grantBytes])
-                ->increment('reserved_bytes', $grantBytes, ['updated_at' => $at->toIso8601String()]);
-            if ($reserved !== 1) {
-                throw new TrafficQuotaExceeded('The shared entitlement traffic quota is fully used or reserved.');
-            }
-
-            $reservationId = (string) Str::uuid();
-            $expiresAt = $at->copy()->addSeconds($leaseSeconds)->toIso8601String();
-            DB::table('node_traffic_reservations')->insert([
-                'id' => $reservationId, 'request_id' => $requestId, 'entitlement_id' => $entitlementId,
-                'node_id' => $nodeId, 'peer_id' => $peerId, 'peer_generation' => $generation,
-                'grant_bytes' => $grantBytes, 'settled_upload_bytes' => 0, 'settled_download_bytes' => 0,
-                'status' => 'reserved', 'lease_expires_at' => $expiresAt, 'acknowledgement_id' => null,
-                'final_at' => null, 'created_at' => $at->toIso8601String(), 'updated_at' => $at->toIso8601String(),
-            ]);
-
-            return $this->reservationResponse(DB::table('node_traffic_reservations')->where('id', $reservationId)->first());
-        }, 10);
+            return $this->existingReservationResponse(
+                $existing, $entitlementId, $nodeId, $peerId, $generation, $grantBytes,
+            );
+        }
     }
 
     /**

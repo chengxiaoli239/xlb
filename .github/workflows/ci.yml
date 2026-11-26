@@ -234,6 +234,7 @@ jobs:
           DB_PORT: ${{ matrix.port }}
           DB_URL: ''
           DB_USERNAME: ${{ matrix.username }}
+          XLB_RUN_QUOTA_DB_RACE_TEST: '1'
           XLB_MIHOMO_BINARY: ${{ runner.temp }}/mihomo-bin/mihomo
 
   node-agent:
