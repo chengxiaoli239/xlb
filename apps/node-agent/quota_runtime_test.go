@@ -2,9 +2,17 @@ package agent
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
+	"math/big"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewRuntimeDataPlaneEnablesQuotaOnlyForTrustedProductionConfig(t *testing.T) {
@@ -19,7 +27,13 @@ func TestNewRuntimeDataPlaneEnablesQuotaOnlyForTrustedProductionConfig(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity := NodeTLSIdentity{Certificate: testQuotaClientCertificate(t)}
+	identity := testQuotaNodeIdentity(t)
+	if err := config.Validate(); err != nil {
+		t.Fatalf("runtime config validation error = %v", err)
+	}
+	if err := validateNodeTLSIdentity(identity); err != nil {
+		t.Fatalf("node TLS identity validation error = %v", err)
+	}
 
 	dataPlane, err := NewRuntimeDataPlane(context.Background(), store, NewPublicTargetDialer(), identity, config)
 	if err != nil {
@@ -67,5 +81,57 @@ func TestNewRuntimeDataPlaneKeepsIsolatedTestWithoutOnlineQuota(t *testing.T) {
 	}
 	if dataPlane.quotaProvider != nil {
 		t.Fatal("isolated-test runtime unexpectedly enabled online quota authority")
+	}
+}
+
+func testQuotaNodeIdentity(t *testing.T) NodeTLSIdentity {
+	t.Helper()
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(300), Subject: pkix.Name{CommonName: "quota node test CA"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true,
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCertificate, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(301), Subject: pkix.Name{CommonName: "quota-test-node"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth,
+		},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCertificate, &privateKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(caCertificate)
+	return NodeTLSIdentity{
+		Certificate: tls.Certificate{
+			Certificate: [][]byte{leafDER, caDER},
+			PrivateKey:  privateKey,
+			Leaf:        leaf,
+		},
+		ClientCAs: roots,
 	}
 }

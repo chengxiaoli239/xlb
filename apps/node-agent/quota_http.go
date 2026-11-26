@@ -95,12 +95,15 @@ func validQuotaAuthorityClientCertificate(certificate tls.Certificate) bool {
 		(leaf.KeyUsage != 0 && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0) {
 		return false
 	}
+	clientAuthenticationAllowed := len(leaf.ExtKeyUsage) == 0
 	for _, usage := range leaf.ExtKeyUsage {
-		if usage != x509.ExtKeyUsageAny && usage != x509.ExtKeyUsageClientAuth {
+		if usage == x509.ExtKeyUsageAny || usage == x509.ExtKeyUsageClientAuth {
+			clientAuthenticationAllowed = true
+		} else if usage != x509.ExtKeyUsageServerAuth {
 			return false
 		}
 	}
-	return true
+	return clientAuthenticationAllowed
 }
 
 func (authority *HTTPQuotaAuthority) Reserve(ctx context.Context, request QuotaReservationRequest) (QuotaReservation, error) {

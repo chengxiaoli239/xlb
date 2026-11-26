@@ -6,6 +6,8 @@ The production-shaped `xlb-node-runtime/v2` schema now also requires a trusted H
 
 `NewHTTPQuotaAuthority` validates its client certificate at construction time. The leaf certificate must be currently valid, permit digital signatures, allow the TLS ClientAuth EKU (or omit EKU restrictions), and match the configured `crypto.Signer` public key. Server-only EKU, expired certificates, or mismatched signers fail before any request. This is local configuration validation; it does not establish a deployed node-to-control-plane mTLS connection.
 
+The production-shaped initializer uses the KMS-backed node TLS identity certificate for both the Agent listener and its reverse quota-authority client connection. Its issued leaf therefore needs both ServerAuth and ClientAuth EKUs, and its SHA-256 fingerprint must match the PHP node record's `agent_client_cert_sha256`; the Agent's configured quota-authority CA bundle must validate the control-plane server certificate. No production certificate has been checked against these requirements yet.
+
 ## Trust Boundary
 
 - The Laravel control plane selects an already provisioned, healthy member node. Cloud-provider APIs provision whole nodes; this contract manages member peers on a node and does not depend on AWS.

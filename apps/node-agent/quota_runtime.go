@@ -25,6 +25,9 @@ func NewRuntimeDataPlane(
 	if config.Environment != RuntimeEnvironmentProd {
 		return nil, ErrInvalidNodeRuntimeConfig
 	}
+	if validateNodeTLSIdentity(identity) != nil {
+		return nil, ErrInvalidNodeRuntimeConfig
+	}
 
 	_, authorities, err := parseNodeTLSCertificatePEM([]byte(config.QuotaAuthority.ServerCAPEM))
 	if err != nil || len(authorities) == 0 {
