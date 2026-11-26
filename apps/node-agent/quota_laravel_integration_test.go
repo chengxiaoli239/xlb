@@ -82,22 +82,54 @@ func TestHTTPQuotaAuthorityAgainstLaravelCGI(t *testing.T) {
 			"SSL_CLIENT_VERIFY=SUCCESS", "SSL_CLIENT_CERT="+strings.TrimSpace(string(verifiedCertificate)))
 		cgiHandler.ServeHTTP(writer, request)
 	})
+	quotaServerCertificate, _, quotaServerCAPEM := createTestCertificates(t)
 	server := httptest.NewUnstartedServer(handler)
 	server.TLS = &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs:  clientRoots,
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{quotaServerCertificate},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    clientRoots,
 	}
 	server.StartTLS()
 	t.Cleanup(server.Close)
 
-	serverRoots := x509.NewCertPool()
-	serverRoots.AddCert(server.Certificate())
+	serverRoots := testRootPool(t, quotaServerCAPEM)
 	unauthenticatedClient := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: serverRoots},
 	}}
 	if _, err := unauthenticatedClient.Post(server.URL+quotaReservationPath, "application/json", strings.NewReader("{}")); err == nil {
 		t.Fatal("Laravel CGI mTLS ingress accepted a client without a certificate")
+	}
+
+	_, _, rendererCAPEM := createTestCertificates(t)
+	runtimeConfig := TrustedNodeRuntimeConfig{
+		SchemaVersion: TrustedNodeRuntimeSchemaV2,
+		Environment:   RuntimeEnvironmentProd,
+		Node:          NodeRuntimeIdentity{ID: "node-test-1", Provider: "aws", Region: "us-west-2"},
+		NodeTLSIdentity: NodeTLSIdentityRuntimeConfig{
+			Source: "aws-kms", KeyARN: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+		},
+		ProofBridge: ProofBridgeRuntimeConfig{
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			DeviceProofRequired: true, CredentialSource: RuntimeCredentialSecure,
+		},
+		ProfileRenderer: ProfileRendererRuntimeConfig{
+			Status: RuntimeProfileMihomoBridge, BridgeEndpoint: "https://bridge.example.invalid:9444",
+			BridgeServerCAPEM: string(rendererCAPEM),
+		},
+		QuotaAuthority: QuotaAuthorityRuntimeConfig{
+			Endpoint: server.URL, ServerCAPEM: string(quotaServerCAPEM),
+			GrantBytes: 512, OutboxLimit: 20, TimeoutSeconds: 10,
+		},
+	}
+	quotaStore, err := OpenPeerStore(filepath.Join(t.TempDir(), "quota-agent.json"), runtimeConfig.Node.ID, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeDataPlane, err := NewRuntimeDataPlane(context.Background(), quotaStore, NewPublicTargetDialer(),
+		NodeTLSIdentity{Certificate: clientCertificate, ClientCAs: clientRoots}, runtimeConfig)
+	if err != nil {
+		t.Fatalf("initialize runtime quota data plane against Laravel CGI: %v", err)
 	}
 
 	authority, err := NewHTTPQuotaAuthority(server.URL, serverRoots, clientCertificate, 10*time.Second)
@@ -134,6 +166,23 @@ func TestHTTPQuotaAuthorityAgainstLaravelCGI(t *testing.T) {
 	}
 	if err := authority.Settle(context.Background(), settlement); err != nil {
 		t.Fatalf("idempotent final settlement retry: %v", err)
+	}
+	runtimeLease, err := runtimeDataPlane.quotaProvider.OpenLease(context.Background(), PeerQuotaIdentity{
+		NodeID: runtimeConfig.Node.ID, EntitlementID: reservationRequest.EntitlementID,
+		PeerID: reservationRequest.PeerID, Generation: reservationRequest.Generation,
+	})
+	if err != nil {
+		t.Fatalf("reserve through runtime quota initializer: %v", err)
+	}
+	permit, err := runtimeLease.Permit("upload", 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := permit.Commit(17); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtimeLease.Finalize(context.Background(), requestID+"-runtime-final"); err != nil {
+		t.Fatalf("settle runtime quota lease through Laravel CGI: %v", err)
 	}
 }
 

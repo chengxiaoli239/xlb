@@ -26,6 +26,8 @@
 
 **Node Agent quota reservation 上限（2026-11-26，离线 Go）**：production-shaped trusted runtime 的单次 grant 限为 64 MiB，拒绝更大的 reservation；该配置上限控制中心额度一次预留量，与 32 KiB 本地 permit 分块相容。Go race 191/191（5 packages）、vet/build 通过，Laravel quota feature 12/12、111 assertions 通过。此项只限制配置，不证明用户额度对账或 production quota transport 已启用。
 
+**Node Agent runtime quota initializer → Laravel CGI mTLS（2026-11-26，本机集成）**：Go/Laravel 临时 CGI 测试现经 `NewRuntimeDataPlane` 构造 production-shaped NodeTLS identity 与 quota authority transport，恢复空 durable outbox 后 reserve/settle 并核对累计 `57 used / 0 reserved`。Go race 191/191、vet/build 与 Laravel quota suite 12/12、112 assertions 通过。该测试使用临时 SQLite/证书和本机 CGI，不验证 production KMS/IAM、部署 TLS terminator、目标数据库或会员隧道；production gate 保持关闭。
+
 **Node Agent KMS 区域绑定（2026-11-26，代码 `ab671b3`、回归 `2a861fd`）**：isolated-test 的 AWS KMS signer ARN 必须匹配 runtime node Region，SDK Region 由 trusted node 配置提供而不采信 `AWS_REGION`；production-shaped v2 同样把 node Region 传入身份选择结果。新增 AWS SDK 层测试，确认环境 Region 与显式 trusted Region 冲突时，client 采用 trusted Region。定向 command tests 25/25、新 Region 回归 1/1、全套 race 179/179（5 packages）、vet/build 通过；CI `45754890724` 对 `2a861fd710857b251bf98533bfe77784baaaff3d` 全部成功。此项没有访问 AWS 或打开 production executable gate，不增加 5/12 门数。下一项仍为离线 production startup/mTLS 与 PHP provisioning 接线审查。
 
 **2026-11-26 后续检查点**：M5/M6 live harness 已补撤权前后累计流量单调性与最终快照/回执相等断言，并在 `xlb-lab-us-20261126-m5mon` 隔离节点重新运行通过。专用节点/IAM 栈随后回收，资源核验无残留。此轮在主线复跑 Node Agent `go test -race ./...` 178 passed/5 packages、`go vet ./...` 与 `go build ./...` 通过。放行门仍为 5/12（42%）；下一步继续离线推进生产 Node Agent runtime/mTLS 注入契约与 PHP provisioning 接线，真实 profile 和节点身份/CA 材料到位后再做会员真机联验；合成 peer 证据不能外推到真实会员线路。

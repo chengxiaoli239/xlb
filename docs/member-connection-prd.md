@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-26）
 
+- **Node Agent runtime quota initializer → Laravel CGI/mTLS 集成（2026-11-26，隔离本机）**：将 Go/Laravel CGI mTLS 集成从直接调用 `HTTPQuotaAuthority` 扩展为 `NewRuntimeDataPlane` 按 production-shaped v2 构造 NodeTLS identity、trusted authority CA 与 durable quota provider；通过真实 Laravel CGI 完成 reservation 和最终结算，并验证该 fixture 下累计 `used_bytes=57`、`reserved_bytes=0`、同一 peer 两个 reservation 均 settled。Laravel quota feature 12/12、112 assertions 通过；Go race 191/191（5 packages）、vet/build 通过。证据仅限本机临时 SQLite、临时测试证书与本地 CGI，不是部署 mTLS、生产 KMS/IAM、目标数据库并发或真实会员流量验收。production executable 仍在加载 production config/AWS 前拒绝启动，首发门仍 5/12。
+
 - **Node Agent quota grant 上限（2026-11-26，离线 Go）**：v2 trusted quota 配置的单次 grant 上限设为 64 MiB，与 Agent `CopyWithQuota` 的 32 KiB permit 粒度相容，并拒绝超过上限的配置。Go race 191/191（5 packages）、vet/build 通过；Laravel quota feature 12/12、111 assertions 通过。此项只收紧配置范围，不代表生产配额服务已接通；对应功能提交 `6676db8` 的 hosted CI `45758904103` 全绿。本项回归代码待提交并由 hosted CI 复核。
 
 - **Node Agent quota client → durable data-plane initializer（2026-11-26，离线 Go）**：新增 `NewRuntimeDataPlane`，isolated-test 继续使用不接在线计量的 test plane；validated production-shaped v2 先由 KMS-backed node signer 与 trusted quota CA 构造 HTTPS/TLS 1.3 mTLS authority，再恢复 reservation/settlement durable outboxes，未恢复成功则不返回 data plane。trusted runtime 将单次 quota lease 限制在 1–64 MiB，避免配置意外预留过大额度；正向本机配置构造、server-only certificate 拒绝与隔离模式不启用 quota 三项回归通过。当前 Node Agent TLS identity 证书还用于访问 PHP quota authority，因此签发叶证书必须同时具备 ServerAuth 与 ClientAuth，其 fingerprint 要与 PHP `nodes.agent_client_cert_sha256` 一致，PHP server CA 则由 runtime trust bundle 配置。生产 executable 仍在读取配置前拒绝 production mode，因此未部署/启用该路径，不代表真实 mTLS、商户控制面额度或生产流量计量验收；无实际证书材料时不宣称该映射已验证。

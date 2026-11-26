@@ -233,9 +233,10 @@ final class NodePeerTrafficQuotaTest extends TestCase
         $exitCode = proc_close($process);
         $this->assertSame(0, $exitCode, trim((string) $stdout."\n".(string) $stderr));
 
-        $this->assertSame(40, (int) DB::table('entitlement_traffic_budgets')->where('entitlement_id', 'entitlement-member-annual')->value('used_bytes'));
+        $this->assertSame(57, (int) DB::table('entitlement_traffic_budgets')->where('entitlement_id', 'entitlement-member-annual')->value('used_bytes'));
         $this->assertSame(0, (int) DB::table('entitlement_traffic_budgets')->where('entitlement_id', 'entitlement-member-annual')->value('reserved_bytes'));
         $this->assertSame('settled', DB::table('node_traffic_reservations')->where('request_id', $requestId)->value('status'));
+        $this->assertSame(2, DB::table('node_traffic_reservations')->where('peer_id', 'peer-quota-1')->where('status', 'settled')->count());
     }
 
     public function test_final_receipt_releases_only_unused_credit_and_snapshot_does_not_double_bill(): void
