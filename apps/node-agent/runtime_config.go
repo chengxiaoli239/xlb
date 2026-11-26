@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,7 +26,7 @@ const (
 	RuntimeProfileMihomoBridge     = "mihomo-bridge-v1"
 	RuntimeProbeUnavailable        = "unavailable"
 	RuntimeProbeHTTPSCanary        = "https-canary"
-	maxRuntimeQuotaGrantBytes       = 64 << 20
+	maxRuntimeQuotaGrantBytes      = 64 << 20
 	maxNodeRuntimeConfigBytes      = 64 * 1024
 )
 
@@ -36,6 +37,7 @@ type TrustedNodeRuntimeConfig struct {
 	Environment     string                       `json:"environment"`
 	Node            NodeRuntimeIdentity          `json:"node"`
 	NodeTLSIdentity NodeTLSIdentityRuntimeConfig `json:"node_tls_identity,omitempty"`
+	AgentListeners  AgentListenerRuntimeConfig   `json:"agent_listeners,omitempty"`
 	ProofBridge     ProofBridgeRuntimeConfig     `json:"proof_bridge"`
 	ProfileRenderer ProfileRendererRuntimeConfig `json:"profile_renderer"`
 	DataPlaneProbe  DataPlaneProbeRuntimeConfig  `json:"data_plane_probe,omitempty"`
@@ -43,8 +45,15 @@ type TrustedNodeRuntimeConfig struct {
 }
 
 type NodeTLSIdentityRuntimeConfig struct {
-	Source string `json:"source,omitempty"`
-	KeyARN string `json:"key_arn,omitempty"`
+	Source               string `json:"source,omitempty"`
+	KeyARN               string `json:"key_arn,omitempty"`
+	CertificateChainPath string `json:"certificate_chain_path,omitempty"`
+	ClientCAPEMPath      string `json:"client_ca_pem_path,omitempty"`
+}
+
+type AgentListenerRuntimeConfig struct {
+	ManagementListenAddress string `json:"management_listen_address,omitempty"`
+	DataPlaneListenAddress  string `json:"data_plane_listen_address,omitempty"`
 }
 
 type NodeRuntimeIdentity struct {
@@ -121,15 +130,47 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 	if config.SchemaVersion == TrustedNodeRuntimeSchemaV2 {
 		if config.NodeTLSIdentity.Source != "aws-kms" || !ValidKMSKeyARN(config.NodeTLSIdentity.KeyARN) ||
 			kmsKeyARNRegion(config.NodeTLSIdentity.KeyARN) != config.Node.Region ||
+			!validProtectedRuntimePath(config.NodeTLSIdentity.CertificateChainPath) ||
+			!validProtectedRuntimePath(config.NodeTLSIdentity.ClientCAPEMPath) ||
+			validateAgentListenerRuntimeConfig(config.AgentListeners) != nil ||
 			validateQuotaAuthorityRuntimeConfig(config.QuotaAuthority) != nil {
 			return ErrInvalidNodeRuntimeConfig
 		}
 	} else if config.NodeTLSIdentity.Source != "" || config.NodeTLSIdentity.KeyARN != "" ||
+		config.NodeTLSIdentity.CertificateChainPath != "" || config.NodeTLSIdentity.ClientCAPEMPath != "" ||
+		config.AgentListeners != (AgentListenerRuntimeConfig{}) ||
 		config.QuotaAuthority != (QuotaAuthorityRuntimeConfig{}) {
 		return ErrInvalidNodeRuntimeConfig
 	}
 
 	return nil
+}
+
+func validateAgentListenerRuntimeConfig(config AgentListenerRuntimeConfig) error {
+	managementPort, managementErr := runtimeListenerPort(config.ManagementListenAddress)
+	dataPlanePort, dataPlaneErr := runtimeListenerPort(config.DataPlaneListenAddress)
+	if managementErr != nil || dataPlaneErr != nil || managementPort == dataPlanePort {
+		return ErrInvalidNodeRuntimeConfig
+	}
+	return nil
+}
+
+func runtimeListenerPort(address string) (int, error) {
+	host, portValue, err := net.SplitHostPort(address)
+	ip := net.ParseIP(host)
+	if err != nil || ip == nil || !ip.IsLoopback() {
+		return 0, ErrInvalidNodeRuntimeConfig
+	}
+	port, err := strconv.Atoi(portValue)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, ErrInvalidNodeRuntimeConfig
+	}
+	return port, nil
+}
+
+func validProtectedRuntimePath(path string) bool {
+	return path != "" && strings.TrimSpace(path) == path && !strings.ContainsAny(path, "\x00\r\n") &&
+		filepath.IsAbs(path) && filepath.Clean(path) == path
 }
 
 func validateQuotaAuthorityRuntimeConfig(config QuotaAuthorityRuntimeConfig) error {

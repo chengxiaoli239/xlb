@@ -108,6 +108,10 @@ func TestHTTPQuotaAuthorityAgainstLaravelCGI(t *testing.T) {
 		Node:          NodeRuntimeIdentity{ID: "node-test-1", Provider: "aws", Region: "us-west-2"},
 		NodeTLSIdentity: NodeTLSIdentityRuntimeConfig{
 			Source: "aws-kms", KeyARN: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+			CertificateChainPath: "/etc/xlb/node-chain.pem", ClientCAPEMPath: "/etc/xlb/client-ca.pem",
+		},
+		AgentListeners: AgentListenerRuntimeConfig{
+			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
 		},
 		ProofBridge: ProofBridgeRuntimeConfig{
 			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",

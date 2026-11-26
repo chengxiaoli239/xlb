@@ -31,13 +31,28 @@ func run() error {
 	nodeID := os.Getenv("NODE_AGENT_NODE_ID")
 	runtimeConfigPath := os.Getenv("NODE_AGENT_RUNTIME_CONFIG")
 	statePath := os.Getenv("NODE_AGENT_STATE_PATH")
-	certificatePath := os.Getenv("NODE_AGENT_SERVER_CERT")
-	privateKeyPath := os.Getenv("NODE_AGENT_SERVER_KEY")
-	clientCAPath := os.Getenv("NODE_AGENT_CLIENT_CA")
+	environmentCertificatePath := os.Getenv("NODE_AGENT_SERVER_CERT")
+	environmentPrivateKeyPath := os.Getenv("NODE_AGENT_SERVER_KEY")
+	environmentClientCAPath := os.Getenv("NODE_AGENT_CLIENT_CA")
 	if nodeID == "" || runtimeConfigPath == "" || statePath == "" {
 		return errors.New("node agent identity, runtime config, and state path are required")
 	}
 	runtimeConfig, err := readRuntimeConfig(runtimeConfigPath, nodeID)
+	if err != nil {
+		return err
+	}
+	certificatePath, privateKeyPath, clientCAPath, err := resolveNodeTLSCertificateFiles(
+		runtimeConfig, environmentCertificatePath, environmentPrivateKeyPath, environmentClientCAPath,
+	)
+	if err != nil {
+		return err
+	}
+	listeners, err := resolveNodeAgentListenAddresses(
+		runtimeConfig,
+		os.Getenv("NODE_AGENT_LISTEN"),
+		os.Getenv("NODE_AGENT_DATA_LISTEN"),
+		os.Getenv("NODE_AGENT_PROBE_LISTEN"),
+	)
 	if err != nil {
 		return err
 	}
@@ -62,13 +77,7 @@ func run() error {
 		return err
 	}
 
-	address := os.Getenv("NODE_AGENT_LISTEN")
-	if address == "" {
-		address = "127.0.0.1:9443"
-	}
-	if err := validateLoopbackAddress(address); err != nil {
-		return err
-	}
+	address := listeners.management
 	capacity, err := strconv.Atoi(os.Getenv("NODE_AGENT_CAPACITY"))
 	if err != nil || capacity < 1 || capacity > 4096 {
 		return errors.New("NODE_AGENT_CAPACITY must be between 1 and 4096")
@@ -83,14 +92,8 @@ func run() error {
 	}
 	defer processLock.Close()
 
-	dataAddress := os.Getenv("NODE_AGENT_DATA_LISTEN")
-	if dataAddress == "" {
-		dataAddress = "127.0.0.1:9444"
-	}
-	if err := validateLoopbackAddress(dataAddress); err != nil {
-		return err
-	}
-	probeAddress := os.Getenv("NODE_AGENT_PROBE_LISTEN")
+	dataAddress := listeners.dataPlane
+	probeAddress := listeners.probe
 	if err := validateProbeListenerAddress(probeAddress, address, dataAddress); err != nil {
 		return err
 	}
@@ -148,6 +151,80 @@ type nodeTLSIdentitySelection struct {
 	source string
 	keyARN string
 	region string
+}
+
+type nodeAgentListenAddresses struct {
+	management string
+	dataPlane  string
+	probe      string
+}
+
+func resolveNodeTLSCertificateFiles(config agent.TrustedNodeRuntimeConfig,
+	environmentCertificatePath, environmentPrivateKeyPath, environmentClientCAPath string,
+) (string, string, string, error) {
+	switch config.Environment {
+	case agent.RuntimeEnvironmentTest:
+		if config.SchemaVersion != agent.TrustedNodeRuntimeSchemaV1 ||
+			config.NodeTLSIdentity.CertificateChainPath != "" || config.NodeTLSIdentity.ClientCAPEMPath != "" {
+			return "", "", "", agent.ErrInvalidNodeRuntimeConfig
+		}
+		return environmentCertificatePath, environmentPrivateKeyPath, environmentClientCAPath, nil
+	case agent.RuntimeEnvironmentProd:
+		if config.SchemaVersion != agent.TrustedNodeRuntimeSchemaV2 || environmentCertificatePath != "" ||
+			environmentPrivateKeyPath != "" || environmentClientCAPath != "" ||
+			config.Validate() != nil {
+			return "", "", "", agent.ErrInvalidNodeRuntimeConfig
+		}
+		return config.NodeTLSIdentity.CertificateChainPath, "", config.NodeTLSIdentity.ClientCAPEMPath, nil
+	default:
+		return "", "", "", agent.ErrInvalidNodeRuntimeConfig
+	}
+}
+
+func resolveNodeAgentListenAddresses(config agent.TrustedNodeRuntimeConfig,
+	environmentManagementAddress, environmentDataPlaneAddress, environmentProbeAddress string,
+) (nodeAgentListenAddresses, error) {
+	switch config.Environment {
+	case agent.RuntimeEnvironmentTest:
+		if config.SchemaVersion != agent.TrustedNodeRuntimeSchemaV1 ||
+			config.AgentListeners != (agent.AgentListenerRuntimeConfig{}) {
+			return nodeAgentListenAddresses{}, agent.ErrInvalidNodeRuntimeConfig
+		}
+		managementAddress := environmentManagementAddress
+		if managementAddress == "" {
+			managementAddress = "127.0.0.1:9443"
+		}
+		dataPlaneAddress := environmentDataPlaneAddress
+		if dataPlaneAddress == "" {
+			dataPlaneAddress = "127.0.0.1:9444"
+		}
+		if err := validateLoopbackAddress(managementAddress); err != nil {
+			return nodeAgentListenAddresses{}, err
+		}
+		if err := validateLoopbackAddress(dataPlaneAddress); err != nil {
+			return nodeAgentListenAddresses{}, err
+		}
+		if err := validateProbeListenerAddress(environmentProbeAddress, managementAddress, dataPlaneAddress); err != nil {
+			return nodeAgentListenAddresses{}, err
+		}
+		return nodeAgentListenAddresses{
+			management: managementAddress,
+			dataPlane:  dataPlaneAddress,
+			probe:      environmentProbeAddress,
+		}, nil
+	case agent.RuntimeEnvironmentProd:
+		if config.SchemaVersion != agent.TrustedNodeRuntimeSchemaV2 ||
+			environmentManagementAddress != "" || environmentDataPlaneAddress != "" || environmentProbeAddress != "" ||
+			config.Validate() != nil {
+			return nodeAgentListenAddresses{}, agent.ErrInvalidNodeRuntimeConfig
+		}
+		return nodeAgentListenAddresses{
+			management: config.AgentListeners.ManagementListenAddress,
+			dataPlane:  config.AgentListeners.DataPlaneListenAddress,
+		}, nil
+	default:
+		return nodeAgentListenAddresses{}, agent.ErrInvalidNodeRuntimeConfig
+	}
 }
 
 func resolveNodeTLSIdentitySource(

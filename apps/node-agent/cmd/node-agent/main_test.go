@@ -40,6 +40,10 @@ func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
 		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
 		NodeTLSIdentity: agent.NodeTLSIdentityRuntimeConfig{
 			Source: "aws-kms", KeyARN: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+			CertificateChainPath: "/etc/xlb/node-chain.pem", ClientCAPEMPath: "/etc/xlb/client-ca.pem",
+		},
+		AgentListeners: agent.AgentListenerRuntimeConfig{
+			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
 		},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
 			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
@@ -152,6 +156,10 @@ func TestProductionShapedRuntimeSelectsMihomoBridgeRendererAndConfirmedReceipt(t
 		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
 		NodeTLSIdentity: agent.NodeTLSIdentityRuntimeConfig{
 			Source: "aws-kms", KeyARN: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+			CertificateChainPath: "/etc/xlb/node-chain.pem", ClientCAPEMPath: "/etc/xlb/client-ca.pem",
+		},
+		AgentListeners: agent.AgentListenerRuntimeConfig{
+			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
 		},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
 			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
@@ -295,6 +303,10 @@ func TestResolveNodeTLSIdentitySourceUsesTrustedRuntimeARNInProduction(t *testin
 		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
 		NodeTLSIdentity: agent.NodeTLSIdentityRuntimeConfig{
 			Source: "aws-kms", KeyARN: keyARN,
+			CertificateChainPath: "/etc/xlb/node-chain.pem", ClientCAPEMPath: "/etc/xlb/client-ca.pem",
+		},
+		AgentListeners: agent.AgentListenerRuntimeConfig{
+			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
 		},
 	}
 	selection, err := resolveNodeTLSIdentitySource(productionConfig, "", "")
@@ -330,6 +342,104 @@ func TestResolveNodeTLSIdentitySourceKeepsIsolatedTestDefaultsAndExplicitKMSSele
 	wrongRegionARN := "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"
 	if _, err := resolveNodeTLSIdentitySource(isolatedConfig, "aws-kms", wrongRegionARN); err == nil {
 		t.Fatal("isolated-test KMS source accepted a key ARN from another node region")
+	}
+}
+
+func TestProductionRuntimeResolvesTrustedListenerAndCertificatePathsOnly(t *testing.T) {
+	config := productionNodeRuntimeConfig(t)
+	listeners, err := resolveNodeAgentListenAddresses(config, "", "", "")
+	if err != nil {
+		t.Fatalf("resolveNodeAgentListenAddresses error = %v", err)
+	}
+	wantListeners := nodeAgentListenAddresses{
+		management: "127.0.0.1:9443",
+		dataPlane:  "127.0.0.1:9444",
+	}
+	if listeners != wantListeners {
+		t.Fatalf("resolved listeners = %+v; want %+v", listeners, wantListeners)
+	}
+	if _, err := resolveNodeAgentListenAddresses(config, "127.0.0.1:10443", "", ""); err == nil {
+		t.Fatal("production runtime accepted an environment override for its management listener")
+	}
+	if _, err := resolveNodeAgentListenAddresses(config, "", "0.0.0.0:10444", ""); err == nil {
+		t.Fatal("production runtime accepted an environment override for its data-plane listener")
+	}
+	if _, err := resolveNodeAgentListenAddresses(config, "", "", "127.0.0.1:10445"); err == nil {
+		t.Fatal("production runtime accepted an environment override for its probe listener")
+	}
+
+	certificate, privateKey, clientCA, err := resolveNodeTLSCertificateFiles(config, "", "", "")
+	if err != nil {
+		t.Fatalf("resolveNodeTLSCertificateFiles error = %v", err)
+	}
+	if certificate != config.NodeTLSIdentity.CertificateChainPath || privateKey != "" ||
+		clientCA != config.NodeTLSIdentity.ClientCAPEMPath {
+		t.Fatalf("resolved TLS files = %q/%q/%q; want trusted public files and no private-key path",
+			certificate, privateKey, clientCA)
+	}
+	if _, _, _, err := resolveNodeTLSCertificateFiles(config, "/tmp/override.pem", "", ""); err == nil {
+		t.Fatal("production runtime accepted an environment override for its certificate chain")
+	}
+	if _, _, _, err := resolveNodeTLSCertificateFiles(config, "", "", "/tmp/override-ca.pem"); err == nil {
+		t.Fatal("production runtime accepted an environment override for its client CA")
+	}
+	if _, _, _, err := resolveNodeTLSCertificateFiles(config, "", "/tmp/private-key.pem", ""); err == nil {
+		t.Fatal("production runtime accepted a file-backed private-key path")
+	}
+}
+
+func TestIsolatedRuntimeKeepsLoopbackDefaultsAndEnvironmentOverrides(t *testing.T) {
+	config := agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV1,
+		Environment:   agent.RuntimeEnvironmentTest,
+		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+	}
+	listeners, err := resolveNodeAgentListenAddresses(config, "", "", "")
+	if err != nil {
+		t.Fatalf("resolveNodeAgentListenAddresses error = %v", err)
+	}
+	want := nodeAgentListenAddresses{management: "127.0.0.1:9443", dataPlane: "127.0.0.1:9444"}
+	if listeners != want {
+		t.Fatalf("default listeners = %+v; want %+v", listeners, want)
+	}
+	listeners, err = resolveNodeAgentListenAddresses(config, "localhost:19443", "127.0.0.1:19444", "")
+	if err != nil {
+		t.Fatalf("resolveNodeAgentListenAddresses with isolated overrides error = %v", err)
+	}
+	if listeners.management != "localhost:19443" || listeners.dataPlane != "127.0.0.1:19444" {
+		t.Fatalf("isolated listeners = %+v; want requested loopback addresses", listeners)
+	}
+	if _, err := resolveNodeAgentListenAddresses(config, "0.0.0.0:19443", "", ""); err == nil {
+		t.Fatal("isolated runtime accepted a non-loopback management listener")
+	}
+}
+
+func productionNodeRuntimeConfig(t *testing.T) agent.TrustedNodeRuntimeConfig {
+	t.Helper()
+	caPEM := testRuntimeRendererCA(t)
+	return agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV2,
+		Environment:   agent.RuntimeEnvironmentProd,
+		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+		NodeTLSIdentity: agent.NodeTLSIdentityRuntimeConfig{
+			Source: "aws-kms", KeyARN: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+			CertificateChainPath: "/etc/xlb/node-chain.pem", ClientCAPEMPath: "/etc/xlb/client-ca.pem",
+		},
+		AgentListeners: agent.AgentListenerRuntimeConfig{
+			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
+		},
+		ProofBridge: agent.ProofBridgeRuntimeConfig{
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialSecure,
+		},
+		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
+			Status: agent.RuntimeProfileMihomoBridge, BridgeEndpoint: "https://bridge.example.invalid:9444",
+			BridgeServerCAPEM: caPEM,
+		},
+		QuotaAuthority: agent.QuotaAuthorityRuntimeConfig{
+			Endpoint: "https://quota.example.invalid", ServerCAPEM: caPEM,
+			GrantBytes: 4096, OutboxLimit: 100, TimeoutSeconds: 5,
+		},
 	}
 }
 

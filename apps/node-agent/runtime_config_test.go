@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -152,6 +153,88 @@ func TestProductionRuntimeV2RequiresQuotaAuthorityConfiguration(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(string(payload))); !errors.Is(err, ErrInvalidNodeRuntimeConfig) {
+				t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v; want ErrInvalidNodeRuntimeConfig", err)
+			}
+		})
+	}
+}
+
+func TestProductionRuntimeV2RequiresTrustedAgentListenersAndCertificatePaths(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	valid := productionRendererRuntimeConfigJSON(RuntimeProfileMihomoBridge,
+		"https://bridge.example.invalid:9444", string(caPEM))
+	tests := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{
+			name: "missing trusted listener addresses",
+			mutate: func(config map[string]any) {
+				delete(config, "agent_listeners")
+			},
+		},
+		{
+			name: "management and data listeners share a port",
+			mutate: func(config map[string]any) {
+				config["agent_listeners"].(map[string]any)["data_plane_listen_address"] = "0.0.0.0:9443"
+			},
+		},
+		{
+			name: "listener host is not an IP address",
+			mutate: func(config map[string]any) {
+				config["agent_listeners"].(map[string]any)["management_listen_address"] = "node.example.invalid:9443"
+			},
+		},
+		{
+			name: "wildcard management listener is not allowed",
+			mutate: func(config map[string]any) {
+				config["agent_listeners"].(map[string]any)["management_listen_address"] = "0.0.0.0:9443"
+			},
+		},
+		{
+			name: "public data-plane listener is not allowed",
+			mutate: func(config map[string]any) {
+				config["agent_listeners"].(map[string]any)["data_plane_listen_address"] = "203.0.113.7:9444"
+			},
+		},
+		{
+			name: "probe listener is not part of the production runtime contract",
+			mutate: func(config map[string]any) {
+				config["agent_listeners"].(map[string]any)["probe_listen_address"] = "127.0.0.1:9444"
+			},
+		},
+		{
+			name: "certificate path is missing",
+			mutate: func(config map[string]any) {
+				delete(config["node_tls_identity"].(map[string]any), "certificate_chain_path")
+			},
+		},
+		{
+			name: "certificate path is not absolute",
+			mutate: func(config map[string]any) {
+				config["node_tls_identity"].(map[string]any)["certificate_chain_path"] = "etc/xlb/node.pem"
+			},
+		},
+		{
+			name: "client CA path contains a parent traversal",
+			mutate: func(config map[string]any) {
+				config["node_tls_identity"].(map[string]any)["client_ca_pem_path"] = "/etc/xlb/../client-ca.pem"
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var config map[string]any
+			if err := json.Unmarshal([]byte(valid), &config); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(config)
+			invalid, err := json.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeTrustedNodeRuntimeConfig(bytes.NewReader(invalid)); !errors.Is(err, ErrInvalidNodeRuntimeConfig) {
 				t.Fatalf("DecodeTrustedNodeRuntimeConfig error = %v; want ErrInvalidNodeRuntimeConfig", err)
 			}
 		})
@@ -331,5 +414,5 @@ func rendererRuntimeConfigJSON(environment, status, endpoint, caPEM string) stri
 func productionRendererRuntimeConfigJSON(status, endpoint, caPEM string) string {
 	endpointJSON, _ := json.Marshal(endpoint)
 	caPEMJSON, _ := json.Marshal(caPEM)
-	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"node_tls_identity":{"source":"aws-kms","key_arn":"arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `},"quota_authority":{"endpoint":"https://quota.example.invalid","server_ca_pem":` + string(caPEMJSON) + `,"grant_bytes":4096,"outbox_limit":100,"timeout_seconds":5}}`
+	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"node_tls_identity":{"source":"aws-kms","key_arn":"arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012","certificate_chain_path":"/etc/xlb/node-chain.pem","client_ca_pem_path":"/etc/xlb/client-ca.pem"},"agent_listeners":{"management_listen_address":"127.0.0.1:9443","data_plane_listen_address":"127.0.0.1:9444"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `},"quota_authority":{"endpoint":"https://quota.example.invalid","server_ca_pem":` + string(caPEMJSON) + `,"grant_bytes":4096,"outbox_limit":100,"timeout_seconds":5}}`
 }
