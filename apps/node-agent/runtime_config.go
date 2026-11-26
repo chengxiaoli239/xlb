@@ -31,9 +31,15 @@ type TrustedNodeRuntimeConfig struct {
 	SchemaVersion   string                       `json:"schema_version"`
 	Environment     string                       `json:"environment"`
 	Node            NodeRuntimeIdentity          `json:"node"`
+	NodeTLSIdentity NodeTLSIdentityRuntimeConfig `json:"node_tls_identity,omitempty"`
 	ProofBridge     ProofBridgeRuntimeConfig     `json:"proof_bridge"`
 	ProfileRenderer ProfileRendererRuntimeConfig `json:"profile_renderer"`
 	DataPlaneProbe  DataPlaneProbeRuntimeConfig  `json:"data_plane_probe,omitempty"`
+}
+
+type NodeTLSIdentityRuntimeConfig struct {
+	Source string `json:"source,omitempty"`
+	KeyARN string `json:"key_arn,omitempty"`
 }
 
 type NodeRuntimeIdentity struct {
@@ -99,8 +105,51 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 	if config.ProofBridge.CredentialSource != wantCredentialSource {
 		return ErrInvalidNodeRuntimeConfig
 	}
+	if config.SchemaVersion == TrustedNodeRuntimeSchemaV2 {
+		if config.NodeTLSIdentity.Source != "aws-kms" || !validKMSKeyARN(config.NodeTLSIdentity.KeyARN) {
+			return ErrInvalidNodeRuntimeConfig
+		}
+	} else if config.NodeTLSIdentity.Source != "" || config.NodeTLSIdentity.KeyARN != "" {
+		return ErrInvalidNodeRuntimeConfig
+	}
 
 	return nil
+}
+
+func validKMSKeyARN(value string) bool {
+	if len(value) < 70 || len(value) > 2048 || strings.TrimSpace(value) != value ||
+		strings.ContainsAny(value, " \t\r\n") {
+		return false
+	}
+	parts := strings.SplitN(value, ":", 6)
+	if len(parts) != 6 || parts[0] != "arn" ||
+		(parts[1] != "aws" && parts[1] != "aws-us-gov" && parts[1] != "aws-cn") ||
+		parts[2] != "kms" || !validRuntimeToken(parts[3], 32) || len(parts[4]) != 12 ||
+		parts[5] == "" || !strings.HasPrefix(parts[5], "key/") {
+		return false
+	}
+	for _, digit := range parts[4] {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	keyID := strings.TrimPrefix(parts[5], "key/")
+	if len(keyID) != 36 {
+		return false
+	}
+	for index, character := range keyID {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if character != '-' {
+				return false
+			}
+			continue
+		}
+		if !((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') ||
+			(character >= 'A' && character <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateProfileRendererRuntimeConfig(schemaVersion, environment string, bridge ProofBridgeRuntimeConfig,

@@ -38,6 +38,9 @@ func TestRuntimeConfigMustMatchIsolatedAgentIdentity(t *testing.T) {
 		SchemaVersion: agent.TrustedNodeRuntimeSchemaV2,
 		Environment:   agent.RuntimeEnvironmentProd,
 		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+		NodeTLSIdentity: agent.NodeTLSIdentityRuntimeConfig{
+			Source: "aws-kms", KeyARN: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+		},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
 			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
 			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialSecure,
@@ -143,6 +146,9 @@ func TestProductionShapedRuntimeSelectsMihomoBridgeRendererAndConfirmedReceipt(t
 		SchemaVersion: agent.TrustedNodeRuntimeSchemaV2,
 		Environment:   agent.RuntimeEnvironmentProd,
 		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+		NodeTLSIdentity: agent.NodeTLSIdentityRuntimeConfig{
+			Source: "aws-kms", KeyARN: "arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+		},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
 			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
 			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialSecure,

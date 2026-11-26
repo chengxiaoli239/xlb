@@ -125,6 +125,33 @@ func TestDecodeTrustedNodeRuntimeConfigRejectsUnsafeProductionRendererContractV2
 	}
 }
 
+func TestTrustedNodeRuntimeV2RequiresNodeScopedKMSKeyARN(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	valid := productionRendererRuntimeConfigJSON(RuntimeProfileMihomoBridge,
+		"https://bridge.example.invalid:9444", string(caPEM))
+	for _, invalidARN := range []string{
+		"",
+		"arn:aws:kms:us-west-2:123456789012:alias/node-key",
+		"arn:aws:kms:us-west-2:123456789012:key/123456789012",
+		"arn:aws-fake:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+	} {
+		t.Run(invalidARN, func(t *testing.T) {
+			var config map[string]any
+			if err := json.Unmarshal([]byte(valid), &config); err != nil {
+				t.Fatal(err)
+			}
+			config["node_tls_identity"] = map[string]any{"source": "aws-kms", "key_arn": invalidARN}
+			payload, err := json.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(string(payload))); err == nil {
+				t.Fatalf("runtime config accepted invalid KMS key ARN %q", invalidARN)
+			}
+		})
+	}
+}
+
 func TestDecodeTrustedNodeRuntimeConfigRejectsUnsafeMihomoRendererDeclarations(t *testing.T) {
 	_, _, caPEM := createTestCertificates(t)
 	tests := []struct {
@@ -218,5 +245,5 @@ func rendererRuntimeConfigJSON(environment, status, endpoint, caPEM string) stri
 func productionRendererRuntimeConfigJSON(status, endpoint, caPEM string) string {
 	endpointJSON, _ := json.Marshal(endpoint)
 	caPEMJSON, _ := json.Marshal(caPEM)
-	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `}}`
+	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"node_tls_identity":{"source":"aws-kms","key_arn":"arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `}}`
 }
