@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-26）
 
+- **主线与 KMS worktree 复核（2026-11-26）**：权威主线 `main=origin/main=09e3298a7790b404b4a0025006926bd6ec0ee87c`，工作树干净；对应 CI `45764929395` success。本机在主线重跑 Node Agent `go test -race ./...` 为 192 项/5 packages，`go vet ./...` 与 `go build ./...` 通过。另一个 `codex/aws-kms-node-identity` worktree 无 upstream，含 16 个相对主线的提交；逐文件核对发现其 KMS signer、证书文件保护与 trusted runtime 功能已由主线较新实现覆盖，分支还包含较旧 quota/runtime 版本，因此本轮没有整支合并或改写该 worktree。AWS `xlb-ops` 通过 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 仍返回 `session expired`，没有 AWS 资源查询或变更。总放行门仍 5/12（42%），模块门 Android/M6 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3；离线测试不改变生产门状态。下一步继续推进不依赖 AWS 的 Android/Node Agent 离线缺口；AWS 只读盘点待用户本人恢复登录，生产 member profile/节点回执、商户 sandbox、合规意见、签名环境和 staging 仍按放行门逐项处理。
+
 - **PHP Node Agent mTLS credential file protection（2026-11-26，`393d51a`）**：`NodeAccessAgentHttpClient` now rejects symlink/non-regular/empty/oversized credential files, group/other-writable certificate or CA files, and private keys accessible to group/others. It uses `lstat` + open/fstat device/inode comparison to reject file replacement while validating. Focused unit tests 5/5、Node provisioning+client tests 14/14（146 assertions）、Pint passed；CI `45763371527` 全部通过。此项保护本机配置，不证明生产 secret mount、live node connection 或 production release。
 
 - **Node Agent trusted runtime config 文件边界（2026-11-26，离线 Go）**：`readRuntimeConfig` 现在在解析前用 `Lstat` 和打开后 `fstat` 复核，拒绝符号链接、非普通文件、组/其他用户可写文件和替换竞态；isolated-test runtime parser 专项 26/26 通过。此项保护未来 production 配置的信任来源，不让 Node Agent 启动或读取 AWS；完整 race/vet/build 与 Laravel quota integration 本轮结果待本阶段提交后记录。

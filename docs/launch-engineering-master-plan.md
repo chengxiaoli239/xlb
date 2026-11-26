@@ -1,6 +1,6 @@
 # 上线工程总体规划：批量部署 / 快速上下线 / 压测负载均衡 / 四端研发 / 多云长期演进
 
-日期：2026-11-25（滚动执行状态复核）
+日期：2026-11-26（滚动执行状态复核）
 状态：**滚动执行计划**。路线与验收门在本文维护；具体阶段证据以 `docs/member-connection-prd.md` 顶部和链接验收记录为准。本文不改任何线上资源，不代表生产已上线或可发布。
 
 ## 0. 这份文档解决什么
@@ -18,7 +18,7 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-26）
 
-**2026-11-26 当前 checkout 与外部会话复核**：本轮起始主线 `5f37bda` 与 `origin/main` 同步，阶段提交包括 Node Agent runtime/quota wiring、PHP mTLS credential hardening 和当前 `59c5dc7096424f6feab8f69931f9d112371f7978`，CI `45764317401` success，工作区干净。打开的 `codex/aws-kms-node-identity` worktree 在 `961406d`、无 upstream、落后主线多个提交，未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `session expired`，所以 AWS 资源状态未复核，无云写入。12 项首发门仍为 5/12（42%），不是工时或上线概率。下一项是 production quota mTLS identity 与真实 PHP fingerprint mapping 的材料核验；恢复 AWS 会话后先只读查找已有 KMS/IAM/节点证书材料，若需创建计费资源必须先单独核成本与授权。
+**2026-11-26 当前 checkout 与外部会话复核**：权威主线 `main=origin/main=09e3298a7790b404b4a0025006926bd6ec0ee87c`，CI `45764929395` success，工作区干净。本机 Node Agent 全量 race tests 192 项/5 packages、`go vet` 与 `go build` 通过。`codex/aws-kms-node-identity` worktree 在 `961406d` 且无 upstream；其 KMS signer、证书文件保护和 trusted runtime 能力已由主线较新实现覆盖，旧 quota/runtime 改动未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `session expired`，所以 AWS 资源状态未复核，无云查询或写入。12 项首发门仍为 5/12（42%），不是工时或上线概率；Android/M6、Web/API+支付、Node Agent、发布运维分别为 2/3、1/2、1/2、1/3。下一项继续做不依赖云的 Android/Node Agent 离线验收；会话恢复后先只读核查已有 KMS/IAM/节点证书材料，任何有费用的资源操作须先核成本并取得明确授权。
 
 **Node Agent 配额前置配置校验（2026-11-26，离线 Go）**：runtime v1 只允许隔离测试环境，production-shaped v2 则必须携带 quota authority HTTPS endpoint/CA、byte grant、有限 recovery batch 和有界 timeout。测试覆盖缺失/不安全端点、非法 CA、额度与上限越界。定向 runtime tests 49 项通过；Node Agent 全套 race 187 passed/5 packages、vet/build 通过。该阶段只校验未来接线的必需配置，尚未在 Agent executable 构造线上 quota authority 或 journal，也不打开 production mode；首发仍 5/12。
 
