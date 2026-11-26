@@ -70,6 +70,7 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
         String nodeId = requiredArgument(arguments, "node_id");
         String controlUrl = requiredArgument(arguments, "control_url");
         String bridgeEndpoint = requiredArgument(arguments, "bridge_endpoint");
+        String expectedEgressIp = requiredArgument(arguments, "expected_egress_ip");
         File caFile = new File(requiredArgument(arguments, "node_ca_file"));
         File clientCertificateFile = new File(requiredArgument(arguments, "admin_cert_file"));
         File clientPrivateKeyFile = new File(requiredArgument(arguments, "admin_key_file"));
@@ -185,7 +186,7 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
             assertTrue("node egress response was not an IPv4 address: " + egressIp,
                     Pattern.matches("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", egressIp));
             assertEquals("VPN traffic did not exit through the isolated Node Agent endpoint",
-                    new URL(bridgeEndpoint).getHost(), egressIp);
+                    expectedEgressIp, egressIp);
 
             JSONObject revokeRequest = new JSONObject()
                     .put("node_id", nodeId).put("peer_id", peerId)
