@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-27）
 
+**2026-11-27 M6 remote runner 参数/设备 guard 纳入 CI**：新增 fake-adb 回归确保预期出口不是公网 IPv4、control origin 非 HTTPS 或 node ID 含注入字符时，在联系 ADB 前拒绝；既有 AVD guard 也在 Android job 中执行。两组 guard 本机通过，CI `45886280116` 全绿。此为安全启动自动化证据，不代表真实 Node Agent/TUN 已运行，也不增加 5/12 首发门计数。
+
 **2026-11-27 MySQL provisioning interop CI 失败信息补足**：CI `45881725783` 的 MySQL 8.4 全套 Laravel 首次运行中，Go Node Agent TLS 1.3/mTLS provisioning case 的 outbox 状态偶发为 `retry`；同 run 重跑失败 job 后通过，现象没有复现。测试断言已补充 peer/outbox 状态、脱敏错误码与尝试次数上下文，定向 suite 9/9 与 Pint 通过。该改动改善后续归因，不解决或证明该间歇性失败根因已消失，不影响首发门计数。
 
 **2026-11-27 Node Agent KMS identity 启动诊断收敛（离线）**：AWS KMS 服务端故障只输出安全的 ErrorCode 或错误类型，避免把原始响应消息写入节点日志；identity startup 保留脱敏错误链。`go test -race ./...` 207/5 packages、`go vet`、`go build` 通过。它不证明当前实例具备 KMS 权限或 Agent 已启动；AWS root session 过期后，需用户重新 `aws login` 才能检查实际 `NodeKmsKeyArn` 授权并继续有界复测。

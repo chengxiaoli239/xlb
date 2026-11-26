@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-27）
 
+- **M6 Android remote-runner 输入守卫回归（2026-11-27，离线与 hosted CI）**：新增 fake-adb 测试，验证非公网预期出口地址、非 HTTPS control origin 与注入型 node ID 均在联系 ADB 前失败；复用的 disposable AVD guard 同时回归缺少 serial、多设备、offline 物理设备、错误 serial、非专用 AVD 和伪装硬件身份。两组脚本在本机通过；主线 CI `45886280116` 全绿，Android job 实际执行这些 guard 后再构建 APK/AndroidTest、JVM、lint。该项只证明测试启动参数与设备选择失败关闭，不建立隧道、不调用 AWS，也不增加首发门，仍为 5/12。
+
 - **MySQL 8.4 Node Peer Provisioning 测试失败诊断增强（2026-11-27）**：主线 CI `45881725783` 首次运行中 MySQL 8.4 的 `NodePeerProvisioningTest::test_http_provisioning_interoperates_with_go_node_agent_over_tls_13_mtls` 偶发观察到 outbox 状态 `retry`，同 run 对失败 job 重跑后通过，CI 总体 success；PostgreSQL 和普通 Laravel suite 同 run 通过。修正测试断言，在 outbox 确认状态失败时同时输出 peer/outbox 状态、安全错误码和尝试次数，避免只有 `retry` 的无上下文失败。定向 Laravel suite 9/9、Pint 通过。未重现或修复该偶发运行时原因，不据一次重跑宣称 MySQL 路径稳定；Node Agent/会员数据面、首发门均不变。
 
 - **M6 远端 Android instrumentation 安全启动脚本（2026-11-27，本机离线验收）**：新增 `apps/android/scripts/test-remote-node-agent-member-tun-emulator.sh`，只接受通过现有 AVD guard 的唯一 `xlb-m9-recovery` 模拟器；先构建并安装最新 Debug/AndroidTest APK，再把调用方提供的临时 CA 与管理 mTLS 证书安全复制到 AVD app cache，运行指定 remote-node instrumentation，并在退出时清理设备与本机暂存文件。脚本校验 HTTPS origin、全球可路由预期 IPv4 和证书文件类型，不打印证书内容。`bash -n` 与缺参用法退出码检查通过；AWS 会话过期，未运行真实节点测试，也未创建或改动云资源。后续获批窗口恢复后可以用精确参数执行。此脚本不证明 TUN/撤权通过，首发门仍为 5/12。
