@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-27）
 
+- **MySQL 8.4 Node Peer Provisioning 测试失败诊断增强（2026-11-27）**：主线 CI `45881725783` 首次运行中 MySQL 8.4 的 `NodePeerProvisioningTest::test_http_provisioning_interoperates_with_go_node_agent_over_tls_13_mtls` 偶发观察到 outbox 状态 `retry`，同 run 对失败 job 重跑后通过，CI 总体 success；PostgreSQL 和普通 Laravel suite 同 run 通过。修正测试断言，在 outbox 确认状态失败时同时输出 peer/outbox 状态、安全错误码和尝试次数，避免只有 `retry` 的无上下文失败。定向 Laravel suite 9/9、Pint 通过。未重现或修复该偶发运行时原因，不据一次重跑宣称 MySQL 路径稳定；Node Agent/会员数据面、首发门均不变。
+
 - **M6 远端 Android instrumentation 安全启动脚本（2026-11-27，本机离线验收）**：新增 `apps/android/scripts/test-remote-node-agent-member-tun-emulator.sh`，只接受通过现有 AVD guard 的唯一 `xlb-m9-recovery` 模拟器；先构建并安装最新 Debug/AndroidTest APK，再把调用方提供的临时 CA 与管理 mTLS 证书安全复制到 AVD app cache，运行指定 remote-node instrumentation，并在退出时清理设备与本机暂存文件。脚本校验 HTTPS origin、全球可路由预期 IPv4 和证书文件类型，不打印证书内容。`bash -n` 与缺参用法退出码检查通过；AWS 会话过期，未运行真实节点测试，也未创建或改动云资源。后续获批窗口恢复后可以用精确参数执行。此脚本不证明 TUN/撤权通过，首发门仍为 5/12。
 
 - **Node Agent KMS identity 启动错误的安全诊断（2026-11-27，本地离线验收）**：KMS `GetPublicKey`/`Sign` 错误现在只暴露 AWS error code 或错误类型，不回显服务端原始错误消息；runtime identity loader 保留经过脱敏的错误链，便于区分 IAM/API 类失败与本地身份装载失败。新增回归断言验证 `AccessDeniedException` 可诊断、原始消息不会进入错误文本。Node Agent `go test -race ./...` 207 项/5 packages、`go vet ./...`、`go build ./...` 通过。此改动不确定当前隔离实例失败根因，不代表 KMS identity 实例启动、Android TUN 或会员撤权通过；AWS 会话过期后的实际角色权限仍待用户重新登录后只读核查，首发门保持 5/12。

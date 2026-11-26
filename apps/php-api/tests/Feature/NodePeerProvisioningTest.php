@@ -221,7 +221,13 @@ class NodePeerProvisioningTest extends TestCase
             $outboxAfterProcessing = DB::table('node_access_provisioning_outbox')
                 ->where('peer_id', $peer->id)->first();
             $this->assertNotNull($outboxAfterProcessing);
-            $this->assertSame('confirmed', $outboxAfterProcessing->status);
+            $this->assertSame('confirmed', $outboxAfterProcessing->status, json_encode([
+                'peer_id' => $peer->id,
+                'peer_status' => $peer->status,
+                'outbox_status' => $outboxAfterProcessing->status,
+                'last_error_code' => $outboxAfterProcessing->last_error_code,
+                'attempts' => $outboxAfterProcessing->attempts,
+            ]));
             $this->assertSame(1, (int) $outboxAfterProcessing->attempts);
             $this->assertSame('active', $peer->status, json_encode([
                 'peer_id' => $peer->id,
