@@ -380,6 +380,7 @@ M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求�
 3. 节点联调材料：由节点/运维侧提供可用于获批验收的 member profile 生成条件、node ID、管理员控制的 endpoint、证书身份映射和受控 mTLS CA/client/server 证书注入方式，以及能核对 node/peer/request/generation 的真实回执。凭据走本机受控安全存储，不经聊天、仓库或普通文档。现有合成 peer 回执不能替代此项。
 4. 商业放行材料：真实支付服务商的商户沙箱账号、API/验签与回调契约，以及目标市场对应的合规书面结论；凭据使用安全注入。provider-neutral 支付代码可继续，但不能宣称真实支付已验收。
 5. 分发条件：若 Windows/iOS 纳入首发，需要相应代码签名、分发/商店账号和可用验收设备；若不纳入，可在 Android 首发之后推进。
+6. Android signed candidate：Environment reviewer/branch/admin-bypass 保护已配置，但其四项 secrets 与 API origin variable 尚缺。仓库管理员/发布凭据保管人需在 GitHub `Settings → Environments → android-release-candidate` 通过 UI 安全录入 `XLB_ANDROID_RELEASE_KEYSTORE_BASE64`、`XLB_ANDROID_RELEASE_STORE_PASSWORD`、`XLB_ANDROID_RELEASE_KEY_ALIAS`、`XLB_ANDROID_RELEASE_KEY_PASSWORD`，并设 `XLB_ANDROID_RELEASE_API_BASE_URL` 为已批准的 HTTPS API origin；不要把 keystore、password 或 values 发给 Codex、写进仓库或普通聊天。若当前没有正式 keystore，先由发布凭据保管人确定并安全备份发行密钥后再配置。当前唯一 reviewer 是 repository owner `chengxiaoli239`，`prevent_self_review=false`；可由 owner 自行审阅自己的候选，若业务要求双人审批，仓库管理员需另加一名独立 reviewer。
 
 **时间判断更新（2026-11-26）**：AI 可控代码和离线候选原以 2026-12-01 为内部冲刺检查点；这不是受控试点上线承诺。受控试点没有可靠日历日期，须等真实会员节点及撤权回执、商户沙箱契约、合规书面意见、正式签名候选和 staging/回滚门落实后，再按实际验收计划重估。`xlb-ops` STS 当前有效，AWS 资源最新状态见 §0.1，不需要再次登录才能继续只读复核。`android-release-candidate` 环境已设 owner reviewer 与 main allowlist，但正式签名材料/API origin 尚缺。全平台公开发布及多云放量仍需数月以上，且涉及 Android/Windows/macOS/iOS 各自系统隧道、签名/分发审核和第二服务商 conformance。
 
