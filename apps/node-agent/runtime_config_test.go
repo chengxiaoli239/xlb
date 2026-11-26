@@ -134,6 +134,8 @@ func TestTrustedNodeRuntimeV2RequiresNodeScopedKMSKeyARN(t *testing.T) {
 		"arn:aws:kms:us-west-2:123456789012:alias/node-key",
 		"arn:aws:kms:us-west-2:123456789012:key/123456789012",
 		"arn:aws-fake:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012",
+		"arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012",
+		"arn:aws-cn:kms:cn-north-1:123456789012:key/12345678-1234-1234-1234-123456789012",
 	} {
 		t.Run(invalidARN, func(t *testing.T) {
 			var config map[string]any
@@ -149,6 +151,18 @@ func TestTrustedNodeRuntimeV2RequiresNodeScopedKMSKeyARN(t *testing.T) {
 				t.Fatalf("runtime config accepted invalid KMS key ARN %q", invalidARN)
 			}
 		})
+	}
+}
+
+func TestTrustedNodeRuntimeV2AcceptsMultiRegionKMSKeyARN(t *testing.T) {
+	_, _, caPEM := createTestCertificates(t)
+	input := productionRendererRuntimeConfigJSON(RuntimeProfileMihomoBridge,
+		"https://bridge.example.invalid:9444", string(caPEM))
+	input = strings.Replace(input,
+		"key/12345678-1234-1234-1234-123456789012",
+		"key/mrk-12345678-1234-1234-1234-123456789012", 1)
+	if _, err := DecodeTrustedNodeRuntimeConfig(strings.NewReader(input)); err != nil {
+		t.Fatalf("DecodeTrustedNodeRuntimeConfig rejected a valid multi-region KMS key ARN: %v", err)
 	}
 }
 

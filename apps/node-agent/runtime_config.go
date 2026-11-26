@@ -106,7 +106,8 @@ func (config TrustedNodeRuntimeConfig) Validate() error {
 		return ErrInvalidNodeRuntimeConfig
 	}
 	if config.SchemaVersion == TrustedNodeRuntimeSchemaV2 {
-		if config.NodeTLSIdentity.Source != "aws-kms" || !validKMSKeyARN(config.NodeTLSIdentity.KeyARN) {
+		if config.NodeTLSIdentity.Source != "aws-kms" || !validKMSKeyARN(config.NodeTLSIdentity.KeyARN) ||
+			kmsKeyARNRegion(config.NodeTLSIdentity.KeyARN) != config.Node.Region {
 			return ErrInvalidNodeRuntimeConfig
 		}
 	} else if config.NodeTLSIdentity.Source != "" || config.NodeTLSIdentity.KeyARN != "" {
@@ -123,8 +124,8 @@ func validKMSKeyARN(value string) bool {
 	}
 	parts := strings.SplitN(value, ":", 6)
 	if len(parts) != 6 || parts[0] != "arn" ||
-		(parts[1] != "aws" && parts[1] != "aws-us-gov" && parts[1] != "aws-cn") ||
-		parts[2] != "kms" || !validRuntimeToken(parts[3], 32) || len(parts[4]) != 12 ||
+		!validKMSPartitionRegion(parts[1], parts[3]) || parts[2] != "kms" ||
+		!validRuntimeToken(parts[3], 32) || len(parts[4]) != 12 ||
 		parts[5] == "" || !strings.HasPrefix(parts[5], "key/") {
 		return false
 	}
@@ -134,6 +135,7 @@ func validKMSKeyARN(value string) bool {
 		}
 	}
 	keyID := strings.TrimPrefix(parts[5], "key/")
+	keyID = strings.TrimPrefix(keyID, "mrk-")
 	if len(keyID) != 36 {
 		return false
 	}
@@ -150,6 +152,30 @@ func validKMSKeyARN(value string) bool {
 		}
 	}
 	return true
+}
+
+func validKMSPartitionRegion(partition, region string) bool {
+	if !validRuntimeToken(region, 32) {
+		return false
+	}
+	switch partition {
+	case "aws":
+		return !strings.HasPrefix(region, "cn-") && !strings.HasPrefix(region, "us-gov-")
+	case "aws-us-gov":
+		return strings.HasPrefix(region, "us-gov-")
+	case "aws-cn":
+		return strings.HasPrefix(region, "cn-")
+	default:
+		return false
+	}
+}
+
+func kmsKeyARNRegion(value string) string {
+	parts := strings.SplitN(value, ":", 6)
+	if len(parts) != 6 {
+		return ""
+	}
+	return parts[3]
 }
 
 func validateProfileRendererRuntimeConfig(schemaVersion, environment string, bridge ProofBridgeRuntimeConfig,
