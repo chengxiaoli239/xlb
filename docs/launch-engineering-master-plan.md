@@ -56,6 +56,8 @@
 
 **CI / AWS 检查点（2026-11-26）**：Node Agent AWS SDK 依赖缺少 Android 本地替换模块 sums 已补入，hosted CI `45749846197` 全绿（Android native build、PHP/MySQL/PostgreSQL、Node Agent 与 provenance 均通过）。本机完整 Gradle 因 Temurin 26.0.1 与当前 Kotlin Gradle compiler 不兼容未通过；CI JDK 21 构建已通过。随后 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 session expired，因此真实 KMS/IAM 只读盘点未完成，无云资源写入。下一轮需本人重新 `aws login` 后先只读盘点现有 KMS key 与 IAM role；无现成获批 key 时，KMS key 创建与持续费用必须先明确核定。
 
+**后续 AWS/KMS 只读复核（2026-11-26）**：随后登录已恢复，`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 root principal。KMS key `dd29fe54-38e5-4094-8dde-0c1a1cd8c872` 当前为 `PendingDeletion`，预计 2026-12-03 16:11 +08 删除；隔离节点栈已不存在且没有运行中的 `ManagedBy=xlb-node-lab` 实例。为避免重复创建，`xlb-lab-access-usw2` IAM 栈保留，其中 KMS policy 只允许对显式单一 key ARN 执行 `kms:GetPublicKey` 和 `kms:Sign`；业务服务器和 `xlb-node-manager-access-usw2` 未改动。账单尚未最终结算。后续如需 KMS live 测试，先核查是否能复用现有资源，并把资源阶段集中完成。
+
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
 | M1–M2 产品与盘点 | PRD、边界、账号/节点/支付现状盘点已固化 | 随新实现继续维护，不代表发布审查完成 |

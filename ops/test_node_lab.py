@@ -55,6 +55,27 @@ class NodeLabSafetyTest(unittest.TestCase):
         self.assertIn("shutdown -h now", node["UserData"]["Fn::Base64"]["Fn::Sub"])
         self.assertEqual(resources["ExpirySchedule"]["Properties"]["Target"]["Arn"], "arn:aws:scheduler:::aws-sdk:ec2:terminateInstances")
 
+    def test_access_template_limits_optional_kms_grants_to_one_lab_key(self):
+        template = json.loads((Path(__file__).parent / "aws-node-lab-access.template.json").read_text())
+        parameter = template["Parameters"]["NodeKmsKeyArn"]
+        self.assertEqual(parameter["Default"], "")
+        self.assertEqual(parameter["AllowedPattern"], "^$|^arn:aws:kms:us-west-2:[0-9]{12}:key/[0-9a-fA-F-]{36}$")
+        self.assertEqual(
+            template["Conditions"]["UseNodeKmsKey"]["Fn::Not"][0]["Fn::Equals"],
+            [{"Ref": "NodeKmsKeyArn"}, ""],
+        )
+
+        policy = template["Resources"]["NodeKmsSigningPolicy"]
+        self.assertEqual(policy["Condition"], "UseNodeKmsKey")
+        self.assertEqual(policy["Properties"]["Roles"], [{"Ref": "SsmRole"}])
+        statement = policy["Properties"]["PolicyDocument"]["Statement"][0]
+        self.assertEqual(statement["Action"], ["kms:GetPublicKey", "kms:Sign"])
+        self.assertEqual(statement["Resource"], {"Ref": "NodeKmsKeyArn"})
+
+        expiry_statement = template["Resources"]["ExpiryRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"][0]
+        self.assertEqual(expiry_statement["Action"], "ec2:TerminateInstances")
+        self.assertEqual(expiry_statement["Condition"]["StringEquals"]["ec2:ResourceTag/ManagedBy"], "xlb-node-lab")
+
 
 if __name__ == "__main__":
     unittest.main()
