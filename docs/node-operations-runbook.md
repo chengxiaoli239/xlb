@@ -43,7 +43,7 @@ python3 -B ops/node_probe.py --host pd01 --expected-ip '<已核实的 pd01 出�
 
 AWS CLI 统一经 `ops/aws-cli` 执行。该入口移除大小写形式的 HTTP/HTTPS/ALL proxy 环境变量，并设 `NO_PROXY=*`，避免 WorkBuddy 动态注入代理拦截 AWS TLS；不关闭证书校验、不改 AWS CA 配置。手工调用使用 `ops/aws-cli sts ...`、`ops/aws-cli cloudformation ...`、`ops/aws-cli ec2 ...`、`ops/aws-cli ssm ...` 或 `ops/aws-cli iam ...`。`node_lab.py` 与 `node_manager.py` 也调用此入口。
 
-模板创建小规格 Amazon Linux x86_64 测试主机、独立安全组和 EventBridge 到期终止任务。默认 t3.micro，可选 t3.small，标准 CPU 积分模式，12GB 加密 gp3 根盘、随实例删除；不创建 NAT Gateway、负载均衡器、弹性 IP 或生产角色。实例要求 IMDSv2。主机没有公网入站，使用 SSM 管理和端口转发；公网协议验收应另做来源 IP 白名单下的专用变更。
+模板创建小规格 Amazon Linux x86_64 测试主机、独立安全组和 EventBridge 到期终止任务。默认 t3.micro，可选 t3.small，标准 CPU 积分模式，12GB 加密 gp3 根盘、随实例删除；不创建 NAT Gateway、负载均衡器、弹性 IP 或生产角色。实例要求 IMDSv2。默认不配置公网入站并使用 SSM 管理和端口转发。仅在 `node_lab.py create --member-ingress-cidr <公网IPv4/32>` 明确提供单个全球可路由 IPv4 主机地址时，模板才开放该来源到 TCP 443；同一个 test-only UserData 条件安装 HAProxy，以 TCP 模式将 443 原样透传至 loopback Node Agent `127.0.0.1:9444`，不终止 TLS。管理接口仍只经 SSM port-forward，不开放入站管理端口。必须通过 `node_lab.py` 生成并审阅计划，模板的 CloudFormation 参数正则只校验 IPv4 `/32` 语法，全球可路由语义由脚本额外校验，禁止绕过脚本直接部署模板。未指定白名单来源时仍无入站规则；此变更只用于隔离会员链路验收，不能当作生产防火墙或稳定域名方案。
 
 首次需要准备：一个具有 EC2/CloudFormation/SSM/Scheduler 操作权限的个人项目运维身份、同区 VPC/公网子网、经核实的 AMI、专用 SSM 实例角色和到期终止角色。不要复用生产发布角色。终止角色由 `scheduler.amazonaws.com` 扮演，仅允许终止 `Project=xlb`、`Environment=test`、`ManagedBy=xlb-node-lab` 的实例；PassRole 只允许这两个精确角色。权限边界必须允许这些动作，单独添加普通策略不足以解除边界拒绝。
 

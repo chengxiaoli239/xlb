@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "XLB isolated temporary EC2 test host. No VPN keys, production data or public ingress. Delete this stack after testing.",
+  "Description": "XLB isolated temporary EC2 test host. No VPN keys or production data. Optional member TLS passthrough requires one explicit IPv4 /32. Delete this stack after testing.",
   "Parameters": {
     "VpcId": {"Type": "AWS::EC2::VPC::Id"},
     "SubnetId": {"Type": "AWS::EC2::Subnet::Id", "Description": "Public subnet with an internet gateway in this VPC"},
@@ -10,14 +10,28 @@
     "ExpiryRoleArn": {"Type": "String", "AllowedPattern": "arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+", "Description": "Existing scheduler role allowing ec2:TerminateInstances only for tagged XLB test instances"},
     "ExpiresAtUtc": {"Type": "String", "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}", "Description": "UTC time within 15 to 60 minutes from now, without Z; generated immediately before deployment"},
     "LifetimeMinutes": {"Type": "Number", "Default": 30, "AllowedValues": [15, 30, 60]},
-    "NodeId": {"Type": "String", "AllowedPattern": "xlb-lab-[a-z0-9-]{1,30}"}
+    "NodeId": {"Type": "String", "AllowedPattern": "xlb-lab-[a-z0-9-]{1,30}"},
+    "MemberIngressCidr": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/32$",
+      "ConstraintDescription": "Leave empty for no inbound access or provide exactly one IPv4 /32 host CIDR."
+    }
+  },
+  "Conditions": {
+    "EnableMemberIngress": {"Fn::Not": [{"Fn::Equals": [{"Ref": "MemberIngressCidr"}, ""]}]}
   },
   "Resources": {
     "NodeSecurityGroup": {
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
-        "GroupDescription": "Temporary XLB test node: no public inbound, SSM over outbound HTTPS",
+        "GroupDescription": "Temporary XLB test node: optional /32-only TCP 443 TLS passthrough, SSM over outbound HTTPS",
         "VpcId": {"Ref": "VpcId"},
+        "SecurityGroupIngress": [{
+          "Fn::If": ["EnableMemberIngress", {
+            "IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": {"Ref": "MemberIngressCidr"}
+          }, {"Ref": "AWS::NoValue"}]
+        }],
         "SecurityGroupEgress": [{"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": "0.0.0.0/0"}],
         "Tags": [{"Key": "Project", "Value": "xlb"}, {"Key": "Environment", "Value": "test"}, {"Key": "ManagedBy", "Value": "xlb-node-lab"}]
       }
@@ -34,7 +48,7 @@
         "PropagateTagsToVolumeOnCreation": true,
         "NetworkInterfaces": [{"DeviceIndex": "0", "AssociatePublicIpAddress": true, "SubnetId": {"Ref": "SubnetId"}, "GroupSet": [{"Ref": "NodeSecurityGroup"}]}],
         "BlockDeviceMappings": [{"DeviceName": "/dev/xvda", "Ebs": {"VolumeType": "gp3", "VolumeSize": 12, "Encrypted": true, "DeleteOnTermination": true}}],
-        "UserData": {"Fn::Base64": {"Fn::Sub": "#!/bin/bash\nset -euo pipefail\nsystemd-run --unit=xlb-node-expiry --on-active=${LifetimeMinutes}m /usr/sbin/shutdown -h now\n"}},
+        "UserData": {"Fn::Base64": {"Fn::Sub": "#!/bin/bash\nset -euo pipefail\nsystemd-run --unit=xlb-node-expiry --on-active=${LifetimeMinutes}m /usr/sbin/shutdown -h now\nif [ -n \"${MemberIngressCidr}\" ]; then\n  dnf install -y haproxy\n  cat > /etc/haproxy/haproxy.cfg <<'HAPROXY'\nglobal\n  maxconn 128\ndefaults\n  mode tcp\n  timeout connect 5s\n  timeout client 30m\n  timeout server 30m\nfrontend xlb_member_tls_passthrough\n  bind 0.0.0.0:443\n  default_backend xlb_node_agent_data\nbackend xlb_node_agent_data\n  server node_agent 127.0.0.1:9444\nHAPROXY\n  systemctl enable --now haproxy\nfi\n"}},
         "Tags": [{"Key": "Name", "Value": {"Ref": "NodeId"}}, {"Key": "NodeId", "Value": {"Ref": "NodeId"}}, {"Key": "Project", "Value": "xlb"}, {"Key": "Environment", "Value": "test"}, {"Key": "ManagedBy", "Value": "xlb-node-lab"}, {"Key": "ExpiresAt", "Value": {"Ref": "ExpiresAtUtc"}}]
       }
     },

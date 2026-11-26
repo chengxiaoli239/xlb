@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from node_lab import TAGS, aws, check_delete_scope, check_name, create_request
+from node_lab import TAGS, aws, check_delete_scope, check_member_ingress_cidr, check_name, create_request
 
 
 class NodeLabSafetyTest(unittest.TestCase):
@@ -34,19 +34,45 @@ class NodeLabSafetyTest(unittest.TestCase):
                 check_name(value)
 
     def test_launch_deadline_uses_utc_and_never_accepts_an_unbounded_lifetime(self):
-        args = argparse.Namespace(name="xlb-lab-us-test", minutes=30, vpc="vpc-test", subnet="subnet-test", image="ami-test", instance_type="t3.micro", instance_profile="xlb-ssm", expiry_role="arn:aws:iam::123456789012:role/xlb-expiry")
+        args = argparse.Namespace(name="xlb-lab-us-test", minutes=30, vpc="vpc-test", subnet="subnet-test", image="ami-test", instance_type="t3.micro", instance_profile="xlb-ssm", expiry_role="arn:aws:iam::123456789012:role/xlb-expiry", member_ingress_cidr="")
         request = create_request(args, datetime(2026, 11, 8, 9, 30, tzinfo=timezone.utc))
         parameters = {p["ParameterKey"]: p["ParameterValue"] for p in request["Parameters"]}
         self.assertEqual(parameters["ExpiresAtUtc"], "2026-11-08T10:00:00")
+        self.assertEqual(parameters["MemberIngressCidr"], "")
         self.assertEqual(request["OnFailure"], "DELETE")
+        args.member_ingress_cidr = "8.8.8.8/32"
+        request = create_request(args, datetime(2026, 11, 8, 9, 30, tzinfo=timezone.utc))
+        parameters = {p["ParameterKey"]: p["ParameterValue"] for p in request["Parameters"]}
+        self.assertEqual(parameters["MemberIngressCidr"], "8.8.8.8/32")
         args.minutes = 0
         with self.assertRaises(ValueError):
             create_request(args, datetime.now(timezone.utc))
 
+    def test_member_ingress_is_optional_but_limited_to_one_ipv4_host(self):
+        self.assertEqual(check_member_ingress_cidr(""), "")
+        self.assertEqual(check_member_ingress_cidr("8.8.8.8/32"), "8.8.8.8/32")
+        for value in (
+            "0.0.0.0/0", "8.8.8.0/24", "2001:db8::1/128", "8.8.8.8/24", "not-a-cidr",
+            "0.0.0.0/32", "127.0.0.1/32", "224.0.0.1/32", "192.168.1.1/32",
+        ):
+            with self.subTest(cidr=value), self.assertRaises(ValueError):
+                check_member_ingress_cidr(value)
+
     def test_template_keeps_inbound_closed_and_has_independent_expiry_controls(self):
         template = json.loads((Path(__file__).parent / "aws-node-lab.template.json").read_text())
         resources = template["Resources"]
-        self.assertNotIn("SecurityGroupIngress", resources["NodeSecurityGroup"]["Properties"])
+        ingress = resources["NodeSecurityGroup"]["Properties"]["SecurityGroupIngress"][0]["Fn::If"]
+        self.assertEqual(ingress[0], "EnableMemberIngress")
+        self.assertEqual(ingress[1]["FromPort"], 443)
+        self.assertEqual(ingress[1]["ToPort"], 443)
+        self.assertEqual(ingress[1]["CidrIp"], {"Ref": "MemberIngressCidr"})
+        self.assertEqual(ingress[2], {"Ref": "AWS::NoValue"})
+        self.assertEqual(template["Parameters"]["MemberIngressCidr"]["Default"], "")
+        user_data = resources["Node"]["Properties"]["UserData"]["Fn::Base64"]["Fn::Sub"]
+        self.assertIn("if [ -n \"${MemberIngressCidr}\" ]", user_data)
+        self.assertIn("bind 0.0.0.0:443", user_data)
+        self.assertIn("server node_agent 127.0.0.1:9444", user_data)
+        self.assertNotIn("haproxy", user_data.split("if [ -n", 1)[0])
         node = resources["Node"]["Properties"]
         self.assertEqual(node["InstanceInitiatedShutdownBehavior"], "terminate")
         self.assertTrue(node["PropagateTagsToVolumeOnCreation"])

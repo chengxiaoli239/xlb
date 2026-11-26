@@ -2,7 +2,9 @@
 
 确认：2026-11-18 09:44。范围：自有 Android / Windows / macOS 客户端、会员网站、浏览器扩展，以及 Clash Verge 等兼容客户端。本文区分产品目标、开发期验证和正式上线门槛；不表示当前代码或正式节点已实现。阶段进度见下文。
 
-## 开发进度（2026-11-26）
+## 开发进度（2026-11-27）
+
+- **隔离会员数据面来源白名单模板（2026-11-27，ops 本地验收）**：`ops/node_lab.py` 现在支持显式可选 `--member-ingress-cidr`，校验仅接受全球可路由 IPv4 `/32`，空值仍关闭全部入站。节点模板仅在该值非空时开放 TCP 443 至该来源，并条件安装 HAProxy 做 TCP/TLS passthrough 到 loopback Node Agent `127.0.0.1:9444`；Agent control API 仍只经 SSM 转发。全 ops unittest 78/78 通过，AWS CloudFormation `validate-template` 已接受该模板，未创建或改动 AWS 资源。下一步将用只读状态确定当前单次验收的精确来源 CIDR和资源计划，经 `node_lab.py plan` 审阅后在获批隔离栈上验证 Android/PHP 沙箱到真实 Node Agent；当前无设备在线，先用 AVD 联调。该入口不代表生产防火墙、稳定 endpoint 或真实双手机验证，5/12 放行门暂不增加。
 
 - **Node Agent production-shaped runtime v2 trusted listener/certificate input contract（2026-11-26，离线 Go）**：v2 现在要求 management 与 data-plane listener 由受保护 runtime 配置显式给出，必须是 loopback IP:port 且端口不同；节点证书链和 client CA 使用绝对规范路径，同样来自该 runtime 文件。生产解析器拒绝 wildcard/public bind 和环境变量覆盖 listener、证书、CA 与私钥路径，private key 继续只能由 KMS signer 提供。v1 isolated-test 保留原 loopback defaults 与测试证书输入。新增正反向 schema/override 回归；`go test -race ./...`、`go vet ./...`、`go build ./...` 通过。production executable 仍在读取配置和 AWS 前 fail closed；外部节点暴露/TLS passthrough 与防火墙策略尚未实现或定稿，没有打开监听、创建资源或声称生产 mTLS 已就绪。本阶段不增加 12 项放行门计数，仍为 5/12（42%）、Node Agent 模块 1/2（50%）。下一步先固化 production listener exposure 与证书 EKU/fingerprint mapping 合同，再做不启用服务的 runtime assembly 回归；真实节点与会员 profile 仍未验收。
 

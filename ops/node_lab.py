@@ -2,6 +2,7 @@
 """Plan/create/delete an XLB-only temporary CloudFormation stack. Default: plan."""
 
 import argparse
+import ipaddress
 import json
 import re
 import subprocess
@@ -21,6 +22,21 @@ def check_name(value):
     if not re.fullmatch(r"xlb-lab-[a-z0-9-]{1,30}", value):
         raise ValueError("Stack name must start xlb-lab- and contain only lowercase letters/digits/hyphens")
     return value
+
+
+def check_member_ingress_cidr(value):
+    if value == "":
+        return ""
+    try:
+        network = ipaddress.ip_network(value, strict=True)
+    except ValueError as exc:
+        raise ValueError("Member ingress must be one globally routable IPv4 /32 host address") from exc
+    if not isinstance(network, ipaddress.IPv4Network) or network.prefixlen != 32:
+        raise ValueError("Member ingress must be one globally routable IPv4 /32 host address")
+    address = network.network_address
+    if not address.is_global or address.is_multicast or address.is_unspecified or address.is_reserved:
+        raise ValueError("Member ingress must be one globally routable IPv4 /32 host address")
+    return str(network)
 
 
 def aws(args, *command):
@@ -44,6 +60,7 @@ def create_request(args, now):
         "InstanceType": args.instance_type, "InstanceProfile": args.instance_profile,
         "ExpiryRoleArn": args.expiry_role, "ExpiresAtUtc": expires,
         "LifetimeMinutes": str(args.minutes), "NodeId": args.name,
+        "MemberIngressCidr": check_member_ingress_cidr(getattr(args, "member_ingress_cidr", "")),
     }
     return {
         "StackName": args.name,
@@ -76,6 +93,10 @@ def main():
     create.add_argument("--expiry-role", required=True)
     create.add_argument("--instance-type", choices=("t3.micro", "t3.small"), default="t3.micro")
     create.add_argument("--minutes", type=int, choices=(15, 30, 60), default=30)
+    create.add_argument(
+        "--member-ingress-cidr", type=check_member_ingress_cidr, default="",
+        help="optional globally routable IPv4 /32 allowed to reach the TLS-passthrough member endpoint on TCP 443",
+    )
     create.add_argument("--apply", action="store_true")
     for action in ("status", "delete"):
         command = commands.add_parser(action)

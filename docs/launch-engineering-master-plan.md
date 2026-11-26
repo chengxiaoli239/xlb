@@ -16,7 +16,9 @@
 
 > 结论先行：目前已从单纯本地业务原型推进到隔离节点协议证据、支付沙箱账本、Android Debug 客户端和 M9 多端账号状态；**离上线仍有技术放行、合规与运营门槛**。CI、Docker 构建文件、k6 场景和 smoke 脚本已入库，但没有实测压测报告、staging、生产部署/回滚演练、生产监控告警或批量节点编排。下方 §0.1 是当前执行快照；旧章节中的全仓"无脚本/无工作流/客户端未实现"等基线文字应以该快照和源码复核为准。
 
-### 0.1 当前完成度与工作队列（2026-11-26）
+### 0.1 当前完成度与工作队列（2026-11-27）
+
+**2026-11-27 M6 隔离会员入口准备**：node-lab 模板默认无入站；只有显式单个全球可路由 IPv4 `/32` 时才开 TCP 443 并以 HAProxy TCP passthrough 转发至 loopback Node Agent，PHP 管理仍走 SSM。ops 安全回归 78/78 与 AWS CloudFormation `validate-template` 通过，本轮无资源写入。当前目标是一次性用该 source-IP 窗口联调 Android/PHP 沙箱和隔离 Agent，再完整回收临时节点；不作为生产网络策略，用户双真机与匹配撤权回执仍未验收，放行门保持 5/12。
 
 **2026-11-26 GitHub 候选环境保护已配置**：已在仓库创建 `android-release-candidate` Environment，required reviewer 为仓库所有者/用户账号 `chengxiaoli239`（ID `5234259`），deployment branch policy 显式只允许 `main`，并关闭管理员绕过（`can_admins_bypass=false`）。`prevent_self_review=false`，目前唯一 reviewer 可批准自己发起的候选，这不是双人审批。`gh` 只查询 environment secret/variable 名称元数据，没有读取 secret value；预期四项 secrets `XLB_ANDROID_RELEASE_KEYSTORE_BASE64`、`XLB_ANDROID_RELEASE_STORE_PASSWORD`、`XLB_ANDROID_RELEASE_KEY_ALIAS`、`XLB_ANDROID_RELEASE_KEY_PASSWORD` 均未配置，variable `XLB_ANDROID_RELEASE_API_BASE_URL` 也未配置。`python3 ops/verify_android_release_environment.py --repo chengxiaoli239/xlb` 实测 `release environment preflight passed`。本阶段只配置人工保护与分支 allowlist，不运行签名候选 workflow、不部署。受保护环境准备子项已完成，但 12 项首发门 #11 仍未通过，正式签名材料、候选 APK、制品审查和 staging/回滚仍缺，整体 5/12、模块发布运维 1/3 不变。
 
