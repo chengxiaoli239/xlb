@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-26）
 
+**2026-11-26 GitHub 候选环境保护已配置**：已在仓库创建 `android-release-candidate` Environment，required reviewer 为仓库所有者/用户账号 `chengxiaoli239`（ID `5234259`），deployment branch policy 显式只允许 `main`。`python3 ops/verify_android_release_environment.py --repo chengxiaoli239/xlb` 实测 `release environment preflight passed`。本阶段只配置人工保护与分支 allowlist，不读取/写入任何 secrets，不运行签名候选 workflow、不部署。受保护环境准备子项已完成，但 12 项首发门 #11 仍未通过，签名 keystore/password/API origin、正式候选 APK、制品审查和 staging/回滚仍缺，整体 5/12、模块发布运维 1/3 不变。
+
 **2026-11-26 AWS 会话恢复后只读盘点（临时 key 创建前基线）**：`ops/aws-cli sts get-caller-identity --profile xlb-ops` 成功，身份为账号 `289069331089` root。us-west-2 限定盘点没有活动 XLB lab/node 栈、`Project=xlb` 活动 EC2、`/xlb` SSM 参数或名称匹配 xlb 的 Secrets Manager 项。仅发现旧测试权限栈 `xlb-node-manager-access-usw2`，含 `XlbNodeCleanupRole`、`XlbNodeSsmRole` 和 `XlbNodeSsmProfile`，均未改动。该区仅有两个 AWS 托管 EBS/Secrets Manager 对称加密 key，没有可用于节点 mTLS 的 XLB P-256 签名 key。没有读取 secret 值、写入或删除云资源，也没有检查全账号账单/其他区域。首发门仍 5/12，模块门仍 Android/M6 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。真实 Node Agent key/certificate/CA/profile 与会员撤权回执仍是硬缺项；创建有费用的 KMS key 需先明确成本授权。
 
 **2026-11-26 成本只读检查（临时 key 创建前）**：Cost Explorer 对 11 月 1–26 日账户级未混合成本返回约 USD 685.75，其中 us-west-2 约 USD 0.07；主要花费发生于其他区域的非 XLB 标识资源，未据此把其他项目费用算给迅连宝。账户没有 AWS Budget。该估算有账单延迟且非最终金额。记录该快照时尚未执行本轮临时 KMS key 测试，之后仅创建一枚用户批准的临时 key 并安排待删除。本项目不修改其他区域资源；本轮单枚临时 KMS key 已获用户费用授权并保留给集中的隔离验收；删除尚未重新安排，测试完毕后再统一设待删除。若要重建或长期保留，仍须另行批准成本上限。
@@ -90,7 +92,7 @@
 | 8 | 匹配真实节点的撤权回执和最终流量单调证据 | 未完成 | 需要 `node/peer/request/generation` 匹配回执；不得以 `confirmed_test` 替代 |
 | 9 | 真实商户 sandbox 回调与对账 | 未完成 | 商户契约、沙箱凭据和支付负责人未提供 |
 | 10 | 首发市场书面合规意见 | 未完成 | 合规责任人和书面结论未登记 |
-| 11 | 受保护签名 Environment、正式 APK 与制品审查 | 未完成 | Environment 数量为 0；无正式签名凭据/候选 APK |
+| 11 | 受保护签名 Environment、正式 APK 与制品审查 | 未完成（Environment 子项已完成） | `android-release-candidate` 已设 required reviewer `chengxiaoli239` 与仅 `main` branch allowlist，预检通过；正式签名凭据/API origin、签名 APK 与候选制品审查仍缺 |
 | 12 | 获批 staging smoke、回滚、值守与费用边界 | 未完成 | staging、维护窗口、回滚负责人及批准的资源/费用限制未落实 |
 
 **总体进度：5/12 = 42% 的首发交付门已有证据。**这是等权门清单比例，不是剩余工时或上线概率；仍有 7 项未通过，任何一个真实节点/支付/合规/发布硬门都可阻止上线。2026-11-26 M5/M6 synthetic live protocol 复测提升了隔离验收证据，但没有关闭 production/runtime/会员设备数据面门，因此门数仍为 5/12。
@@ -100,7 +102,7 @@
 | Android / M6、M8 | 本地独立身份；隔离 TUN/proof/revoke；真实双机连接与匹配回执 | 2/3 = 67% | 真实节点/profile 材料到位后，先单设备连接，再双机复制拒绝和撤权回执 |
 | Web/API 与支付 | local/testing 会员购买退款；真实商户 sandbox 与对账 | 1/2 = 50% | 商户负责人提供回调/验签/重试/对账契约及受控凭据 |
 | Node Agent / M5–M10 | 合成 peer/健康调度隔离证据；生产 runtime 与真实节点回执 | 1/2 = 50% | 真实节点身份、secure-store/mTLS 注入方案和获批窗口 |
-| 发布与运维 / M11 | CI、来源追溯及候选审核准备；受保护签名候选；staging/回滚 | 1/3 = 33% | 管理员配置 main-only reviewer Environment，获批者生成候选并按核验模板审查 |
+| 发布与运维 / M11 | CI、来源追溯及候选审核准备；受保护签名候选；staging/回滚 | 1/3 = 33% | Environment 的 main-only reviewer 保护已配置并通过只读预检；下一步是经受控渠道准备正式签名/API origin 凭据并人工审批生成候选，再做 staging/回滚 |
 | Windows / macOS / iOS | 首发范围内验收门 | N/A，后续范围 | 不计入 Android + 网站/API 首发分母；首发后另立目标和分母 |
 
 模块百分比只反映表内子门计数，不能相加作为总进度。完整放行清单和已验收项的边界以 PRD 开发进度和 §0.2.3 为准。
@@ -119,7 +121,7 @@
 | 11-29 至 11-30 | 故障/回滚演练，检查指标、告警、客服和资源费用；仅对已通过的链路做小范围受控试运行准备 | 记录错误预算、停止扩量与回滚责任人；未做真实节点和 staging 验收不发布付费试点 |
 | 12-01 | Go/no-go 审查与候选交付 | 所有 P0 放行门通过后才可宣布受控试点上线。若外部材料延迟，交付签名候选/内部技术预览并列明阻塞，不把日期写成已上线承诺 |
 
-一周目标是压缩 AI 可控开发与审查周期。11-25 当前只读复核显示 GitHub Environment 数量为 0；us-west-2 XLB 隔离实验资源范围盘点已完成，历史实验资源均已清理，仅保留既有 node-manager access stack，未做云写入。该检查不包含全账号账单核验。节点/撤权材料、staging、商户沙箱与合规书面意见仍未登记到责任人和窗口。因此 12-01 只能作为内部冲刺检查点，当前没有证据支持受控试点上线日期预测；新增或剩余 AI 可控工作继续按新缺陷与首发验收路径排序。
+一周目标是压缩 AI 可控开发与审查周期。11-25 GitHub Environment 数量为 0 的记录已由 11-26 受保护 Environment 配置更新；当前目标环境的 owner reviewer 与 main-only allowlist 已通过只读预检，但正式签名/API 凭据、签名候选和 staging 仍缺。us-west-2 XLB 隔离实验资源范围盘点已完成；最新 AWS 复核见 11-26 资源状态记录，未触碰业务服务器。节点/撤权材料、staging、商户沙箱与合规书面意见仍未登记到责任人和窗口。因此 12-01 只能作为内部冲刺检查点，当前没有证据支持受控试点上线日期预测；新增或剩余 AI 可控工作继续按新缺陷与首发验收路径排序。
 
 ### 0.2.1 四象限复盘与本周工作重排（2026-11-25）
 
@@ -136,7 +138,7 @@
 | 优先级/工作流 | 当前证据与主要工作量 | AI 主动投入估计 | 依赖与安排 | 下一项可验收结果 |
 | --- | --- | --- | --- | --- |
 | **Q1 Android 会员数据面放行** | 两台真机身份、Android Keystore、Go bridge、Mihomo/TUN 的隔离 harness 和客户端安全诊断已有证据；生产 gate 仍关闭。最大不确定性在真实 member profile/节点凭证接线、双机复制拒绝、撤权回执与最终流量匹配 | 有材料后按 1–3 个开发/验收日估算，不能把外部排队算作 AI 工时；具体需根据节点契约复估 | 节点负责人提供 endpoint、CA/mTLS 注入方式、profile、获批窗口和回执字段。资料未到期间不改 gate、不模拟真实结论 | 材料齐备后先做单设备 happy path，再做第二身份复制拒绝和撤权；每项保留请求/节点/peer/generation 对应证据 |
-| **Q1 M11 签名候选与 staging** | APK、runtime SBOM、摘要 manifest、provenance workflow 有离线/CI 验证；protected Environment 未配置，无 staging 部署/回滚验收 | Environment 元数据可见后约 2–4 小时配置核对与候选流程复核；staging 演练约 0.5–1.5 日，环境和负责人等待另计 | 仓库管理员建受保护 Environment 并设审核者；凭据负责人经批准通道提供正式签名配置/API origin；staging 负责人给环境、窗口和回滚人。AI 不读取/提交凭据，不部署 | 获批者产出同一 commit 的签名 APK、SBOM、manifest、provenance；staging smoke 与回滚形成独立记录 |
+| **Q1 M11 签名候选与 staging** | APK、runtime SBOM、摘要 manifest、provenance workflow 有离线/CI 验证；`android-release-candidate` protected Environment 已配置 owner reviewer 与 main-only allowlist，预检通过；无签名候选及 staging 部署/回滚验收 | 候选前置配置已完成；签名材料受控核验与候选复核仍需约 2–4 小时，staging 演练约 0.5–1.5 日，凭据准备和环境/责任人等待另计 | 凭据负责人经批准通道提供正式签名配置/API origin；获批者人工运行候选；staging 负责人给环境、窗口和回滚人。AI 不读取/提交凭据，不部署 | 获批者产出同一 commit 的签名 APK、SBOM、manifest、provenance；staging smoke 与回滚形成独立记录 |
 | **Q1 商户沙箱与首发合规** | provider-neutral 契约和 local/testing 付款退款账本已经存在；真实商户 sandbox、首发地区合规意见未验收 | 商户契约到位后约 0.5–1.5 日接入/验收，审查时间由外部负责人决定 | 支付负责人提供回调、签名、重试、对账字段；合规负责人确认地区和书面意见。不得以本地假渠道宣称真实支付已验收 | 测试下单→回调→权益→退款→对账可追溯，并取得书面放行意见 |
 | **Q2 Android 离线失败处理** | 连接与 API 失败的安全诊断编号已有实现；首页连接失败有“重试连接”、账户节点线路不可用卡有“重试同步”。本轮为 attempt-bound monitor 补上“probe 进行中旧 attempt 被替换”回归；JVM 全量、AndroidTest compile、lint、Debug APK 本机通过，主线 `f07465d` CI `45406085919` 六个 jobs 全绿。未发现还需重复建设诊断 UI 的离线缺口 | 本阶段已完成；后续由新的复现问题驱动 | 真实节点材料缺失期间可继续其它工作，但不把客户端 probe 说成节点撤权事件/线路稳定证明 | 将 Android 诊断入口从本周 AI 待办移出；真实 member profile、节点证书和回执到位后转入 Q1 真机验收 |
 | **Q2 Android 恢复秘密静态存储回归** | 专用 AVD 覆盖 `SecureSessionStore` 在 KeyStore 加密状态下持久化恢复秘密/Cookie；本轮进一步确认 SharedPreferences 只有 `encrypted_state` 且解码后仍无明文，完整隔离 recovery harness 成功，主线 `099ccfd` CI `45570424762` 全绿 | 本轮新增测试和本机 harness 已验收 | 仅 Android 端本地静态存储行为，不证明硬件安全等级或生产账号保护 | 本地恢复存储证据补齐；不改变真实会员 profile、节点数据面或上线放行状态 |
@@ -195,7 +197,7 @@
 | 阶段 | Go 条件 | 当前结论/动作 |
 | --- | --- | --- |
 | 源码冻结 | 候选来源为已审阅的 `main` commit；常规 CI 六个 jobs 全绿；构建理由可关联到 issue/审批记录 | 当前 main `24dd1b9` 的 CI `45571571648` 全部 jobs success；正式候选冻结仍须把构建理由关联到审阅/审批记录 |
-| 签名权限 | `android-release-candidate` Environment 存在、仅允许 main、设置人工审核者；签名 secrets 和 approved API origin 由负责人经受控通道配置 | 只读预检 `python3 ops/verify_android_release_environment.py` 已实现并由 ops 76/76 测试覆盖。它只核验环境存在、required reviewer 有效 ID、显式 branch allowlist 仅为 `main`，不读取 secrets/不改配置。当前 GitHub API 返回 Environment 数量为 0，预检实际返回 `not configured`；正式签名候选不可运行 |
+| 签名权限 | `android-release-candidate` Environment 存在、仅允许 main、设置人工审核者；签名 secrets 和 approved API origin 由负责人经受控通道配置 | 2026-11-26 已创建环境并要求仓库所有者 `chengxiaoli239` 人工审核，显式 branch allowlist 仅为 `main`；只读预检实测通过。未读取/写入 secrets；签名 key/password 与 approved API origin 仍未配置，因此正式签名候选不可运行 |
 | 候选构建 | 获批者手动运行 workflow；Release unit tests、lint、APK signature/package identity 检查、runtime SBOM、APK+SBOM source-bound manifest、manifest 校验及两项 provenance attest 全部成功 | 常规 CI 仅以临时测试密钥检查签名配置并产出 Debug APK/SBOM；正式 workflow 仍受 `workflow_dispatch`、`main` 与 protected Environment 限制。没有正式凭据，未构建签名候选 |
 | 候选审查 | 下载 APK/BOM/manifest；核对 manifest source commit 等于审阅 commit、摘要一致；验证 APK signer/package 与来源证明；记录审阅结果 | `verify_artifact_manifest.py --expected-commit` 现可强制 manifest commit 与审阅目标相同，signed candidate workflow 传入 `GITHUB_SHA`；错配/非法输入测试通过，ops 66/66，主线 CI `45562668654` 全绿。当前无正式签名候选制品，候选审查本身仍未通过 |
 | staging 放行 | 负责人提供已批准 staging、数据保留与回滚窗口；候选摘要固定后部署；登录/权益、商户沙箱、Android 安装/线路和撤权回执 smoke 通过；回滚演练有记录 | 尚无 staging 环境、窗口与回滚责任人记录；不部署、不产生云费用 |
@@ -262,7 +264,7 @@ gh attestation verify "$candidate_dir/$sbom_rel" \
 | Q1 门 | 当前证据/状态 | 需要的负责人动作 | 可核对退出证据 | 截止检查点 |
 | --- | --- | --- | --- | --- |
 | 会员节点与撤权回执 | 11-25 经项目包装器完成 us-west-2 XLB 实验资源范围只读盘点，历史实验栈均已删除，既有 node-manager access 栈保留；无云写入。会员专属线路/节点材料仍缺 | 节点/运维负责人提供隔离节点 endpoint、节点身份、CA 与生产用途 mTLS 注入路径、获批 canary 地址；没有新协议变更时不重建节点；材料与窗口获批后先生成并审查有界 plan，再按授权执行 | 节点 `node/peer/request/generation` 匹配的回执、最终累计流量与重连拒绝；两台设备各自输出脱敏版本/时间证据 | 负责人/材料尚未确认；12-01 仅内部检查点，缺材料不得称受控试点上线 |
-| Android 受保护签名候选 | 候选 workflow 和签名配置离线验证通过；11-25 GitHub 只读 API 返回 Environment 数量 0 项 | 仓库管理员创建 `android-release-candidate` protected environment，限定 main、设置审核者；凭据负责人按批准通道注入 keystore/password 与 approved API origin，不在仓库/聊天传递 | 获批者手动运行 workflow，保存 APK、BOM、manifest、provenance 与审核结果；不自动建 GitHub Release 或上架 | 11-25 管理员/凭据负责人尚未确认；11-27 仍为原计划目标、并非已承诺候选日期；未配置不得称候选可审核 |
+| Android 受保护签名候选 | 候选 workflow 和签名配置离线验证通过；2026-11-26 `android-release-candidate` protected Environment 已创建，预检证明 owner reviewer 与 main-only allowlist 有效 | 凭据负责人按批准通道注入 keystore/password 与 approved API origin，不在仓库/聊天传递；获批 owner 人工审阅候选 workflow | 获批者手动运行 workflow，保存 APK、BOM、manifest、provenance 与审核结果；不自动建 GitHub Release 或上架 | 环境保护准备已完成；正式签名凭据和 API origin 尚缺，因此没有正式候选/审查结论；11-27 仍是旧计划检查点、非候选日期承诺 |
 | staging 与回滚 | CI 容器构建/HTTP smoke 通过；无 staging 部署记录 | staging 负责人确认隔离 URL、数据库/数据保留、部署权限、回滚责任人与维护窗口；任何新增费用/云资源先单独审批 | 按同一源 commit 部署、健康检查、登录/权益/支付沙箱 smoke、回滚演练记录 | 11-25 确认窗口；11-28 前验收，否则不开放付费试点 |
 | 商户沙箱与首发合规 | provider-neutral 支付及退款状态机只有 local/testing 证据；真实商户与首发市场书面意见未登记 | 支付负责人提供单一商户 sandbox、回调契约、签名/重试规则和对账字段；合规负责人确认首发地区、退款/隐私/服务条款并给书面意见 | 商户 sandbox 下单→回调→权益→退款→对账记录，以及可审计合规结论 | 11-25 确认资料/责任人；11-28 前验收，否则只保留本地沙箱演示，不宣称可收真实款或可上线 |
 
