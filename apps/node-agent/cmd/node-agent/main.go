@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -346,7 +347,7 @@ func loadNodeTLSIdentity(nodeID, source, certificatePath, privateKeyPath, client
 	}
 	client, err := agent.NewAWSKMSAsymmetricKeyClient(context.Background(), region)
 	if err != nil {
-		return agent.NodeTLSIdentity{}, errors.New("initialize AWS KMS node identity client")
+		return agent.NodeTLSIdentity{}, fmt.Errorf("initialize AWS KMS node identity client: %w", err)
 	}
 	certificates, err := agent.NewPEMNodeTLSCertificateProvider(map[string]agent.NodeTLSCertificateFiles{
 		nodeID: {CertificateChainPath: certificatePath, ClientCAPEMPath: clientCAPath},
@@ -361,11 +362,11 @@ func loadNodeTLSIdentity(nodeID, source, certificatePath, privateKeyPath, client
 		5*time.Second,
 	)
 	if err != nil {
-		return agent.NodeTLSIdentity{}, errors.New("configure AWS KMS node TLS identity")
+		return agent.NodeTLSIdentity{}, fmt.Errorf("configure AWS KMS node TLS identity: %w", err)
 	}
 	identity, err := agent.LoadNodeTLSIdentity(context.Background(), nodeID, identitySource)
 	if err != nil {
-		return agent.NodeTLSIdentity{}, errors.New("load AWS KMS node TLS identity")
+		return agent.NodeTLSIdentity{}, fmt.Errorf("load AWS KMS node TLS identity: %w", err)
 	}
 	return identity, nil
 }

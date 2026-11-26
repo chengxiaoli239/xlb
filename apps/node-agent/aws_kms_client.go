@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
+	"github.com/aws/smithy-go"
 )
 
 var ErrAWSKMSOperationFailed = errors.New("AWS KMS node identity operation failed")
@@ -30,7 +32,7 @@ func NewAWSKMSAsymmetricKeyClient(ctx context.Context, region string) (*AWSKMSAs
 	}
 	config, err := awsconfig.LoadDefaultConfig(ctx, loadOptions...)
 	if err != nil {
-		return nil, ErrAWSKMSOperationFailed
+		return nil, awsKMSOperationError("load AWS credential configuration", err)
 	}
 	return &AWSKMSAsymmetricKeyClient{api: kms.NewFromConfig(config)}, nil
 }
@@ -51,7 +53,7 @@ func (client *AWSKMSAsymmetricKeyClient) GetPublicKey(
 	}
 	result, err := client.api.GetPublicKey(ctx, &kms.GetPublicKeyInput{KeyId: &keyID})
 	if err != nil {
-		return KMSPublicKey{}, ErrAWSKMSOperationFailed
+		return KMSPublicKey{}, awsKMSOperationError("GetPublicKey", err)
 	}
 	if result == nil {
 		return KMSPublicKey{}, ErrAWSKMSOperationFailed
@@ -81,12 +83,20 @@ func (client *AWSKMSAsymmetricKeyClient) Sign(
 		SigningAlgorithm: algorithm,
 	})
 	if err != nil {
-		return nil, ErrAWSKMSOperationFailed
+		return nil, awsKMSOperationError("Sign", err)
 	}
 	if result == nil || result.SigningAlgorithm != algorithm || len(result.Signature) == 0 {
 		return nil, ErrAWSKMSOperationFailed
 	}
 	return append([]byte(nil), result.Signature...), nil
+}
+
+func awsKMSOperationError(operation string, err error) error {
+	var apiError smithy.APIError
+	if errors.As(err, &apiError) && validRuntimeToken(apiError.ErrorCode(), 64) {
+		return fmt.Errorf("%w: %s (%s)", ErrAWSKMSOperationFailed, operation, apiError.ErrorCode())
+	}
+	return fmt.Errorf("%w: %s (%T)", ErrAWSKMSOperationFailed, operation, err)
 }
 
 func signingAlgorithmNames(algorithms []types.SigningAlgorithmSpec) []string {
