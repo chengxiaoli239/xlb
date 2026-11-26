@@ -116,6 +116,25 @@ ops/aws-cli --profile xlb-ops --region us-west-2 ssm start-session \
 
 在本机第二个终端通过 `https://127.0.0.1:19443/healthz` 使用隔离 test CA 和 client cert 验证 TLS、Agent 身份及健康状态；禁止 `curl -k`。若本机端口冲突，改用另一个仅本机监听的高端口。停止 session 后确认该端口不可达。所有请求使用稳定 ID，日志只记 request/node/peer ID 与状态，不打印凭证、私钥、profile 或订阅 URL。
 
+### C.1 生成短期 M6 测试证书包（本地，仅在隔离节点 plan 已批准后使用）
+
+`apps/node-agent/cmd/node-lab-certificates` 只接受由 KMS `GetPublicKey` 导出的 P-256 DER 公钥文件；它不会调用 AWS。用项目包装器导出公钥，再由本地工具签发测试 CA 下的 Node Agent server certificate 和 admin mTLS client certificate：
+
+```bash
+PUBLIC_KEY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/xlb-kms-public-key.XXXXXX")"
+chmod 700 "$PUBLIC_KEY_DIR"
+ops/aws-cli --profile xlb-ops --region us-west-2 kms get-public-key \
+  --key-id "$KMS_KEY_ARN" --query PublicKey --output text \
+  | python3 -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read()))' \
+  > "$PUBLIC_KEY_DIR/node-kms-public-key.der"
+(cd apps/node-agent && go run ./cmd/node-lab-certificates \
+  --kms-public-key-der "$PUBLIC_KEY_DIR/node-kms-public-key.der" \
+  --kms-key-arn "$KMS_KEY_ARN" --node-id "$NODE_ID" --node-public-ip "$NODE_PUBLIC_IPV4")
+rm -rf "$PUBLIC_KEY_DIR"
+```
+
+工具生成 owner-only 临时目录，Node Agent leaf 的公钥与 KMS 公钥相同，SAN 同时覆盖节点公网 IPv4 与 `127.0.0.1`，有效期 2 小时；临时 CA 私钥不落盘，admin client key 为 mode `0600`。manifest 记录 KMS ARN、node ID、SAN 与文件名。证书只用于隔离测试，测试结束后删除生成目录；不得复制到生产配置或提交仓库。
+
 运行 Android remote-node instrumentation 前保持该 SSM session 活动，并将启动器的 control origin 设为 `https://127.0.0.1:19443`。Android runner 会在专用 AVD 上建立 `adb reverse tcp:19443 tcp:19443`，结束后清理自己创建的映射；若该 AVD 已有本地端口映射则拒绝覆盖。节点 TLS leaf 需同时包含数据面公网 endpoint 与 `127.0.0.1` SAN，Android 才能在 SSM 转发的管理连接上验证同一 CA 下的节点身份。之后通过 `apps/android/scripts/test-remote-node-agent-member-tun-emulator.sh` 提供 serial、node ID、control origin、bridge endpoint、节点公网 egress IPv4，以及 CA/管理 client cert/key 文件路径。测试材料只在临时主机目录和专用 AVD app cache 短暂存在，runner 退出时清理。
 
 ### D. M5/M6 实测门

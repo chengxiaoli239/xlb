@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-27）
 
+- **M6 KMS 对应短期节点/管理端测试证书生成器（2026-11-27，离线验收）**：新增 `apps/node-agent/cmd/node-lab-certificates`，将经 `ops/aws-cli kms get-public-key` 导出的 P-256 DER 公钥与全球公网 IPv4 绑定，生成 CA 签发的 Node Agent server chain（SAN 包含公网 endpoint 与 `127.0.0.1`）、临时 admin client certificate/key 及身份 manifest。KMS 节点私钥由 KMS 持有不导出；CA 私钥只留内存，输出目录 mode `0700`、admin client key mode `0600`、证书有效期 2 小时。`go test -race ./cmd/node-lab-certificates`、`go vet`、`go build` 通过，覆盖证书链、SAN、key-match、EKU、权限和错误输入。此生成器不调用 AWS；实际 KMS 公钥导出和 Node Agent Sign 首次运行仍依赖恢复的 xlb-ops 会话，未生成、使用或提交任何证书私钥，也未关闭 M6/上线门。
+
 - **M6 Android remote-runner 输入守卫回归（2026-11-27，离线与 hosted CI）**：新增 fake-adb 测试，验证非公网预期出口地址、非 HTTPS control origin 与注入型 node ID 均在联系 ADB 前失败；复用的 disposable AVD guard 同时回归缺少 serial、多设备、offline 物理设备、错误 serial、非专用 AVD 和伪装硬件身份。两组脚本在本机通过；主线 CI `45886280116` 全绿，Android job 实际执行这些 guard 后再构建 APK/AndroidTest、JVM、lint。该项只证明测试启动参数与设备选择失败关闭，不建立隧道、不调用 AWS，也不增加首发门，仍为 5/12。
 
 - **MySQL 8.4 Node Peer Provisioning 测试失败诊断增强（2026-11-27）**：主线 CI `45881725783` 首次运行中 MySQL 8.4 的 `NodePeerProvisioningTest::test_http_provisioning_interoperates_with_go_node_agent_over_tls_13_mtls` 偶发观察到 outbox 状态 `retry`，同 run 对失败 job 重跑后通过，CI 总体 success；PostgreSQL 和普通 Laravel suite 同 run 通过。修正测试断言，在 outbox 确认状态失败时同时输出 peer/outbox 状态、安全错误码和尝试次数，避免只有 `retry` 的无上下文失败。定向 Laravel suite 9/9、Pint 通过。未重现或修复该偶发运行时原因，不据一次重跑宣称 MySQL 路径稳定；Node Agent/会员数据面、首发门均不变。
