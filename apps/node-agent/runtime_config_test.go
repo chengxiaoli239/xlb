@@ -122,6 +122,12 @@ func TestProductionRuntimeV2RequiresQuotaAuthorityConfiguration(t *testing.T) {
 			},
 		},
 		{
+			name: "grant above configured limit",
+			mutate: func(config map[string]any) {
+				config["quota_authority"].(map[string]any)["grant_bytes"] = maxRuntimeQuotaGrantBytes + 1
+			},
+		},
+		{
 			name: "outbox limit above recovery bound",
 			mutate: func(config map[string]any) {
 				config["quota_authority"].(map[string]any)["outbox_limit"] = 1001

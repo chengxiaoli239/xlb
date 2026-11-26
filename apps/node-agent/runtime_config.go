@@ -25,6 +25,7 @@ const (
 	RuntimeProfileMihomoBridge     = "mihomo-bridge-v1"
 	RuntimeProbeUnavailable        = "unavailable"
 	RuntimeProbeHTTPSCanary        = "https-canary"
+	maxRuntimeQuotaGrantBytes       = 64 << 20
 	maxNodeRuntimeConfigBytes      = 64 * 1024
 )
 
@@ -136,7 +137,8 @@ func validateQuotaAuthorityRuntimeConfig(config QuotaAuthorityRuntimeConfig) err
 	if err != nil || config.Endpoint == "" || strings.TrimSpace(config.Endpoint) != config.Endpoint ||
 		endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" ||
 		endpoint.ForceQuery || endpoint.Fragment != "" || endpoint.Opaque != "" ||
-		(config.GrantBytes < 1) || config.OutboxLimit < 1 || config.OutboxLimit > 1000 ||
+		(config.GrantBytes < 1) || config.GrantBytes > maxRuntimeQuotaGrantBytes ||
+		config.OutboxLimit < 1 || config.OutboxLimit > 1000 ||
 		config.TimeoutSeconds < 1 || config.TimeoutSeconds > 60 {
 		return ErrInvalidNodeRuntimeConfig
 	}
