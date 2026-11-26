@@ -18,7 +18,7 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-26）
 
-**2026-11-26 当前 checkout 与外部会话复核**：本轮起始主线 `5f37bda` 与 `origin/main` 同步，阶段提交包括 Node Agent runtime/quota wiring、PHP mTLS credential hardening 和当前 `472f58e8877bbcc271c1dcf016b0eb3b234751b5`，CI `45763868668` success，工作区干净。打开的 `codex/aws-kms-node-identity` worktree 在 `961406d`、无 upstream、落后主线多个提交，未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `session expired`，所以 AWS 资源状态未复核，无云写入。12 项首发门仍为 5/12（42%），不是工时或上线概率。下一项是 production quota mTLS identity 与真实 PHP fingerprint mapping 的材料核验；恢复 AWS 会话后先只读查找已有 KMS/IAM/节点证书材料，若需创建计费资源必须先单独核成本与授权。
+**2026-11-26 当前 checkout 与外部会话复核**：本轮起始主线 `5f37bda` 与 `origin/main` 同步，阶段提交包括 Node Agent runtime/quota wiring、PHP mTLS credential hardening 和当前 `59c5dc7096424f6feab8f69931f9d112371f7978`，CI `45764317401` success，工作区干净。打开的 `codex/aws-kms-node-identity` worktree 在 `961406d`、无 upstream、落后主线多个提交，未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `session expired`，所以 AWS 资源状态未复核，无云写入。12 项首发门仍为 5/12（42%），不是工时或上线概率。下一项是 production quota mTLS identity 与真实 PHP fingerprint mapping 的材料核验；恢复 AWS 会话后先只读查找已有 KMS/IAM/节点证书材料，若需创建计费资源必须先单独核成本与授权。
 
 **Node Agent 配额前置配置校验（2026-11-26，离线 Go）**：runtime v1 只允许隔离测试环境，production-shaped v2 则必须携带 quota authority HTTPS endpoint/CA、byte grant、有限 recovery batch 和有界 timeout。测试覆盖缺失/不安全端点、非法 CA、额度与上限越界。定向 runtime tests 49 项通过；Node Agent 全套 race 187 passed/5 packages、vet/build 通过。该阶段只校验未来接线的必需配置，尚未在 Agent executable 构造线上 quota authority 或 journal，也不打开 production mode；首发仍 5/12。
 
