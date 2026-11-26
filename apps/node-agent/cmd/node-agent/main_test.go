@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -414,6 +416,67 @@ func TestIsolatedRuntimeKeepsLoopbackDefaultsAndEnvironmentOverrides(t *testing.
 	}
 }
 
+func TestProductionRuntimeAssemblyBuildsLoopbackMTLSServersWithoutBinding(t *testing.T) {
+	config := productionNodeRuntimeConfig(t)
+	listeners, err := resolveNodeAgentListenAddresses(config, "", "", "")
+	if err != nil {
+		t.Fatalf("resolveNodeAgentListenAddresses error = %v", err)
+	}
+	store, err := openPeerStoreForRuntimeConfig(filepath.Join(t.TempDir(), "peer-store.json"),
+		config.Node.ID, 4, config)
+	if err != nil {
+		t.Fatalf("openPeerStoreForRuntimeConfig error = %v", err)
+	}
+	servers, err := buildRuntimeHTTPServers(context.Background(), config, listeners, store, testRuntimeNodeTLSIdentity(t))
+	if err != nil {
+		t.Fatalf("buildRuntimeHTTPServers error = %v", err)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("runtime server count = %d; want management and data-plane servers", len(servers))
+	}
+	if servers[0].Addr != listeners.management || servers[1].Addr != listeners.dataPlane {
+		t.Fatalf("runtime server addresses = %q/%q; want %q/%q",
+			servers[0].Addr, servers[1].Addr, listeners.management, listeners.dataPlane)
+	}
+	for _, server := range servers {
+		if server.Handler == nil || server.TLSConfig == nil || server.TLSConfig.MinVersion != tls.VersionTLS13 {
+			t.Fatalf("runtime server is missing its handler or TLS 1.3 config: %+v", server)
+		}
+	}
+	if servers[0].TLSConfig.ClientAuth != tls.RequireAndVerifyClientCert ||
+		servers[1].TLSConfig.ClientAuth != tls.RequireAnyClientCert {
+		t.Fatalf("management/data client-auth modes = %v/%v; want verified control and proof-checked data certificates",
+			servers[0].TLSConfig.ClientAuth, servers[1].TLSConfig.ClientAuth)
+	}
+	overriddenListeners := listeners
+	overriddenListeners.management = "127.0.0.1:19443"
+	if _, err := buildRuntimeHTTPServers(context.Background(), config, overriddenListeners, store,
+		testRuntimeNodeTLSIdentity(t)); err == nil {
+		t.Fatal("production runtime assembly accepted a listener override outside the trusted config")
+	}
+}
+
+func TestRuntimeAssemblyRejectsIsolatedWildcardListener(t *testing.T) {
+	config := agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV1,
+		Environment:   agent.RuntimeEnvironmentTest,
+		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
+		ProofBridge: agent.ProofBridgeRuntimeConfig{
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialTestFile,
+		},
+		ProfileRenderer: agent.ProfileRendererRuntimeConfig{Status: agent.RuntimeProfileUnavailable},
+	}
+	store, err := agent.OpenPeerStore(filepath.Join(t.TempDir(), "peer-store.json"), config.Node.ID, 4)
+	if err != nil {
+		t.Fatalf("OpenPeerStore error = %v", err)
+	}
+	listeners := nodeAgentListenAddresses{management: "0.0.0.0:9443", dataPlane: "127.0.0.1:9444"}
+	if _, err := buildRuntimeHTTPServers(context.Background(), config, listeners, store, agent.NodeTLSIdentity{}); err == nil {
+		t.Fatal("runtime assembly accepted a wildcard management listener")
+	}
+}
+
 func productionNodeRuntimeConfig(t *testing.T) agent.TrustedNodeRuntimeConfig {
 	t.Helper()
 	caPEM := testRuntimeRendererCA(t)
@@ -440,6 +503,54 @@ func productionNodeRuntimeConfig(t *testing.T) agent.TrustedNodeRuntimeConfig {
 			Endpoint: "https://quota.example.invalid", ServerCAPEM: caPEM,
 			GrantBytes: 4096, OutboxLimit: 100, TimeoutSeconds: 5,
 		},
+	}
+}
+
+func testRuntimeNodeTLSIdentity(t *testing.T) agent.NodeTLSIdentity {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(10), Subject: pkix.Name{CommonName: "runtime assembly test CA"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour), IsCA: true,
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCertificate, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(11), Subject: pkix.Name{CommonName: "runtime assembly test node"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCertificate, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafCertificate, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientCAs := x509.NewCertPool()
+	clientCAs.AddCert(caCertificate)
+	return agent.NodeTLSIdentity{
+		Certificate: tls.Certificate{
+			Certificate: [][]byte{leafDER, caDER}, PrivateKey: leafKey, Leaf: leafCertificate,
+		},
+		ClientCAs: clientCAs,
 	}
 }
 

@@ -77,7 +77,6 @@ func run() error {
 		return err
 	}
 
-	address := listeners.management
 	capacity, err := strconv.Atoi(os.Getenv("NODE_AGENT_CAPACITY"))
 	if err != nil || capacity < 1 || capacity > 4096 {
 		return errors.New("NODE_AGENT_CAPACITY must be between 1 and 4096")
@@ -92,37 +91,9 @@ func run() error {
 	}
 	defer processLock.Close()
 
-	dataAddress := listeners.dataPlane
-	probeAddress := listeners.probe
-	if err := validateProbeListenerAddress(probeAddress, address, dataAddress); err != nil {
-		return err
-	}
-	dataPlane, err := agent.NewRuntimeDataPlane(
-		context.Background(), store, agent.NewPublicTargetDialer(), identity, runtimeConfig,
-	)
+	servers, err := buildRuntimeHTTPServers(context.Background(), runtimeConfig, listeners, store, identity)
 	if err != nil {
 		return err
-	}
-	server, err := agent.NewMTLSServerWithNodeTLSIdentity(
-		address, identity, agent.NewHTTPHandler(store, dataPlane),
-	)
-	if err != nil {
-		return err
-	}
-	dataServer, err := agent.NewDataPlaneServerWithNodeTLSIdentity(dataAddress, identity.Certificate, dataPlane)
-	if err != nil {
-		return err
-	}
-	probeServer, err := newDataPlaneProbeServer(
-		probeAddress, nodeID, identity, runtimeConfig.DataPlaneProbe,
-	)
-	if err != nil {
-		return err
-	}
-
-	servers := []*http.Server{server, dataServer}
-	if probeServer != nil {
-		servers = append(servers, probeServer)
 	}
 	serveError := make(chan error, len(servers))
 	for _, httpServer := range servers {
@@ -157,6 +128,56 @@ type nodeAgentListenAddresses struct {
 	management string
 	dataPlane  string
 	probe      string
+}
+
+func buildRuntimeHTTPServers(ctx context.Context, runtimeConfig agent.TrustedNodeRuntimeConfig,
+	listeners nodeAgentListenAddresses, store *agent.PeerStore, identity agent.NodeTLSIdentity,
+) ([]*http.Server, error) {
+	var resolvedListeners nodeAgentListenAddresses
+	var err error
+	switch runtimeConfig.Environment {
+	case agent.RuntimeEnvironmentTest:
+		resolvedListeners, err = resolveNodeAgentListenAddresses(
+			runtimeConfig, listeners.management, listeners.dataPlane, listeners.probe,
+		)
+	case agent.RuntimeEnvironmentProd:
+		resolvedListeners, err = resolveNodeAgentListenAddresses(runtimeConfig, "", "", "")
+	default:
+		return nil, agent.ErrInvalidNodeRuntimeConfig
+	}
+	if err != nil || resolvedListeners != listeners {
+		return nil, agent.ErrInvalidNodeRuntimeConfig
+	}
+	if err := validateProbeListenerAddress(listeners.probe, listeners.management, listeners.dataPlane); err != nil {
+		return nil, err
+	}
+	dataPlane, err := agent.NewRuntimeDataPlane(ctx, store, agent.NewPublicTargetDialer(), identity, runtimeConfig)
+	if err != nil {
+		return nil, err
+	}
+	managementServer, err := agent.NewMTLSServerWithNodeTLSIdentity(
+		listeners.management, identity, agent.NewHTTPHandler(store, dataPlane),
+	)
+	if err != nil {
+		return nil, err
+	}
+	dataPlaneServer, err := agent.NewDataPlaneServerWithNodeTLSIdentity(
+		listeners.dataPlane, identity.Certificate, dataPlane,
+	)
+	if err != nil {
+		return nil, err
+	}
+	servers := []*http.Server{managementServer, dataPlaneServer}
+	probeServer, err := newDataPlaneProbeServer(
+		listeners.probe, runtimeConfig.Node.ID, identity, runtimeConfig.DataPlaneProbe,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if probeServer != nil {
+		servers = append(servers, probeServer)
+	}
+	return servers, nil
 }
 
 func resolveNodeTLSCertificateFiles(config agent.TrustedNodeRuntimeConfig,
