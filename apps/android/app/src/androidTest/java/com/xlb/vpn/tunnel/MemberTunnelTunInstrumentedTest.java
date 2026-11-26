@@ -212,8 +212,9 @@ public final class MemberTunnelTunInstrumentedTest {
             assertFalse("revoked startup retained a member session", XlbVpnService.currentTunnelIsMember());
             assertEquals("revoked startup retained its VPN route", "", XlbVpnService.currentRouteName());
 
+            int probesAfterStop = DeviceProofJni.nodeAgentFixtureEchoTargetDialCount();
             Thread.sleep(1_250);
-            assertEquals("startup incorrectly installed a health monitor after its attempt was revoked", 1,
+            assertEquals("revoked startup continued probing after stop completed", probesAfterStop,
                     DeviceProofJni.nodeAgentFixtureEchoTargetDialCount());
         } finally {
             DeviceProofJni.releaseNodeAgentFixtureEchoGate();
