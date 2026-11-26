@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	agent "xlb/node-agent"
 )
 
 const testKMSKeyARN = "arn:aws:kms:us-west-2:289069331089:key/dd29fe54-38e5-4094-8dde-0c1a1cd8c872"
@@ -57,6 +60,18 @@ func TestWriteCertificateBundleMatchesKMSPublicKeyAndSANDomains(t *testing.T) {
 		!containsExtendedKeyUsage(serverCertificate.ExtKeyUsage, x509.ExtKeyUsageServerAuth) ||
 		!containsExtendedKeyUsage(serverCertificate.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
 		t.Fatalf("node certificate extended key usage = %v, want server and client auth", serverCertificate.ExtKeyUsage)
+	}
+	quotaRoots := x509.NewCertPool()
+	quotaRoots.AddCert(ca)
+	quotaClientIdentity := tls.Certificate{
+		Certificate: [][]byte{serverCertificate.Raw, ca.Raw},
+		PrivateKey:  nodeKey,
+		Leaf:        serverCertificate,
+	}
+	if _, err := agent.NewHTTPQuotaAuthority(
+		"https://quota.example.invalid", quotaRoots, quotaClientIdentity, time.Second,
+	); err != nil {
+		t.Fatalf("generated KMS-backed node identity cannot authenticate as quota mTLS client: %v", err)
 	}
 	serverPublicKey, ok := serverCertificate.PublicKey.(*ecdsa.PublicKey)
 	if !ok || serverPublicKey.Curve != elliptic.P256() ||

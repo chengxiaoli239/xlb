@@ -18,7 +18,7 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-27）
 
-**2026-11-27 M6 隔离 Node Agent 证书 EKU 与 quota mTLS 要求对齐**：`node-lab-certificates` 生成的 KMS 对应 Node Agent leaf 现同时包含 TLS ServerAuth 与 quota-authority TLS ClientAuth EKU，满足 production-shaped `NewRuntimeDataPlane` 对反向 HTTPS/mTLS client identity 的本地构造校验；admin certificate 仍限定 ClientAuth。证书定向 race 测试、Node Agent 全量 race 217 项、vet/build 通过，主线提交 `9e26660` 的 CI `45896618347` 全绿。本修改只消除隔离证书夹具与 runtime 合同矛盾，不调用 KMS、不生成证书、不新增 AWS 资源，也不证明 live runtime/M6；门数保持 5/12。
+**2026-11-27 M6 隔离 Node Agent 证书 EKU 与 quota mTLS 要求对齐**：`node-lab-certificates` 生成的 KMS 对应 Node Agent leaf 现同时包含 TLS ServerAuth 与 quota-authority TLS ClientAuth EKU，满足 production-shaped `NewRuntimeDataPlane` 对反向 HTTPS/mTLS client identity 的本地构造校验；回归还把该 leaf 和匹配 signer 传入 `NewHTTPQuotaAuthority` 的证书校验器，确认客户端用途被接受而不发起网络请求；admin certificate 仍限定 ClientAuth。证书定向 race 测试、Node Agent 全量 race 217 项、vet/build 通过，主线提交 `9e26660` 的 CI `45896618347` 全绿。本修改只消除隔离证书夹具与 runtime 合同矛盾，不调用 KMS、不生成证书、不新增 AWS 资源，也不证明 live runtime/M6；门数保持 5/12。
 
 **2026-11-27 Node Agent production 启动接线与信任文件权限闭环（离线，CI 全绿）**：`cmd/node-agent` 现有显式 production mode，要求可信 `xlb-node-runtime/v2`、匹配 node ID、KMS key ARN、loopback listener 和完整 renderer/quota 配置；容量、本地 peer store 和进程锁在 KMS signer 前验证。Unix 信任文件仅接受 root/服务 UID 所有且路径祖先不可由非特权用户写入的 regular file，Windows 目前 fail closed。Node Agent race 217 项/6 packages、vet/build 通过，主线提交 `a99e728` 的 CI `45895895138` 全绿；当前 checkout 是 macOS，所以 Windows cross-build 被仓库既有 `peerstore.go` 使用 Unix `syscall.Flock` 阻断，本阶段未改 Windows peer-store 支持。生产 server assembly 单测不绑定 socket、不调用 AWS；环境中 `xlb-ops` STS 仍过期，因此没有 live KMS startup 或远端资源盘点。总体 5/12、Node Agent 1/2 不变；未验证 external ingress/TLS passthrough、PHP trust/fingerprint mapping、真实会员 profile 或撤权回执。
 
