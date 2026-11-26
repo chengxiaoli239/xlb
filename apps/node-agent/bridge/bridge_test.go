@@ -154,6 +154,14 @@ func TestSOCKSBridgeKeepsSessionForActiveTunnelsAndReleasesIdleSession(t *testin
 	transientFailureObserved := heartbeatCount.Load()
 	waitForHeartbeatCount(t, &heartbeatCount, transientFailureObserved)
 	waitForActiveSessions(t, store, 1)
+	probePayload := []byte("tunnel remains usable after transient heartbeat failure")
+	if _, err := revokedTunnel.Write(probePayload); err != nil {
+		t.Fatal(err)
+	}
+	probeReply := make([]byte, len(probePayload))
+	if _, err := io.ReadFull(revokedTunnel, probeReply); err != nil || !bytes.Equal(probeReply, probePayload) {
+		t.Fatalf("transient heartbeat failure interrupted active tunnel: reply=%q err=%v", probeReply, err)
+	}
 
 	rejectHeartbeats.Store(true)
 	lastSuccessfulHeartbeat := heartbeatCount.Load()
