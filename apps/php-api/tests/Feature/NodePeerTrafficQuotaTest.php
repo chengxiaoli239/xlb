@@ -25,11 +25,13 @@ final class NodePeerTrafficQuotaTest extends TestCase
         $this->defaultDatabaseConnection = (string) config('database.default');
         $databaseRaceTest = $this->name() === 'test_concurrent_request_id_reuse_by_another_peer_returns_conflict';
         $databaseName = (string) config('database.connections.'.$this->defaultDatabaseConnection.'.database');
+        $databaseUrl = config('database.connections.'.$this->defaultDatabaseConnection.'.url');
         $this->testDatabaseConnection = $databaseRaceTest
             && env('XLB_RUN_QUOTA_DB_RACE_TEST') === '1'
             && app()->environment('testing')
             && in_array($this->defaultDatabaseConnection, ['mysql', 'pgsql'], true)
             && $databaseName === 'xlb_test'
+            && ($databaseUrl === null || $databaseUrl === '')
             ? $this->defaultDatabaseConnection
             : 'sqlite';
         if ($this->testDatabaseConnection === 'sqlite') {
