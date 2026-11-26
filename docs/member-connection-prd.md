@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-26）
 
+- **M8/M10 proof bridge 活动会话与空闲释放（2026-11-26，本地 Go race）**：bridge 现按活动 SOCKS TCP 隧道数维护 peer session；至少一条流仍活动时继续 20 秒心跳，最后一条流结束后向 Agent 发送 disconnect、关闭 idle HTTP/2 连接并停止续租；空闲后重连会建立新 session。回归覆盖两个并发流、关闭其中一个后继续心跳、最后流关闭后立即释放 session、空闲期间无续租及随后重连。`go test -race ./...` 192 项/5 packages、`go vet ./...`、`go build ./...` 通过；该场景 race test 连续运行 20 次通过。证据仅限本地隔离 Agent 与合成身份，不证明生产节点稳定性、真实会员隧道或撤权断流；首发放行门仍为 5/12（42%）。下一步继续覆盖网络中断/服务端拒绝时的客户端错误恢复，并等待真实 endpoint、CA/mTLS 与会员 profile 完成双机验收。
+
 - **隔离验收资源成本与回收原则（2026-11-26）**：用户确认必要的多日隔离测试资源费用可以接受，并要求把需要云资源的验证集中到同一窗口、优先复用已有实验 IAM/其他仍可使用的资源，避免无必要的重复创建和释放；业务服务器不得纳入测试资源或回收范围。新建资源仍须先核对专用标签、账号/区域、实例范围、TTL、回收对象及费用归属，测试后按资源清单核验回收。该原则用于排期和成本管理，不把隔离资源测试记作生产上线验收。
 
 - **Q2 Live AWS KMS P-256 signer 实测通过并进入隔离验收窗口（2026-11-26）**：在用户授权持续费用及释放后，临时创建 `us-west-2` ECC_NIST_P256/SIGN_VERIFY key `dd29fe54-38e5-4094-8dde-0c1a1cd8c872`，运行 opt-in `TestLiveKMSNodeTLSIdentityCompletesTLS13Handshake` 实际完成 AWS SDK `GetPublicKey`/`Sign` 与本地 TLS 1.3 握手，测试 PASS（3.39 秒）。按当时验收计划先提交了 7 天待删除，用户随后说明资源可为集中的多日验收保留；因此当时取消待删除并重新启用同一 key，隔离 Node Agent 验收开始前的资源快照为 `Enabled`。后续 Node Agent 隔离验收完成后已再次设为 `PendingDeletion`，当前删除日期见紧邻下一条记录。不会重新创建 key，相关验收集中使用同一 key；待删除期间持续计费。Cost Explorer 对 2026-11-01 至 2026-11-27（结束日期不含）报告 AWS Key Management Service 在 `us-west-2` 的月度区域/服务汇总约 **USD 0.000048**；数据有延迟，不是该 key 的独立成本或最终账单。只生成临时本机 CA/证书并由 Go test 自动清理，未保存私钥、未创建节点/实例、未改 IAM 或访问真实会员流量。该结果验证“Node Agent 能否使用真实 AWS KMS P-256 signer 完成 TLS 签名”的隔离集成问题，但不关闭生产节点身份、生产证书/CA、member profile、双真机会员链路或撤权回执门，放行门仍为 5/12（42%）。

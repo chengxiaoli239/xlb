@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	agent "xlb/node-agent"
@@ -34,15 +33,20 @@ type Config struct {
 }
 
 type Bridge struct {
-	identity      agent.DeviceCertificateIdentity
-	remoteURL     *url.URL
-	client        *http.Client
-	transport     *http.Transport
-	ctx           context.Context
-	cancel        context.CancelFunc
-	closeOnce     sync.Once
-	closeErr      error
-	connected     atomic.Bool
+	identity  agent.DeviceCertificateIdentity
+	remoteURL *url.URL
+	client    *http.Client
+	transport *http.Transport
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closeOnce sync.Once
+	closeErr  error
+	// Lock order is sessionMu then heartbeatMu; heartbeat I/O releases sessionMu first.
+	sessionMu     sync.Mutex
+	heartbeatMu   sync.Mutex
+	activeTunnels int
+	connected     bool
+	heartbeatTick time.Duration
 	lifecycleMu   sync.Mutex
 	handlers      sync.WaitGroup
 	localClients  map[net.Conn]struct{}
@@ -54,6 +58,13 @@ type Bridge struct {
 }
 
 func New(config Config) (*Bridge, error) {
+	return newWithHeartbeatInterval(config, 20*time.Second)
+}
+
+func newWithHeartbeatInterval(config Config, heartbeatInterval time.Duration) (*Bridge, error) {
+	if heartbeatInterval <= 0 {
+		return nil, errors.New("bridge heartbeat interval must be positive")
+	}
 	listenHost, _, err := net.SplitHostPort(config.ListenAddress)
 	if err != nil || !isLoopbackHost(listenHost) {
 		return nil, errors.New("bridge listener must use a valid loopback address")
@@ -125,6 +136,7 @@ func New(config Config) (*Bridge, error) {
 		transport: transport, ctx: ctx, cancel: cancel,
 		localClients: make(map[net.Conn]struct{}),
 		localUser:    []byte(config.LocalUsername), localPass: []byte(config.LocalPassword),
+		heartbeatTick: heartbeatInterval,
 	}
 	go bridge.heartbeatLoop()
 	return bridge, nil
@@ -202,10 +214,9 @@ func (bridge *Bridge) Close() error {
 		case <-done:
 		case <-time.After(2 * time.Second):
 		}
-		if bridge.connected.Load() {
-			bridge.disconnectRemoteSession()
-		}
-		bridge.transport.CloseIdleConnections()
+		bridge.sessionMu.Lock()
+		bridge.closeErr = bridge.disconnectIdleSessionLocked()
+		bridge.sessionMu.Unlock()
 		bridge.credentialsMu.Lock()
 		for index := range bridge.localUser {
 			bridge.localUser[index] = 0
@@ -218,51 +229,90 @@ func (bridge *Bridge) Close() error {
 	return bridge.closeErr
 }
 
-func (bridge *Bridge) disconnectRemoteSession() {
+func (bridge *Bridge) disconnectRemoteSession() error {
 	requestContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestContext, http.MethodPost,
 		bridge.endpoint("/v1/tunnel/disconnect", nil), nil)
 	if err != nil {
-		bridge.closeErr = err
-		return
+		return err
 	}
 	response, err := bridge.client.Do(request)
 	if err != nil {
-		bridge.closeErr = err
-		return
+		return err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNotFound {
-		bridge.closeErr = fmt.Errorf("node tunnel session disconnect returned status %d", response.StatusCode)
+		return fmt.Errorf("node tunnel session disconnect returned status %d", response.StatusCode)
+	}
+	return nil
+}
+
+func (bridge *Bridge) disconnectIdleSessionLocked() error {
+	bridge.heartbeatMu.Lock()
+	defer bridge.heartbeatMu.Unlock()
+	var err error
+	if bridge.connected {
+		bridge.connected = false
+		err = bridge.disconnectRemoteSession()
+	}
+	bridge.transport.CloseIdleConnections()
+	return err
+}
+
+func (bridge *Bridge) finishTunnel() {
+	bridge.sessionMu.Lock()
+	defer bridge.sessionMu.Unlock()
+	if bridge.activeTunnels > 0 {
+		bridge.activeTunnels--
+	}
+	if bridge.activeTunnels == 0 {
+		_ = bridge.disconnectIdleSessionLocked()
 	}
 }
 
+func (bridge *Bridge) beginTunnel() error {
+	bridge.sessionMu.Lock()
+	defer bridge.sessionMu.Unlock()
+	if bridge.ctx.Err() != nil {
+		return errors.New("bridge is closed")
+	}
+	bridge.activeTunnels++
+	return nil
+}
+
 func (bridge *Bridge) heartbeatLoop() {
-	ticker := time.NewTicker(20 * time.Second)
+	ticker := time.NewTicker(bridge.heartbeatTick)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-bridge.ctx.Done():
 			return
 		case <-ticker.C:
-			if !bridge.connected.Load() {
+			bridge.sessionMu.Lock()
+			if !bridge.connected || bridge.activeTunnels == 0 {
+				bridge.sessionMu.Unlock()
 				continue
 			}
+			bridge.heartbeatMu.Lock()
+			bridge.sessionMu.Unlock()
 			request, err := http.NewRequestWithContext(bridge.ctx, http.MethodPost,
 				bridge.endpoint("/v1/tunnel/heartbeat", nil), nil)
 			if err != nil {
+				bridge.heartbeatMu.Unlock()
 				continue
 			}
 			response, err := bridge.client.Do(request)
 			if err != nil {
 				bridge.transport.CloseIdleConnections()
+				bridge.heartbeatMu.Unlock()
 				continue
 			}
 			response.Body.Close()
 			if response.StatusCode != http.StatusOK {
 				bridge.transport.CloseIdleConnections()
 			}
+			bridge.heartbeatMu.Unlock()
 		}
 	}
 }
@@ -371,6 +421,10 @@ func (bridge *Bridge) requiresSOCKSUserPassword() bool {
 }
 
 func (bridge *Bridge) openTunnel(local net.Conn, host string, port uint16) error {
+	if err := bridge.beginTunnel(); err != nil {
+		return err
+	}
+	defer bridge.finishTunnel()
 	context, cancel := context.WithCancel(bridge.ctx)
 	defer cancel()
 	pipeReader, pipeWriter := io.Pipe()
@@ -403,7 +457,9 @@ func (bridge *Bridge) openTunnel(local net.Conn, host string, port uint16) error
 		_ = pipeWriter.Close()
 		return fmt.Errorf("node data plane rejected the device connection: %d", response.StatusCode)
 	}
-	bridge.connected.Store(true)
+	bridge.sessionMu.Lock()
+	bridge.connected = true
+	bridge.sessionMu.Unlock()
 	if err := writeSOCKSReply(local, 0); err != nil {
 		cancel()
 		_ = pipeReader.CloseWithError(err)

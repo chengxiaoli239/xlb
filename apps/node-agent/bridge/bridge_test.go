@@ -16,15 +16,17 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	agent "xlb/node-agent"
 )
 
-func TestSOCKSBridgeUsesDeviceProofAndForwardsTCPOverHTTP2(t *testing.T) {
+func TestSOCKSBridgeKeepsSessionForActiveTunnelsAndReleasesIdleSession(t *testing.T) {
 	store, err := agent.OpenPeerStore(filepath.Join(t.TempDir(), "agent-state.json"), "node-bridge-test", 2)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +57,15 @@ func TestSOCKSBridgeUsesDeviceProofAndForwardsTCPOverHTTP2(t *testing.T) {
 		t.Fatal(err)
 	}
 	serverCertificate, roots := newBridgeTestServerCertificate(t)
-	server := httptest.NewUnstartedServer(plane.Handler())
+	var heartbeatCount atomic.Int32
+	planeHandler := plane.Handler()
+	serverHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/v1/tunnel/heartbeat" {
+			heartbeatCount.Add(1)
+		}
+		planeHandler.ServeHTTP(writer, request)
+	})
+	server := httptest.NewUnstartedServer(serverHandler)
 	server.EnableHTTP2 = true
 	server.Config.ConnContext = plane.ConnContext
 	server.Config.ConnState = plane.ConnState
@@ -72,9 +82,9 @@ func TestSOCKSBridgeUsesDeviceProofAndForwardsTCPOverHTTP2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := New(Config{
+	proxy, err := newWithHeartbeatInterval(Config{
 		ListenAddress: "127.0.0.1:0", RemoteURL: server.URL, ServerRoots: roots, DeviceCertificate: deviceCertificate,
-	})
+	}, 10*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,50 +106,120 @@ func TestSOCKSBridgeUsesDeviceProofAndForwardsTCPOverHTTP2(t *testing.T) {
 		}
 	})
 
-	local, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second)
+	first, connectReply := openSOCKSTunnel(t, listener.Addr().String(), "first bridge stream")
+	second, _ := openSOCKSTunnel(t, listener.Addr().String(), "second bridge stream")
+	if count := binary.BigEndian.Uint16(connectReply[8:]); count != 0 {
+		t.Fatalf("SOCKS bound port=%d; want zero placeholder", count)
+	}
+	waitForHeartbeatCount(t, &heartbeatCount, 0)
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	heartbeatsBeforeClose := heartbeatCount.Load()
+	waitForHeartbeatCount(t, &heartbeatCount, heartbeatsBeforeClose)
+	waitForActiveSessions(t, store, 1)
+
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForNoActiveSessions(t, store)
+	heartbeatsWhenIdle := heartbeatCount.Load()
+	time.Sleep(60 * time.Millisecond)
+	if got := heartbeatCount.Load(); got != heartbeatsWhenIdle {
+		t.Fatalf("bridge sent %d heartbeats after its last local tunnel closed", got-heartbeatsWhenIdle)
+	}
+
+	reconnected, _ := openSOCKSTunnel(t, listener.Addr().String(), "reconnected bridge stream")
+	waitForActiveSessions(t, store, 1)
+	if err := reconnected.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForNoActiveSessions(t, store)
+	if err := proxy.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func openSOCKSTunnel(t *testing.T, address, payload string) (net.Conn, [10]byte) {
+	t.Helper()
+	local, err := net.DialTimeout("tcp", address, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer local.Close()
 	_ = local.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := local.Write([]byte{5, 1, 0}); err != nil {
+		local.Close()
 		t.Fatal(err)
 	}
 	var methodReply [2]byte
 	if _, err := io.ReadFull(local, methodReply[:]); err != nil || methodReply != [2]byte{5, 0} {
+		local.Close()
 		t.Fatalf("SOCKS method reply=%v err=%v", methodReply, err)
 	}
 	host := []byte("echo.test")
 	connect := append([]byte{5, 1, 0, 3, byte(len(host))}, host...)
 	connect = append(connect, 1, 187)
 	if _, err := local.Write(connect); err != nil {
+		local.Close()
 		t.Fatal(err)
 	}
 	var connectReply [10]byte
 	if _, err := io.ReadFull(local, connectReply[:]); err != nil {
+		local.Close()
 		t.Fatal(err)
 	}
 	if connectReply[1] != 0 {
+		local.Close()
 		t.Fatalf("SOCKS CONNECT failed with reply code %d", connectReply[1])
 	}
-	payload := []byte("proof-bound local bridge test")
-	if _, err := local.Write(payload); err != nil {
+	payloadBytes := []byte(payload)
+	if _, err := local.Write(payloadBytes); err != nil {
+		local.Close()
 		t.Fatal(err)
 	}
-	received := make([]byte, len(payload))
+	received := make([]byte, len(payloadBytes))
 	if _, err := io.ReadFull(local, received); err != nil {
+		local.Close()
 		t.Fatal(err)
 	}
-	if !bytes.Equal(received, payload) {
-		t.Fatalf("bridged response=%q; want %q", received, payload)
+	if !bytes.Equal(received, payloadBytes) {
+		local.Close()
+		t.Fatalf("bridged response=%q; want %q", received, payloadBytes)
 	}
-	if count := binary.BigEndian.Uint16(connectReply[8:]); count != 0 {
-		t.Fatalf("SOCKS bound port=%d; want zero placeholder", count)
+	_ = local.SetDeadline(time.Time{})
+	return local, connectReply
+}
+
+func waitForHeartbeatCount(t *testing.T, count *atomic.Int32, before int32) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if count.Load() > before {
+			return
+		}
+		time.Sleep(time.Millisecond)
 	}
-	if err := proxy.Close(); err != nil {
+	t.Fatalf("bridge heartbeat count did not exceed %d", before)
+}
+
+func waitForActiveSessions(t *testing.T, store *agent.PeerStore, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, err := store.RuntimeSnapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.ActiveSessions == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snapshot, err := store.RuntimeSnapshot()
+	if err != nil {
 		t.Fatal(err)
 	}
-	waitForNoActiveSessions(t, store)
+	t.Fatalf("active sessions=%d; want %d", snapshot.ActiveSessions, want)
 }
 
 func waitForNoActiveSessions(t *testing.T, store *agent.PeerStore) {
