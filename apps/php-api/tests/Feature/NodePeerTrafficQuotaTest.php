@@ -19,21 +19,36 @@ final class NodePeerTrafficQuotaTest extends TestCase
 
     private string $testDatabaseConnection;
 
+    private ?string $raceDatabaseName = null;
+
+    private ?string $originalDatabaseName = null;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->defaultDatabaseConnection = (string) config('database.default');
         $databaseRaceTest = $this->name() === 'test_concurrent_request_id_reuse_by_another_peer_returns_conflict';
+        $this->testDatabaseConnection = 'sqlite';
         $databaseName = (string) config('database.connections.'.$this->defaultDatabaseConnection.'.database');
+        $databaseHost = (string) config('database.connections.'.$this->defaultDatabaseConnection.'.host');
         $databaseUrl = config('database.connections.'.$this->defaultDatabaseConnection.'.url');
-        $this->testDatabaseConnection = $databaseRaceTest
+        $canCreateRaceDatabase = $databaseRaceTest
             && env('XLB_RUN_QUOTA_DB_RACE_TEST') === '1'
             && app()->environment('testing')
             && in_array($this->defaultDatabaseConnection, ['mysql', 'pgsql'], true)
             && $databaseName === 'xlb_test'
-            && ($databaseUrl === null || $databaseUrl === '')
-            ? $this->defaultDatabaseConnection
-            : 'sqlite';
+            && in_array($databaseHost, ['127.0.0.1', 'localhost', '::1'], true)
+            && ($databaseUrl === null || $databaseUrl === '');
+        if ($canCreateRaceDatabase) {
+            $this->originalDatabaseName = $databaseName;
+            $this->raceDatabaseName = 'xlb_quota_race_'.Str::lower(Str::random(12));
+            $quotedDatabaseName = $this->defaultDatabaseConnection === 'mysql'
+                ? '`'.$this->raceDatabaseName.'`'
+                : '"'.$this->raceDatabaseName.'"';
+            DB::connection($this->defaultDatabaseConnection)->statement('CREATE DATABASE '.$quotedDatabaseName);
+            config(['database.connections.'.$this->defaultDatabaseConnection.'.database' => $this->raceDatabaseName]);
+            $this->testDatabaseConnection = $this->defaultDatabaseConnection;
+        }
         if ($this->testDatabaseConnection === 'sqlite') {
             $path = tempnam(sys_get_temp_dir(), 'xlb-quota-');
             $this->assertNotFalse($path);
@@ -55,6 +70,14 @@ final class NodePeerTrafficQuotaTest extends TestCase
     protected function tearDown(): void
     {
         DB::purge($this->testDatabaseConnection);
+        if ($this->raceDatabaseName !== null && $this->originalDatabaseName !== null) {
+            config(['database.connections.'.$this->defaultDatabaseConnection.'.database' => $this->originalDatabaseName]);
+            DB::purge($this->defaultDatabaseConnection);
+            $quotedDatabaseName = $this->defaultDatabaseConnection === 'mysql'
+                ? '`'.$this->raceDatabaseName.'`'
+                : '"'.$this->raceDatabaseName.'"';
+            DB::connection($this->defaultDatabaseConnection)->statement('DROP DATABASE IF EXISTS '.$quotedDatabaseName);
+        }
         if ($this->databasePath !== null && is_file($this->databasePath)) {
             unlink($this->databasePath);
         }
