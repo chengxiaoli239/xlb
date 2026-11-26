@@ -318,6 +318,7 @@ func TestPEMNodeTLSCertificateProviderRejectsNonCertificateCABlocks(t *testing.T
 		t.Fatal(err)
 	}
 	inputs := map[string][]byte{
+		"leading junk": append([]byte("unexpected leading content\n"), clientCAPEM...),
 		"private key block": append(append([]byte(nil), clientCAPEM...),
 			pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyDER})...),
 		"unknown PEM block": append(append([]byte(nil), clientCAPEM...),

@@ -119,8 +119,15 @@ func readNodeTLSCertificateFile(path string) ([]byte, error) {
 func parseNodeTLSCertificatePEM(contents []byte) ([][]byte, []*x509.Certificate, error) {
 	var certificates [][]byte
 	var parsedCertificates []*x509.Certificate
-	for len(bytes.TrimSpace(contents)) > 0 {
-		block, remaining := pem.Decode(bytes.TrimSpace(contents))
+	for {
+		contents = bytes.TrimSpace(contents)
+		if len(contents) == 0 {
+			break
+		}
+		if !bytes.HasPrefix(contents, []byte("-----BEGIN ")) {
+			return nil, nil, ErrInvalidKMSNodeTLSIdentity
+		}
+		block, remaining := pem.Decode(contents)
 		if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
 			return nil, nil, ErrInvalidKMSNodeTLSIdentity
 		}
