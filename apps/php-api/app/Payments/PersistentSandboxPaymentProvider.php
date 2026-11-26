@@ -104,8 +104,9 @@ final class PersistentSandboxPaymentProvider implements PaymentProvider
         $events = $rows->map(fn (object $row): ?ProviderPaymentEvent => $this->eventFromRow($row))
             ->filter(fn (?ProviderPaymentEvent $event): bool => $event !== null && $event->occurredAt >= $from && $event->occurredAt <= $until)
             ->values()->all();
+        $nextCursor = $rows->count() === 500 ? $rows->last()->event_id : null;
 
-        return new PaymentEventPage($events, count($events) === 500 ? $events[499]->eventId : null);
+        return new PaymentEventPage($events, $nextCursor);
     }
 
     private function eventFromRow(object $row): ?ProviderPaymentEvent

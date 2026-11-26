@@ -411,6 +411,59 @@ class ProviderPaymentEventLedgerTest extends TestCase
         $this->assertDatabaseHas('provider_payment_orders', ['merchant_order_id' => $orderId, 'status' => 'paid_pending_grant']);
     }
 
+    public function test_persistent_provider_paginates_past_events_outside_reconciliation_window(): void
+    {
+        $outsideWindow = new DateTimeImmutable('2020-01-01T00:00:00+00:00');
+        $rows = [];
+        for ($index = 0; $index < 500; $index++) {
+            $eventId = sprintf('a-old-%04d', $index);
+            $rows[] = [
+                'id' => (string) Str::uuid(),
+                'provider' => 'signed-sandbox',
+                'event_id' => $eventId,
+                'merchant_order_id' => 'old-order-'.$index,
+                'channel_transaction_id' => 'old-transaction-'.$index,
+                'amount_minor' => 2980,
+                'currency' => 'CNY',
+                'event_type' => PaymentEventType::Paid->value,
+                'occurred_at' => $outsideWindow->format(DATE_ATOM),
+                'decision' => PaymentDecision::Review->value,
+                'received_at' => $outsideWindow->format(DATE_ATOM),
+            ];
+        }
+        $eventAt = new DateTimeImmutable('2025-06-15T12:00:00+00:00');
+        $rows[] = [
+            'id' => (string) Str::uuid(),
+            'provider' => 'signed-sandbox',
+            'event_id' => 'z-in-window',
+            'merchant_order_id' => 'current-order',
+            'channel_transaction_id' => 'current-transaction',
+            'amount_minor' => 2980,
+            'currency' => 'CNY',
+            'event_type' => PaymentEventType::Paid->value,
+            'occurred_at' => $eventAt->format(DATE_ATOM),
+            'decision' => PaymentDecision::Review->value,
+            'received_at' => $eventAt->format(DATE_ATOM),
+        ];
+        DB::table('provider_payment_events')->insert($rows);
+
+        $provider = new PersistentSandboxPaymentProvider(self::SIGNING_KEY, new PersistentPaymentEventLedger);
+        $from = new DateTimeImmutable('2025-06-15T00:00:00+00:00');
+        $until = new DateTimeImmutable('2025-06-16T00:00:00+00:00');
+
+        $firstPage = $provider->listEvents($from, $until);
+        $secondPage = $provider->listEvents($from, $until, $firstPage->nextCursor);
+        $report = (new PaymentReconciliationService)->reconcile($provider, $from, $until);
+
+        $this->assertSame([], $firstPage->events);
+        $this->assertSame('a-old-0499', $firstPage->nextCursor);
+        $this->assertCount(1, $secondPage->events);
+        $this->assertSame('z-in-window', $secondPage->events[0]->eventId);
+        $this->assertNull($secondPage->nextCursor);
+        $this->assertSame(1, $report->count('matched'));
+        $this->assertSame(0, $report->count('missing_provider'));
+    }
+
     public function test_reconciliation_reports_fact_mismatches_and_local_only_events(): void
     {
         $orderId = $this->createOrder();
