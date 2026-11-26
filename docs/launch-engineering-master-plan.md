@@ -363,7 +363,7 @@ M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求�
 
 ### 0.3 一周 AI 冲刺目标与整体放行时间分开估计（2026-11-25 更新）
 
-此前“3–6 个月、约 2027-02 至 2027-05”是包含节点、商户、合规、staging 和试运行等待的低置信整体日历估计，并非 AI 编码工期。其“两周内外部材料到位”前提未满足，已撤销为当前上线预测。当前以 2026-12-01 为内部冲刺检查点，覆盖 Android + 网站/API 单服务商受控试点的代码、离线验收和候选审查；受控试点能否按期上线，仍取决于真实节点、商户沙箱、合规、受保护签名 Environment 和 staging 放行门。11-25 只读复核确认 Environment 数量为 0、`xlb-ops` STS 已过期、外部负责人尚未提供；因此没有证据支持受控试点的具体日历上线日期。
+此前“3–6 个月、约 2027-02 至 2027-05”是包含节点、商户、合规、staging 和试运行等待的低置信整体日历估计，并非 AI 编码工期。其“两周内外部材料到位”前提未满足，已撤销为当前上线预测。当前以 2026-12-01 为内部冲刺检查点，覆盖 Android + 网站/API 单服务商受控试点的代码、离线验收和候选审查；受控试点能否按期上线，仍取决于真实节点、商户沙箱、合规、正式签名候选与 staging 放行门。GitHub `android-release-candidate` 环境现已配置仓库 owner reviewer 和 main-only allowlist，但签名密钥/password/API origin、签名 APK 与 staging 均未就绪；历史 11-25 “Environment 数量为 0”记录已被 11-26 配置更新取代。因此当前仍无证据支持受控试点具体日历上线日期。
 
 | 交付范围 | 当前估计 | 说明 |
 | --- | --- | --- |
@@ -390,7 +390,7 @@ M11 隔离控制面负载工具已在主线，包含最多 100 个本地请求�
 | 象限 | 当前事项与证据 | 下一步、依赖与估时口径 |
 | --- | --- | --- |
 | Q1 重要且紧急 | **最大技术工作量与首发关键路径**是 Android M8/M6 生产形状闭环：服务端签发的 member grant/profile → 设备 proof bridge → Mihomo/TUN → 节点 peer 授权，再覆盖重连、停止、退款撤权和匹配节点回执。离线/AVD 与本轮 synthetic live protocol 已有证据，生产 gate 仍关闭，不能将它们当作会员线路验收。 | 继续核查 PHP member provisioning/mTLS 接线与 Node Agent production runtime 在真实 member profile 前可完成的最小实现；真实 profile/endpoint/CA/身份注入及匹配回执契约未齐前，不改生产 gate、不宣称会员线路通过。AWS 隔离节点已回收，无需重复创建同类资源。 |
-| Q1 重要且紧急 | **发布阻塞主要是外部放行工作**：GitHub `android-release-candidate` Environment 只读查询为 0 项；真实节点与撤权证据、商户沙箱契约、合规意见、staging/回滚窗口和负责人日期均未齐。 | 用户表示稍后提供外部放行负责人；当前继续无依赖离线工作。责任人到位后并行处理环境、材料、staging 与书面意见。us-west-2 XLB 隔离实验资源范围已完成只读盘点，无活动实验资源；全账号账单和生产资源状态不在该盘点范围。外部日历等待不可由 AI 编码压缩。 |
+| Q1 重要且紧急 | **发布阻塞主要是外部放行工作**：GitHub `android-release-candidate` Environment 已设置仓库 owner `chengxiaoli239` 为 required reviewer 且仅允许 `main`，只读 preflight 通过；正式签名密钥/password/API origin 仍未配置。真实节点与撤权证据、商户沙箱契约、合规意见、staging/回滚窗口和负责人日期也未齐。 | Environment 保护子项已完成；签名材料由凭据负责人经受控渠道提供，staging/书面材料由责任角色推进。当前继续无依赖离线工作。us-west-2 KMS key 及隔离 IAM/node 状态见顶部最新只读核验；不触碰业务服务器。外部日历等待不可由 AI 编码压缩。 |
 | Q2 重要但不紧急 | Android `MemberTunnelSessionTest.stopRequestDoesNotWaitAtAnyUnresponsiveStartupStage` 覆盖 fake runtime 最终返回时资源按 TUN/core→bridge→credentials→certificate 清理；2026-11-25 新增专用 AVD 服务级竞态回归，在 isolated Node Agent echo probe 阻塞时撤权并停止，确认无 `CONNECTED`、无保留 VPN/member session、health monitor 不再探测。完整 AVD harness `test-anonymous-recovery-emulator.sh` 退出码 0，主 instrumentation `OK (27 tests)`，Android JVM/lint/Debug build 通过。 | 此项服务级覆盖仅限 fake/local API、合成 Agent 与可取消 echo probe；不证明永久阻塞 JNI 可强制回收，也不证明真实会员节点或撤权断流。真实双机/节点验证仍走 Q1，材料到位后按回执核验。 |
 | Q2 重要但不紧急 | Node Agent proof bridge 现按活动 SOCKS 隧道数维护共享 peer session；并发流未全部结束时保持心跳，最后一条流结束即发送 disconnect 并关闭 idle HTTP/2 连接；本地 isolated 回归覆盖空闲释放、重新建连、heartbeat 503 后保留会话并继续重试，以及 heartbeat 401/403 后关闭桥接和活动隧道，race case 连续 20 次通过。 | 本地合成状态只证明客户端重试/失败关闭行为；真实网络切换、Android 后台/休眠、生产节点稳定性和会员撤权断流仍未验收。后续以真实 endpoint/CA/mTLS 在获批节点和两台会员真机验收。 |
 | Q2 重要但不紧急 | PHP quota reservation 在 peer 行锁后复查 request ID；同 peer 重试幂等及跨 peer request ID 唯一键冲突回归已有屏障。2026-11-26 复核发现旧 loopback host allowlist 不能证明数据库为 disposable，已改为单独 `XLB_QUOTA_DB_RACE_URL` 并移除测试内数据库创建/删除；CI 在一次性 service 中预建 run-scoped race DB，`xlb_test` 留给正常套件。主线 CI `45832866755` 全绿，MySQL 8.4/PostgreSQL 16 race compatibility 均成功；本机 Laravel suite 282 passed、2 skipped、2,517 assertions，Pint 通过 | SQLite `IMMEDIATE` 与无专用 DSN 的本地环境会跳过两 peer 锁竞争；hosted fixture 验收只证明 CI disposable service 里的 race 行为，不验证生产数据库压力或容量。 |
