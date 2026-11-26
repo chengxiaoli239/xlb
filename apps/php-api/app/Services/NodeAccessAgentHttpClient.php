@@ -7,6 +7,8 @@ use RuntimeException;
 
 class NodeAccessAgentHttpClient
 {
+    private const MAX_CREDENTIAL_FILE_BYTES = 1_048_576;
+
     /** @param array<string, mixed> $payload
      * @return array<string, mixed>
      */
@@ -86,7 +88,31 @@ class NodeAccessAgentHttpClient
     private function requiredFile(string $name): string
     {
         $path = config('node_access.agent.'.$name);
-        if (! is_string($path) || $path === '' || ! is_file($path) || ! is_readable($path)) {
+        if (! is_string($path) || $path === '' || is_link($path) || ! is_readable($path)) {
+            throw new RuntimeException('Node agent mutual TLS credentials are unavailable.');
+        }
+
+        $privateKey = $name === 'client_key';
+        $unsafePermissions = $privateKey ? 0o077 : 0o022;
+        $fileInfo = @lstat($path);
+        if (! is_array($fileInfo) || (($fileInfo['mode'] & 0o170000) !== 0o100000)
+            || ($fileInfo['mode'] & $unsafePermissions) !== 0 || $fileInfo['size'] < 1
+            || $fileInfo['size'] > self::MAX_CREDENTIAL_FILE_BYTES) {
+            throw new RuntimeException('Node agent mutual TLS credentials are unavailable.');
+        }
+
+        $file = @fopen($path, 'rb');
+        if (! is_resource($file)) {
+            throw new RuntimeException('Node agent mutual TLS credentials are unavailable.');
+        }
+        try {
+            $openedInfo = fstat($file);
+        } finally {
+            fclose($file);
+        }
+        if (! is_array($openedInfo) || $openedInfo['dev'] !== $fileInfo['dev'] || $openedInfo['ino'] !== $fileInfo['ino']
+            || (($openedInfo['mode'] & 0o170000) !== 0o100000) || ($openedInfo['mode'] & $unsafePermissions) !== 0
+            || $openedInfo['size'] < 1 || $openedInfo['size'] > self::MAX_CREDENTIAL_FILE_BYTES) {
             throw new RuntimeException('Node agent mutual TLS credentials are unavailable.');
         }
 

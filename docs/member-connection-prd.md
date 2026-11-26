@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-26）
 
+- **PHP Node Agent mTLS credential file protection（2026-11-26，Laravel offline）**：`NodeAccessAgentHttpClient` now rejects symlink/non-regular/empty/oversized credential files, group/other-writable certificate or CA files, and private keys accessible to group/others. It uses `lstat` + open/fstat device/inode comparison to reject file replacement while validating. Unit regression 5/5、Pint passed；PHP Node provisioning/mTLS integration suite is being re-run. It does not prove production credential installation or a live node connection.
+
 - **Node Agent trusted runtime config 文件边界（2026-11-26，离线 Go）**：`readRuntimeConfig` 现在在解析前用 `Lstat` 和打开后 `fstat` 复核，拒绝符号链接、非普通文件、组/其他用户可写文件和替换竞态；isolated-test runtime parser 专项 26/26 通过。此项保护未来 production 配置的信任来源，不让 Node Agent 启动或读取 AWS；完整 race/vet/build 与 Laravel quota integration 本轮结果待本阶段提交后记录。
 
 - **Node Agent runtime quota initializer → Laravel CGI/mTLS 集成（2026-11-26，隔离本机）**：将 Go/Laravel CGI mTLS 集成从直接调用 `HTTPQuotaAuthority` 扩展为 `NewRuntimeDataPlane` 按 production-shaped v2 构造 NodeTLS identity、trusted authority CA 与 durable quota provider；通过真实 Laravel CGI 完成 reservation 和最终结算，并验证该 fixture 下累计 `used_bytes=57`、`reserved_bytes=0`、同一 peer 两个 reservation 均 settled。Laravel quota feature 12/12、112 assertions 通过；Go race 192/192（5 packages）、vet/build 通过。证据仅限本机临时 SQLite、临时测试证书与本地 CGI，不是部署 mTLS、生产 KMS/IAM、目标数据库并发或真实会员流量验收。production executable 仍在加载 production config/AWS 前拒绝启动，首发门仍 5/12。

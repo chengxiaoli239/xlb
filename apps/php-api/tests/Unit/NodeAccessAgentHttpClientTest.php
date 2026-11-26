@@ -28,7 +28,7 @@ class NodeAccessAgentHttpClientTest extends TestCase
     protected function tearDown(): void
     {
         foreach ($this->credentialFiles as $path) {
-            if (is_file($path)) {
+            if (is_file($path) || is_link($path)) {
                 unlink($path);
             }
         }
@@ -69,5 +69,62 @@ class NodeAccessAgentHttpClientTest extends TestCase
 
         $this->expectException(RuntimeException::class);
         $client->post((object) ['agent_endpoint' => 'https://node-agent.example.test'], 'ensure', []);
+    }
+
+    public function test_client_certificate_symlink_is_rejected_before_http_request(): void
+    {
+        Http::fake();
+        $certificatePath = $this->credentialFiles[0];
+        $symlinkPath = tempnam(sys_get_temp_dir(), 'xlb-agent-link-');
+        $this->assertNotFalse($symlinkPath);
+        unlink($symlinkPath);
+        $this->assertTrue(symlink($certificatePath, $symlinkPath));
+        $this->credentialFiles[] = $symlinkPath;
+        config(['node_access.agent.client_certificate' => $symlinkPath]);
+
+        try {
+            (new NodeAccessAgentHttpClient)->post(
+                (object) ['agent_endpoint' => 'https://node-agent.example.test'], 'ensure', [],
+            );
+            $this->fail('Node Agent client accepted a symlinked certificate file.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Node agent mutual TLS credentials are unavailable.', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_group_or_other_writable_private_key_is_rejected_before_http_request(): void
+    {
+        Http::fake();
+        $this->assertTrue(chmod($this->credentialFiles[1], 0660));
+
+        try {
+            (new NodeAccessAgentHttpClient)->post(
+                (object) ['agent_endpoint' => 'https://node-agent.example.test'], 'ensure', [],
+            );
+            $this->fail('Node Agent client accepted a group-writable private key.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Node agent mutual TLS credentials are unavailable.', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_group_or_other_writable_ca_bundle_is_rejected_before_http_request(): void
+    {
+        Http::fake();
+        $this->assertTrue(chmod($this->credentialFiles[2], 0664));
+
+        try {
+            (new NodeAccessAgentHttpClient)->post(
+                (object) ['agent_endpoint' => 'https://node-agent.example.test'], 'ensure', [],
+            );
+            $this->fail('Node Agent client accepted a group-writable CA bundle.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Node agent mutual TLS credentials are unavailable.', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
     }
 }

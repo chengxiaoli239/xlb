@@ -20,7 +20,7 @@ The production-shaped initializer uses the KMS-backed node TLS identity certific
 
 ## Transport
 
-- Control-plane to Agent traffic uses HTTPS with TLS server validation against the configured CA bundle and a client certificate plus private key (mTLS). Redirects are disabled and requests have a bounded timeout.
+- Control-plane to Agent traffic uses HTTPS with TLS server validation against the configured CA bundle and a client certificate plus private key (mTLS). Redirects are disabled and requests have a bounded timeout. Before sending, Laravel accepts only regular non-symlink credential files no larger than 1 MiB; it rejects group/other-writable certificate/CA files and requires the client private key to be owner-only. It also checks file identity across open to detect replacement while validating.
 - Agent success responses are JSON envelopes of the form `{"data": {...}}`; Laravel `NodeAccessAgentHttpClient` validates and unwraps the data object before acknowledgement validation. Error responses use the Agent error envelope and non-success HTTP status.
 - Agent endpoints must be administrator-controlled node records; never accept an endpoint from a member request. Production must use a private, controlled endpoint and a dedicated client certificate whose issuer and scope are limited to the member-node Agent service.
 - A transport timeout is an unknown outcome, not a failed operation. Retry the same operation with the same request ID and generation. Do not release a peer slot, expose a profile, or report revocation until a matching Agent acknowledgement is durably recorded.

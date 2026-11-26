@@ -30,6 +30,8 @@
 
 **Node Agent trusted runtime config 文件保护（2026-11-26，离线 Go）**：文件 loader 现在使用 `Lstat`、open 后 `fstat` 与 inode equality 检查，拒绝链接、非普通文件、组/其他用户可写权限及替换竞态。命令入口定向 tests 26/26 通过；阶段总测试和 CI 尚待本次提交后确认。该校验不替代生产运行身份/签名配置交付。
 
+**Laravel → Node Agent mTLS credential file checks（2026-11-26，离线 PHP）**：PHP control-plane HTTP client 现拒绝 symlink、非普通/空/>1MiB credentials，private key 必须 owner-only，certificate/CA 禁止 group/other write，且 open 后 fstat 的设备与 inode 必须与 lstat 匹配。定向 unit tests 5/5、Pint passed；provisioning local mTLS integration 和 hosted CI 待本阶段提交后验收。这是本机文件配置门槛，不是 production secret mount/deployment evidence。
+
 **Node Agent KMS 区域绑定（2026-11-26，代码 `ab671b3`、回归 `2a861fd`）**：isolated-test 的 AWS KMS signer ARN 必须匹配 runtime node Region，SDK Region 由 trusted node 配置提供而不采信 `AWS_REGION`；production-shaped v2 同样把 node Region 传入身份选择结果。新增 AWS SDK 层测试，确认环境 Region 与显式 trusted Region 冲突时，client 采用 trusted Region。定向 command tests 25/25、新 Region 回归 1/1、全套 race 179/179（5 packages）、vet/build 通过；CI `45754890724` 对 `2a861fd710857b251bf98533bfe77784baaaff3d` 全部成功。此项没有访问 AWS 或打开 production executable gate，不增加 5/12 门数。下一项仍为离线 production startup/mTLS 与 PHP provisioning 接线审查。
 
 **2026-11-26 后续检查点**：M5/M6 live harness 已补撤权前后累计流量单调性与最终快照/回执相等断言，并在 `xlb-lab-us-20261126-m5mon` 隔离节点重新运行通过。专用节点/IAM 栈随后回收，资源核验无残留。此轮在主线复跑 Node Agent `go test -race ./...` 178 passed/5 packages、`go vet ./...` 与 `go build ./...` 通过。放行门仍为 5/12（42%）；下一步继续离线推进生产 Node Agent runtime/mTLS 注入契约与 PHP provisioning 接线，真实 profile 和节点身份/CA 材料到位后再做会员真机联验；合成 peer 证据不能外推到真实会员线路。
