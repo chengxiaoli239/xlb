@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -43,7 +44,7 @@ func NewHTTPQuotaAuthority(endpoint string, roots *x509.CertPool, clientCertific
 	baseURL, err := url.Parse(endpoint)
 	if err != nil || baseURL.Scheme != "https" || baseURL.Host == "" || baseURL.User != nil ||
 		baseURL.RawQuery != "" || baseURL.ForceQuery || baseURL.Fragment != "" || roots == nil ||
-		len(clientCertificate.Certificate) == 0 || clientCertificate.PrivateKey == nil || timeout <= 0 {
+		!validQuotaAuthorityClientCertificate(clientCertificate) || timeout <= 0 {
 		return nil, ErrInvalid
 	}
 
@@ -71,6 +72,35 @@ func NewHTTPQuotaAuthority(endpoint string, roots *x509.CertPool, clientCertific
 	}
 
 	return &HTTPQuotaAuthority{baseURL: baseURL, client: client}, nil
+}
+
+func validQuotaAuthorityClientCertificate(certificate tls.Certificate) bool {
+	if len(certificate.Certificate) == 0 || certificate.PrivateKey == nil {
+		return false
+	}
+	signer, ok := certificate.PrivateKey.(crypto.Signer)
+	if !ok {
+		return false
+	}
+	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
+	if err != nil || (certificate.Leaf != nil && !bytes.Equal(certificate.Leaf.Raw, leaf.Raw)) {
+		return false
+	}
+	signerPublicKey, err := x509.MarshalPKIXPublicKey(signer.Public())
+	if err != nil || !bytes.Equal(signerPublicKey, leaf.RawSubjectPublicKeyInfo) {
+		return false
+	}
+	now := time.Now()
+	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) ||
+		(leaf.KeyUsage != 0 && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0) {
+		return false
+	}
+	for _, usage := range leaf.ExtKeyUsage {
+		if usage != x509.ExtKeyUsageAny && usage != x509.ExtKeyUsageClientAuth {
+			return false
+		}
+	}
+	return true
 }
 
 func (authority *HTTPQuotaAuthority) Reserve(ctx context.Context, request QuotaReservationRequest) (QuotaReservation, error) {

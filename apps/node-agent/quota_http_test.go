@@ -194,6 +194,25 @@ func TestHTTPQuotaAuthorityRejectsMismatchedIdentityAndInsecureConfiguration(t *
 	if _, err := NewHTTPQuotaAuthority("https://quota.invalid", x509.NewCertPool(), clientCertificate, 0); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("zero timeout error = %v; want invalid configuration", err)
 	}
+	serverOnlyCertificate := testQuotaClientCertificateWithUsage(t,
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, time.Now().Add(time.Hour))
+	if _, err := NewHTTPQuotaAuthority("https://quota.invalid", x509.NewCertPool(), serverOnlyCertificate, time.Second); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("server-only certificate error = %v; want invalid configuration", err)
+	}
+	expiredClientCertificate := testQuotaClientCertificateWithUsage(t,
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, time.Now().Add(-time.Minute))
+	if _, err := NewHTTPQuotaAuthority("https://quota.invalid", x509.NewCertPool(), expiredClientCertificate, time.Second); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expired client certificate error = %v; want invalid configuration", err)
+	}
+	mismatchedClientCertificate := clientCertificate
+	wrongClientKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatchedClientCertificate.PrivateKey = wrongClientKey
+	if _, err := NewHTTPQuotaAuthority("https://quota.invalid", x509.NewCertPool(), mismatchedClientCertificate, time.Second); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("mismatched signer error = %v; want invalid configuration", err)
+	}
 }
 
 func TestHTTPQuotaAuthorityMapsExhaustionAndRejectsMismatchedSettlementReceipt(t *testing.T) {
@@ -275,6 +294,12 @@ func newQuotaHTTPTestAuthority(t *testing.T, server *httptest.Server, clientCert
 
 func testQuotaClientCertificate(t *testing.T) tls.Certificate {
 	t.Helper()
+	return testQuotaClientCertificateWithUsage(t,
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, time.Now().Add(time.Hour))
+}
+
+func testQuotaClientCertificateWithUsage(t *testing.T, usages []x509.ExtKeyUsage, notAfter time.Time) tls.Certificate {
+	t.Helper()
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate test client key: %v", err)
@@ -287,9 +312,9 @@ func testQuotaClientCertificate(t *testing.T) tls.Certificate {
 	template := &x509.Certificate{
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: "isolated-test-node"},
-		NotBefore:    now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		NotBefore:    now.Add(-time.Minute), NotAfter: notAfter,
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		ExtKeyUsage: usages,
 		IsCA:        true, BasicConstraintsValid: true,
 	}
 	certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)

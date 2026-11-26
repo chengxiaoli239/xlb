@@ -4,6 +4,8 @@ Status: the Laravel control plane has a shared entitlement byte ledger with atom
 
 The production-shaped `xlb-node-runtime/v2` schema now also requires a trusted HTTPS quota-authority descriptor, CA trust bundle, positive per-lease byte grant, bounded recovery-outbox batch, and bounded request timeout. This prevents a future production runtime config from omitting online quota enforcement prerequisites. The executable remains isolated-test-only and does not construct `HTTPQuotaAuthority` from this descriptor, so the validation is not production quota enforcement evidence.
 
+`NewHTTPQuotaAuthority` validates its client certificate at construction time. The leaf certificate must be currently valid, permit digital signatures, allow the TLS ClientAuth EKU (or omit EKU restrictions), and match the configured `crypto.Signer` public key. Server-only EKU, expired certificates, or mismatched signers fail before any request. This is local configuration validation; it does not establish a deployed node-to-control-plane mTLS connection.
+
 ## Trust Boundary
 
 - The Laravel control plane selects an already provisioned, healthy member node. Cloud-provider APIs provision whole nodes; this contract manages member peers on a node and does not depend on AWS.
