@@ -18,7 +18,9 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-26）
 
-**2026-11-26 后续检查点**：M5/M6 live harness 已补撤权前后累计流量单调性与最终快照/回执相等断言，并在 `xlb-lab-us-20261126-m5mon` 隔离节点重新运行通过。专用节点/IAM 栈随后回收，资源核验无残留。Node Agent 离线 race/vet/build 检查通过。放行门仍为 5/12（42%）；下一步继续离线推进生产 Node Agent runtime/mTLS 注入契约与 PHP provisioning 接线，真实 profile 和节点身份/CA 材料到位后再做会员真机联验；合成 peer 证据不能外推到真实会员线路。
+**2026-11-26 当前 checkout 与外部会话复核**：权威 `main` 与 `origin/main` 同步于 `1865f461c6e1231ad850028427d1258457983c5a`，工作区干净；CI `45751109316` 对应此提交且成功。当前被打开的 `codex/aws-kms-node-identity` worktree 在 `961406d`、无 upstream、落后主线两个提交，未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 本轮返回 `session expired`，所以 AWS 资源状态未复核，未执行任何云写入。12 项首发放行门仍为 5/12（42%），不等价于工时或上线概率。下一项 AI 可控工作仍是离线 Node Agent production runtime/mTLS 与 PHP provisioning 接线审查；恢复 AWS 会话后先只读查找已有 KMS/IAM 及节点材料，若需创建任何计费资源，先单独核成本和授权。
+
+**2026-11-26 后续检查点**：M5/M6 live harness 已补撤权前后累计流量单调性与最终快照/回执相等断言，并在 `xlb-lab-us-20261126-m5mon` 隔离节点重新运行通过。专用节点/IAM 栈随后回收，资源核验无残留。此轮在主线复跑 Node Agent `go test -race ./...` 178 passed/5 packages、`go vet ./...` 与 `go build ./...` 通过。放行门仍为 5/12（42%）；下一步继续离线推进生产 Node Agent runtime/mTLS 注入契约与 PHP provisioning 接线，真实 profile 和节点身份/CA 材料到位后再做会员真机联验；合成 peer 证据不能外推到真实会员线路。
 
 **Q2 运维诊断增量（2026-11-26）**：设备授权 API 的服务端 `X-Request-Id` 已持久关联到 provisioning outbox；异步 worker 带该 ID 与稳定 `node_operation_id`/peer ID 写安全日志并清理上下文，重复请求仍只复用原 operation。Laravel 全套 275 passed、1 skipped、2,457 assertions，Pint 通过。该改进不改变首发放行门计数，也不代替 production runtime、节点回执或 staging 验收。
 
@@ -93,7 +95,7 @@
 
 **2026-11-25 基线复核（后续更新见下项）**：主线 `main` 与 `origin/main` 同步于 `3a6c6b8`，整仓 CI `45581869634` 全绿。§0.1.1 固定 12 个首发交付门，5 项已有证据、7 项未通过，计数 42%；此数是等权门项比例，不代表投入时间、剩余工期或上线概率。后续 M5/M6 隔离协议重跑结果及 11-26 最新主线状态见下项和 PRD 开发进度顶部。
 
-**2026-11-26 本轮进度**：`main` 与 `origin/main` 已推进到 `ccb3f2e`，上一提交 CI `45586652685` 全绿。首发放行比例仍为 5/12 = 42%，因为本轮 M5/M6 复测是隔离协议门上的补充证据，未满足 production profile/runtime 或真实会员数据面门。us-west-2 隔离节点 live harness PASS 后已删除专用节点栈和 IAM 栈，CloudFormation 显示删除完成，EC2 terminated，卷/ENI/安全组/Scheduler/SSM 和 `XlbLab*` IAM 角色/Profile 无残留；账单尚未结算。责任人按用户指定为穿山甲。下一工作重点是 Q1 Android 真实会员 profile 与 PHP→Node Agent production-shaped 接线边界审查；在 profile/身份/mTLS 注入前，不把生产 runtime 开关设为可用，不宣称会员隧道或真实撤权通过。
+**2026-11-26 本轮进度（主线快照更新）**：主线现为 `1865f461c6e1231ad850028427d1258457983c5a`，CI `45751109316` success；本机 Node Agent `go test -race ./...` 178 passed/5 packages、`go vet ./...` 和 `go build ./...` 均通过。首发放行比例仍为 5/12 = 42%，M5/M6 隔离协议复测没有满足 production profile/runtime 或真实会员数据面门。11-26 隔离节点测试已记录删除与残留核验，账单尚未结算；当前 AWS `xlb-ops` STS 实际为 expired，因此不能声称当前资源状态已复核。责任人按用户指定为穿山甲。下一工作重点是 Q1 Android 真实会员 profile 与 PHP→Node Agent production-shaped 接线边界审查；在 profile/身份/mTLS 注入前，不把生产 runtime 开关设为可用，不宣称会员隧道或真实撤权通过。
 
 本轮阶段汇报采用两种分开的进度口径：首发放行门仍为 5/12（42%）；工程活动记录里，本轮实际完成 1 个独立云端隔离验收包（M5 并发、M6 合成身份复制拒绝/撤权及回收），同时补全 1 个主线进度记录阶段。后一项不是上线完成比例。
 
