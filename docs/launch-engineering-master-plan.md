@@ -24,6 +24,8 @@
 
 **2026-11-26 Q2 支付对账分页修复**：持久化 provider 每次按 event ID 取最多 500 条，cursor 依原始批次推进，避免窗外旧事件过滤后丢失 cursor，使后续页永远不可见。回归构造 500 条早期事件加一条目标时间窗事件，并通过真实 `PaymentReconciliationService` 断言 matched。ledger Feature 17/17（171 assertions）、sandbox payment Feature 7/7（87 assertions）、完整 Laravel 280 项（279 passed、1 skipped，2,484 assertions）、Pint passed。该修复只覆盖 local/testing 持久化 adapter，不验收真实商户 callback、对账服务或支付放行门。
 
+**2026-11-26 Live KMS signer handshake 夹具**：新增默认跳过、仅显式 `XLB_LIVE_KMS_KEY_ARN`/`XLB_LIVE_KMS_REGION` 启用的 Go 验收，使用临时本地证书和 TLS 1.3 handshake 实测 KMS `crypto.Signer`；不创建或删除资源。Go race 192/5 packages、vet/build 通过。下一步用本轮获批的临时 us-west-2 ECC_NIST_P256 key 运行该验收，然后将 key 设置为 AWS 最短 7 天待删除，并把剩余 7/12 放行门维持未通过。
+
 **AWS 重新登录前的历史快照（2026-11-26）**：权威主线 `main=origin/main=09e3298a7790b404b4a0025006926bd6ec0ee87c`，CI `45764929395` success，工作区干净。本机 Node Agent 全量 race tests 192 项/5 packages、`go vet` 与 `go build` 通过。`codex/aws-kms-node-identity` worktree 在 `961406d` 且无 upstream；其 KMS signer、证书文件保护和 trusted runtime 能力已由主线较新实现覆盖，旧 quota/runtime 改动未作为集成基线。`ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `session expired`，所以 AWS 资源状态未复核，无云查询或写入。12 项首发门仍为 5/12（42%），不是工时或上线概率；Android/M6、Web/API+支付、Node Agent、发布运维分别为 2/3、1/2、1/2、1/3。下一项继续做不依赖云的 Android/Node Agent 离线验收；会话恢复后先只读核查已有 KMS/IAM/节点证书材料，任何有费用的资源操作须先核成本并取得明确授权。
 
 **Node Agent 配额前置配置校验（2026-11-26，离线 Go）**：runtime v1 只允许隔离测试环境，production-shaped v2 则必须携带 quota authority HTTPS endpoint/CA、byte grant、有限 recovery batch 和有界 timeout。测试覆盖缺失/不安全端点、非法 CA、额度与上限越界。定向 runtime tests 49 项通过；Node Agent 全套 race 187 passed/5 packages、vet/build 通过。该阶段只校验未来接线的必需配置，尚未在 Agent executable 构造线上 quota authority 或 journal，也不打开 production mode；首发仍 5/12。

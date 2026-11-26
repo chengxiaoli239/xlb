@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-26）
 
+- **Q2 Live AWS KMS signer 握手验收夹具（2026-11-26）**：新增显式 opt-in Go test `TestLiveKMSNodeTLSIdentityCompletesTLS13Handshake`，用指定 key ARN 读取 KMS 公钥、构造仅本机临时 CA/证书，并通过 TLS 1.3 HTTP handshake 实际调用 `crypto.Signer`；默认无 ARN 时跳过，不创建或删除 AWS 资源。`go test -race ./...` 192 passed/5 packages、`go vet ./...`、`go build ./...` 通过；opt-in test 的默认跳过分支实测通过。实现与操作边界已写入 Node Agent README。下一步按用户已授权的费用边界新建临时 us-west-2 P-256 signing key，执行 live handshake 后立刻 schedule 7-day deletion；待运行的 live test 才能关闭 AWS SDK 实际身份/API 验收，且不表示 production node certificate、会员 profile 或上线门通过。
+
 - **Q2 持久化支付 provider 对账分页正确性（2026-11-26）**：修复 `PersistentSandboxPaymentProvider::listEvents` 在取前 500 条后才按对账时间窗筛选，导致旧事件占满首批时把后续目标时间窗事件遗漏且无 cursor 的缺陷。分页 cursor 现依据原始 provider event 批次推进，即使当前页过滤后为空也会继续读取；补充 500 条窗外记录后读取窗内事件并通过 `PaymentReconciliationService` 验证 matched 的回归。定向 ledger tests 17/17、171 assertions，沙箱支付 tests 7/7、87 assertions，完整 Laravel 280 项（279 passed、1 skipped，2,484 assertions），Pint 通过。此项只修复 local/testing 持久化 provider 的分页，不接真实商户，不表示商户支付或上线放行门通过。下一步继续处理不依赖商户材料的离线放行缺口，并等待真实商户契约/预算决策。
 
 - **AWS 账户用量与 XLB 区域费用快照（2026-11-26，只读）**：Cost Explorer 对 2026-11-01 至 2026-11-26 的账户级 `UnblendedCost` 返回约 **USD 685.75**，其中 `us-west-2` 约 **USD 0.07**；主要支出在其他区域，资源元数据带有非 XLB 项目标识，不能归因到迅连宝。本项目没有配置 AWS Budget。Cost Explorer 有数据延迟且本区数字不是最终账单。本轮没有停机、删除、创建或修改任何资源；VPN 项目成本记录只采用受控区域数字，不把其他项目资源写入本仓库。新增计费 KMS 签名 key 前须明确批准持续预算。
