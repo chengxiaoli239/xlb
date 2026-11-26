@@ -24,6 +24,8 @@
 
 **Node Agent mTLS 离线接线增量（2026-11-26）**：已接入 AWS SDK v2 KMS public-key/sign API adapter 与只含 public cert/CA 的 PEM provider，并允许 isolated-test 启动器通过显式 `NODE_AGENT_TLS_IDENTITY_SOURCE=aws-kms` 使用默认 credential chain 和 node-scoped key ARN；trusted runtime v2 要求该 key ARN 与 node Region 一致并支持 standard/Multi-Region key ARN。source resolver 单测确认 production-shape config 使用 trusted key ARN 并拒绝环境覆盖，但 production executable gate 仍关闭。管理/数据/探针 server 共用 opaque signer identity。Go race 176 passed/5 packages、vet/build 通过，fake KMS API 与本地 TLS 1.3/HTTP2 回归通过。生产 mode 仍在加载配置或访问 AWS 前拒绝启动；没有实际 KMS key、IAM policy、签发/部署的节点证书，也没有调用 AWS 资源 API 或产生资源费用。上线门仍为 5/12（42%），这些离线/fake KMS 结果不计 production mTLS 放行证据。
 
+**CI / AWS 检查点（2026-11-26）**：Node Agent AWS SDK 依赖缺少 Android 本地替换模块 sums 已补入，hosted CI `45749846197` 全绿（Android native build、PHP/MySQL/PostgreSQL、Node Agent 与 provenance 均通过）。本机完整 Gradle 因 Temurin 26.0.1 与当前 Kotlin Gradle compiler 不兼容未通过；CI JDK 21 构建已通过。随后 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 session expired，因此真实 KMS/IAM 只读盘点未完成，无云资源写入。下一轮需本人重新 `aws login` 后先只读盘点现有 KMS key 与 IAM role；无现成获批 key 时，KMS key 创建与持续费用必须先明确核定。
+
 | 工作流 / 里程碑 | 当前有证据的完成部分 | 尚未完成与依赖 |
 | --- | --- | --- |
 | M1–M2 产品与盘点 | PRD、边界、账号/节点/支付现状盘点已固化 | 随新实现继续维护，不代表发布审查完成 |
