@@ -184,6 +184,8 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
             String egressIp = fetchEgressIp(vpnNetwork);
             assertTrue("node egress response was not an IPv4 address: " + egressIp,
                     Pattern.matches("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", egressIp));
+            assertEquals("VPN traffic did not exit through the isolated Node Agent endpoint",
+                    new URL(bridgeEndpoint).getHost(), egressIp);
 
             JSONObject revokeRequest = new JSONObject()
                     .put("node_id", nodeId).put("peer_id", peerId)
