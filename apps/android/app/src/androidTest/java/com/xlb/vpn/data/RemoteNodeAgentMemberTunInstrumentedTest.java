@@ -28,14 +28,20 @@ import com.xlb.vpn.tunnel.MemberTunnelGrantStore;
 import com.xlb.vpn.tunnel.XlbVpnService;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import java.io.ByteArrayInputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
-import java.net.HttpURLConnection;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -53,6 +59,7 @@ import java.util.UUID;
 import java.security.SecureRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 import javax.net.ssl.HttpsURLConnection;
@@ -93,12 +100,17 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
         long generation = 1;
         long bindingGeneration = 1;
         String expiresAt = Instant.now().plus(30, ChronoUnit.MINUTES).toString();
+        String egressProbeIPv4 = resolveEgressProbeIPv4(context);
         AtomicInteger connectedStates = new AtomicInteger();
+        AtomicReference<String> tunnelFailure = new AtomicReference<>();
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context receiverContext, Intent intent) {
                 if (XlbVpnService.STATE_CONNECTED.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
                     connectedStates.incrementAndGet();
+                }
+                if (XlbVpnService.STATE_ERROR.equals(intent.getStringExtra(XlbVpnService.EXTRA_STATE))) {
+                    tunnelFailure.set(intent.getStringExtra(XlbVpnService.EXTRA_MESSAGE));
                 }
             }
         };
@@ -174,15 +186,17 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
             requestVpnPermission(context);
             ComponentName started = startVpnService(context, new Intent(context, XlbVpnService.class)
                     .setAction(XlbVpnService.ACTION_START_ISOLATED_MEMBER_TEST)
+                    .putExtra(XlbVpnService.EXTRA_REMOTE_NODE_ACCEPTANCE_TEST, true)
                     .putExtra(XlbVpnService.EXTRA_MEMBER_GRANT_HANDOFF_ID, handoffId));
             assertNotNull("VPN service did not start", started);
             serviceStarted = true;
             Network vpnNetwork = awaitActiveVpnNetwork(context, TimeUnit.SECONDS.toMillis(15));
-            assertNotNull("Android did not establish its test VPN route", vpnNetwork);
+            assertNotNull("Android did not establish its test VPN route. State error: "
+                    + tunnelFailure.get(), vpnNetwork);
             assertTrue(XlbVpnService.currentTunnelIsMember());
             assertEquals("isolated route must not publish production CONNECTED", 0, connectedStates.get());
 
-            String egressIp = fetchEgressIp(vpnNetwork);
+            String egressIp = fetchEgressIp(vpnNetwork, egressProbeIPv4);
             assertTrue("node egress response was not an IPv4 address: " + egressIp,
                     Pattern.matches("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", egressIp));
             assertEquals("VPN traffic did not exit through the isolated Node Agent endpoint",
@@ -280,12 +294,54 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
         return new JSONObject(response);
     }
 
-    private static String fetchEgressIp(Network network) throws Exception {
-        java.net.URLConnection connection = network.openConnection(new URL("https://checkip.amazonaws.com/"));
-        connection.setConnectTimeout(15_000);
-        connection.setReadTimeout(15_000);
+    private static String resolveEgressProbeIPv4(Context context) throws Exception {
+        ConnectivityManager manager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network network = manager == null ? null : manager.getActiveNetwork();
+        if (network == null) throw new java.io.IOException("egress probe network is unavailable before VPN start");
+        java.net.URLConnection connection = network.openConnection(
+                new URL("https://cloudflare-dns.com/dns-query?name=checkip.amazonaws.com&type=A"));
+        connection.setConnectTimeout(8_000);
+        connection.setReadTimeout(8_000);
+        connection.setRequestProperty("Accept", "application/dns-json");
+        String response;
         try (InputStream input = connection.getInputStream()) {
-            return new String(input.readAllBytes(), StandardCharsets.US_ASCII).trim();
+            response = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        JSONArray answers = new JSONObject(response).getJSONArray("Answer");
+        for (int index = 0; index < answers.length(); index++) {
+            JSONObject answer = answers.getJSONObject(index);
+            if (answer.optInt("type") != 1) continue;
+            InetAddress address = InetAddress.getByName(answer.getString("data"));
+            if (address instanceof Inet4Address) return address.getHostAddress();
+        }
+        throw new java.io.IOException("egress probe did not resolve to IPv4 before VPN start");
+    }
+
+    private static String fetchEgressIp(Network network, String probeIPv4) throws Exception {
+        String host = "checkip.amazonaws.com";
+        try (Socket socket = network.getSocketFactory().createSocket()) {
+            socket.connect(new InetSocketAddress(probeIPv4, 80), 8_000);
+            socket.setSoTimeout(8_000);
+            OutputStream output = socket.getOutputStream();
+            output.write(("GET / HTTP/1.1\r\nHost: " + host
+                    + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            output.flush();
+
+            BufferedReader response = new BufferedReader(new InputStreamReader(
+                    socket.getInputStream(), StandardCharsets.US_ASCII));
+            String status = response.readLine();
+            if (status == null || !status.matches("HTTP/1\\.[01] 200(?: .*)?")) {
+                throw new java.io.IOException("egress probe returned unexpected status: " + status);
+            }
+            String header;
+            while ((header = response.readLine()) != null && !header.isEmpty()) {
+                // The endpoint closes the response after returning the small public IP body.
+            }
+            if (header == null) throw new java.io.IOException("egress probe headers were incomplete");
+            StringBuilder body = new StringBuilder();
+            String line;
+            while ((line = response.readLine()) != null) body.append(line);
+            return body.toString().trim();
         }
     }
 

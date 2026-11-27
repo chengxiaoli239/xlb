@@ -13,6 +13,7 @@ import android.net.VpnService;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
+import android.util.Log;
 
 import com.xlb.vpn.BuildConfig;
 import com.xlb.vpn.R;
@@ -43,6 +44,7 @@ public final class XlbVpnService extends VpnService {
     public static final String EXTRA_ROUTE_NAME = "route_name";
     public static final String EXTRA_DEBUG_TEST_ROUTE = "debug_test_route";
     public static final String EXTRA_MEMBER_GRANT_HANDOFF_ID = "member_grant_handoff_id";
+    public static final String EXTRA_REMOTE_NODE_ACCEPTANCE_TEST = "remote_node_acceptance_test";
     public static final String EXTRA_STATE = "state";
     public static final String EXTRA_MESSAGE = "message";
     public static final String EXTRA_FAILURE_CODE = "failure_code";
@@ -61,6 +63,7 @@ public final class XlbVpnService extends VpnService {
     private static final long MEMBER_HEALTH_CHECK_INTERVAL_MILLIS = 10_000;
     private static final int MEMBER_HEALTH_FAILURE_THRESHOLD = 2;
     private static final long ISOLATED_MEMBER_HEALTH_CHECK_INTERVAL_MILLIS = 1_000;
+    private static final long REMOTE_NODE_ACCEPTANCE_HEALTH_CHECK_INTERVAL_MILLIS = 60_000;
     static final long TUNNEL_START_TIMEOUT_MILLIS = TimeUnit.SECONDS.toMillis(20);
     private static final String[] PROBE_URLS = {
             "https://www.gstatic.com/generate_204",
@@ -104,6 +107,8 @@ public final class XlbVpnService extends VpnService {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         boolean isolatedMemberTest = intent != null && ACTION_START_ISOLATED_MEMBER_TEST.equals(intent.getAction());
+        boolean remoteNodeAcceptanceTest = isolatedMemberTest
+                && intent.getBooleanExtra(EXTRA_REMOTE_NODE_ACCEPTANCE_TEST, false);
         if (intent != null && (ACTION_START_MEMBER.equals(intent.getAction()) || isolatedMemberTest)) {
             memberGrantHandoffId = intent.getLongExtra(EXTRA_MEMBER_GRANT_HANDOFF_ID, 0);
         } else if (memberGrantHandoffId == 0) {
@@ -148,7 +153,8 @@ public final class XlbVpnService extends VpnService {
             createChannel();
             promoteForeground("正在连接");
             publish(STATE_CONNECTING, null);
-            worker.execute(() -> startMemberTunnel(grant, attempt, handoffId, isolatedMemberTest));
+            worker.execute(() -> startMemberTunnel(
+                    grant, attempt, handoffId, isolatedMemberTest, remoteNodeAcceptanceTest));
             return START_NOT_STICKY;
         }
         if (!ACTION_START.equals(intent.getAction())) {
@@ -261,7 +267,8 @@ public final class XlbVpnService extends VpnService {
         }
     }
 
-    private void startMemberTunnel(MemberTunnelGrant grant, int attempt, long handoffId, boolean isolatedMemberTest) {
+    private void startMemberTunnel(MemberTunnelGrant grant, int attempt, long handoffId,
+            boolean isolatedMemberTest, boolean remoteNodeAcceptanceTest) {
         if (!tunnelAttempts.isCurrent(attempt)) return;
         if (!closeMemberSession()) {
             tunnelAttempts.runIfCurrent(attempt, () -> {
@@ -270,7 +277,8 @@ public final class XlbVpnService extends VpnService {
             });
             return;
         }
-        MemberTunnelSession session = new MemberTunnelSession(memberTunnelRuntime(grant, attempt, isolatedMemberTest));
+        MemberTunnelSession session = new MemberTunnelSession(
+                memberTunnelRuntime(grant, attempt, isolatedMemberTest, remoteNodeAcceptanceTest));
         synchronized (memberSessionLock) {
             if (!tunnelAttempts.isCurrent(attempt)) return;
             memberSession = session;
@@ -305,7 +313,7 @@ public final class XlbVpnService extends VpnService {
         try {
             operation.get(TUNNEL_START_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
             if (isolatedMemberTest) {
-                startMemberTunnelHealthMonitor(attempt, true);
+                startMemberTunnelHealthMonitor(attempt, true, remoteNodeAcceptanceTest);
                 return;
             }
             boolean published = tunnelAttempts.runIfCurrent(attempt, () -> {
@@ -315,7 +323,7 @@ public final class XlbVpnService extends VpnService {
             if (!published) {
                 closeMemberSession();
             } else {
-                startMemberTunnelHealthMonitor(attempt, false);
+                startMemberTunnelHealthMonitor(attempt, false, false);
             }
         } catch (TimeoutException exception) {
             operation.cancel(true);
@@ -329,14 +337,32 @@ public final class XlbVpnService extends VpnService {
             if (closeMemberSession()) setMemberTunnelForAttempt(attempt, false);
             tunnelAttempts.finishIfCurrent(attempt, () -> {
                 Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+                if (isolatedMemberTest) {
+                    Log.e("XlbVpnService", "Isolated member startup failed: " + safeFailureLocation(cause));
+                }
                 publish(STATE_ERROR, safeMessage(cause));
                 stopSelf();
             });
         }
     }
 
+    private static String safeFailureLocation(Throwable failure) {
+        StringBuilder location = new StringBuilder();
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < 4; depth++, current = current.getCause()) {
+            if (depth > 0) location.append(" <- ");
+            location.append(current.getClass().getSimpleName());
+            StackTraceElement[] stack = current.getStackTrace();
+            if (stack.length > 0) {
+                location.append(" at ").append(stack[0].getClassName())
+                        .append('#').append(stack[0].getMethodName());
+            }
+        }
+        return location.toString();
+    }
+
     private MemberTunnelSession.Runtime memberTunnelRuntime(MemberTunnelGrant grant, int attempt,
-            boolean isolatedMemberTest) {
+            boolean isolatedMemberTest, boolean remoteNodeAcceptanceTest) {
         return new MemberTunnelSession.Runtime() {
             private DeviceProofCertificate certificate;
             private DeviceProofCertificate.BridgeCredentials credentials;
@@ -373,6 +399,7 @@ public final class XlbVpnService extends VpnService {
             @Override
             public void verifyTunnel() throws Exception {
                 if (isolatedMemberTest) {
+                    if (remoteNodeAcceptanceTest) return;
                     if (!TunnelVerifier.verify(XlbVpnService.this::probeIsolatedMemberEcho,
                             () -> !tunnelAttempts.isCurrent(attempt), Thread::sleep, 5)) {
                         throw new IOException("隔离会员数据路径验证失败");
@@ -397,10 +424,11 @@ public final class XlbVpnService extends VpnService {
         };
     }
 
-    private void startMemberTunnelHealthMonitor(int attempt, boolean isolatedMemberTest) {
-        long intervalMillis = isolatedMemberTest
-                ? ISOLATED_MEMBER_HEALTH_CHECK_INTERVAL_MILLIS
-                : MEMBER_HEALTH_CHECK_INTERVAL_MILLIS;
+    private void startMemberTunnelHealthMonitor(int attempt, boolean isolatedMemberTest,
+            boolean remoteNodeAcceptanceTest) {
+        long intervalMillis = remoteNodeAcceptanceTest ? REMOTE_NODE_ACCEPTANCE_HEALTH_CHECK_INTERVAL_MILLIS
+                : isolatedMemberTest ? ISOLATED_MEMBER_HEALTH_CHECK_INTERVAL_MILLIS
+                        : MEMBER_HEALTH_CHECK_INTERVAL_MILLIS;
         MemberTunnelHealthMonitor monitor = new MemberTunnelHealthMonitor(
                 () -> tunnelAttempts.isCurrent(attempt) && currentTunnelIsMember,
                 isolatedMemberTest ? this::probeIsolatedMemberEcho : this::probeVpnRoute,

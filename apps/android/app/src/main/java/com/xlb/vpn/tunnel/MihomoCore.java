@@ -28,7 +28,7 @@ final class MihomoCore {
     static void loadMemberProfile(String profile, String localUsername, String localPassword) {
         String failure = nativeLoadMemberBridgeProfile(profile, localUsername, localPassword);
         if (failure != null) {
-            throw new IllegalStateException("member bridge profile could not be loaded");
+            throw new IllegalStateException(failure);
         }
     }
 
