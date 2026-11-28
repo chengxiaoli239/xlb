@@ -137,6 +137,8 @@ rm -rf "$PUBLIC_KEY_DIR"
 
 工具生成 owner-only 临时目录，Node Agent leaf 的公钥与 KMS 公钥相同，SAN 同时覆盖节点公网 IPv4 与 `127.0.0.1`，EKU 同时包含 ServerAuth 与 ClientAuth，以便同一 KMS identity 可用于 Agent inbound TLS 和 production-shaped quota-authority outbound mTLS，证书有效期 2 小时；临时 CA 私钥不落盘，admin client key 为 mode `0600`。manifest 记录 KMS ARN、node ID、SAN 与文件名。证书及 CA 仍标记为隔离测试用途，测试结束后删除生成目录；不得把测试证书复制到生产配置或提交仓库。
 
+**证书一致性不变量**：一次节点窗口只生成一次证书目录，并将这个目录作为本次验收唯一来源。节点部署包的 `node-server-chain.pem`、`ca.pem` 和 runtime 中 `bridge_server_ca_pem` 必须从该目录生成；管理 health 与 Android runner 的 `ca.pem`、`admin-client.pem`、`admin-client-key.pem` 也必须来自同一目录。生成包后若需重建证书，必须同步重建 runtime/节点包并重启 Agent，不能只替换本机的 CA/admin 文件；每次 health 握手都要使用当前 Agent 实际加载的 CA 和 admin identity。将完整 bundle 的 SHA-256 与 `node-lab-certificates` manifest/node ID 对照后再部署。证书来源或 fingerprint 不一致时停止健康/Android 验收，不能用关闭证书校验绕过。
+
 运行 Android remote-node instrumentation 前保持该 SSM session 活动，并将启动器的 control origin 设为 `https://127.0.0.1:19443`。Android runner 会在专用 AVD 上建立 `adb reverse tcp:19443 tcp:19443`，结束后清理自己创建的映射；若该 AVD 已有本地端口映射则拒绝覆盖。节点 TLS leaf 需同时包含数据面公网 endpoint 与 `127.0.0.1` SAN，Android 才能在 SSM 转发的管理连接上验证同一 CA 下的节点身份。之后通过 `apps/android/scripts/test-remote-node-agent-member-tun-emulator.sh` 提供 serial、node ID、control origin、bridge endpoint、节点公网 egress IPv4，以及 CA/管理 client cert/key 文件路径。测试材料只在临时主机目录和专用 AVD app cache 短暂存在，runner 退出时清理。
 
 ### D. M5/M6 实测门
