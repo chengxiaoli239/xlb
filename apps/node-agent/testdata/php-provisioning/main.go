@@ -75,6 +75,7 @@ func main() {
 		fail("configure loopback Node Agent")
 	}
 	server.ErrorLog = log.New(io.Discard, "", 0)
+	endpoint := "https://" + listener.Addr().String()
 
 	configuredHandler := server.Handler
 	server.Handler = http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -93,16 +94,56 @@ func main() {
 		configuredHandler.ServeHTTP(writer, request)
 	})
 
+	serveError := make(chan error, 1)
+	go func() { serveError <- server.ServeTLS(listener, "", "") }()
+	if err := waitForMTLSHealth(endpoint, files); err != nil {
+		_ = server.Close()
+		fail("wait for loopback Node Agent mTLS health")
+	}
 	if err := json.NewEncoder(os.Stdout).Encode(startup{
-		Endpoint: "https://" + listener.Addr().String(), CACertificate: files.caCertificate,
+		Endpoint: endpoint, CACertificate: files.caCertificate,
 		ClientCertificate: files.clientCertificate, ClientPrivateKey: files.clientPrivateKey,
 		ClientReport: files.clientReport,
 	}); err != nil {
 		fail("announce loopback Node Agent")
 	}
-	if err := server.ServeTLS(listener, "", ""); err != nil && err != http.ErrServerClosed {
+	if err := <-serveError; err != nil && err != http.ErrServerClosed {
 		fail("serve loopback Node Agent")
 	}
+}
+
+func waitForMTLSHealth(endpoint string, files certificateFiles) error {
+	clientCertificate, err := tls.LoadX509KeyPair(files.clientCertificate, files.clientPrivateKey)
+	if err != nil {
+		return err
+	}
+	caPEM, err := os.ReadFile(files.caCertificate)
+	if err != nil {
+		return err
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return fmt.Errorf("test CA certificate is invalid")
+	}
+	client := &http.Client{Timeout: 500 * time.Millisecond, Transport: &http.Transport{
+		Proxy: nil, TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS13, RootCAs: roots, Certificates: []tls.Certificate{clientCertificate},
+		},
+	}}
+	defer client.CloseIdleConnections()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		response, requestErr := client.Get(endpoint + "/healthz")
+		if requestErr == nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return fmt.Errorf("Node Agent mTLS health did not become ready before deadline")
 }
 
 type certificateFiles struct {
