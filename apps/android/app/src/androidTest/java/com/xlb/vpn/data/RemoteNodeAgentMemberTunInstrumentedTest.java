@@ -403,28 +403,24 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
     private static String fetchEgressIp(Network network, String probeIPv4) throws Exception {
         String host = "checkip.amazonaws.com";
         try (Socket socket = network.getSocketFactory().createSocket()) {
-            socket.connect(new InetSocketAddress(probeIPv4, 80), 8_000);
+            // The isolated Node Lab security group intentionally allows only TCP 443 egress.
+            // Keep the TUN probe inside that boundary instead of silently depending on HTTP/80.
+            socket.connect(new InetSocketAddress(probeIPv4, 443), 8_000);
             socket.setSoTimeout(8_000);
-            OutputStream output = socket.getOutputStream();
-            output.write(("GET / HTTP/1.1\r\nHost: " + host
-                    + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-            output.flush();
-
-            BufferedReader response = new BufferedReader(new InputStreamReader(
-                    socket.getInputStream(), StandardCharsets.US_ASCII));
-            String status = response.readLine();
-            if (status == null || !status.matches("HTTP/1\\.[01] 200(?: .*)?")) {
-                throw new java.io.IOException("egress probe returned unexpected status: " + status);
+            SSLSocketFactory tlsFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            try (SSLSocket tls = (SSLSocket) tlsFactory.createSocket(socket, host, 443, true)) {
+                tls.setSoTimeout(8_000);
+                SSLParameters parameters = tls.getSSLParameters();
+                parameters.setEndpointIdentificationAlgorithm("HTTPS");
+                parameters.setServerNames(java.util.Collections.singletonList(new SNIHostName(host)));
+                tls.setSSLParameters(parameters);
+                tls.startHandshake();
+                OutputStream output = tls.getOutputStream();
+                output.write(("GET / HTTP/1.1\r\nHost: " + host
+                        + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                output.flush();
+                return readHttpStatusBody(tls.getInputStream());
             }
-            String header;
-            while ((header = response.readLine()) != null && !header.isEmpty()) {
-                // The endpoint closes the response after returning the small public IP body.
-            }
-            if (header == null) throw new java.io.IOException("egress probe headers were incomplete");
-            StringBuilder body = new StringBuilder();
-            String line;
-            while ((line = response.readLine()) != null) body.append(line);
-            return body.toString().trim();
         }
     }
 

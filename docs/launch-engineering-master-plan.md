@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**Q1 M6 探针策略修正与新隔离窗口状态（2026-11-28 21:17 +08）**：定位到前次 Android TUN 出口探针使用 TCP 80，与 Node Lab 仅 TCP 443 egress 规则冲突；已将探针改为固定 IP 上验证 SNI/证书的 HTTPS 443，Android Debug/AndroidTest/JVM/lint 本地构建通过。新窗口 `xlb-lab-us-20261128-m6bridge4` 创建成功，节点直接 HTTPS 出口探测有 CommandId + Success 回执且返回其自身公网 IP；这不等于 Android 隧道验收。SSM 端口转发上传超时，随后 SSM/CloudFormation API Connect timeout，Node Agent 未部署，Android instrumentation 未运行。精确 `node_lab.py delete --apply` 无回执，不能宣称已回收；最近确认 TTL 仅终止实例，不删除栈/SG/Scheduler。下一步先在区域 API 恢复后对精确栈只读 inventory 并回收、核对残留，再用固定 IP HTTPS/443 探针跑 M6 Android 单次验收。门数仍 5/12（42%）。
+
 **provisioning diagnostics + SSM recheck（2026-11-28 20:46 +08）**：main `7e2c97a` CI `46145978043` success；root exception class logging tests 2/2、loopback mTLS fixture 5/5 consecutive local runs、Laravel 283 passed/2 skipped/2,524 assertions under synthetic bad proxy、Pint passed。此前 hosted Tests/MySQL jobs 间歇出现同一 `node_agent_connection_error`，rerun 通过不等于根因修复；此提交只提升诊断，不称链路稳定。AWS STS root valid，但 SSM token refresh endpoint 又 read timeout；没有云写入。放行门 5/12、模块 Android/M6 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。云通道恢复后继续 M6；等待时做离线缺口，不反复重建资源。
 
 **Q1 provisioning fixture 失败诊断增量（2026-11-28）**：增加安全的 deepest exception class 记录（最多遍历 8 层，字段不声称绝对 root cause），排查重复出现的 PHP→Go mTLS loopback provisioning retry；不记录错误消息或 endpoint，日志泄露边界未放宽。定向 2/2 与本地 Laravel full 283 passed/2 skipped 通过。近期 GitHub run 的 MySQL 和普通 Tests jobs 曾多次首跑失败后 rerun 通过，说明 CI 波动仍在，不能称稳定性修复；需先据下一次失败的异常类继续定位。首发门仍 5/12。
