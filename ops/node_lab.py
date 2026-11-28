@@ -32,8 +32,8 @@ def check_name(value):
 
 
 def check_resource_id(value, prefix):
-    if not re.fullmatch(prefix+r"-[a-f0-9]{17}", value):
-        raise ValueError(f"Resource ID must be a lowercase {prefix}- ID")
+    if not re.fullmatch(prefix+r"-(?:[a-f0-9]{8}|[a-f0-9]{17})", value):
+        raise ValueError(f"Resource ID must be a lowercase {prefix}- ID in a supported legacy or current format")
     return value
 
 
@@ -82,6 +82,17 @@ def aws(
 
 
 def inventory(args):
+    try:
+        return _inventory(args)
+    except (AttributeError, TypeError, KeyError, ValueError):
+        return {
+            "scope": {"name": args.name, "region": args.region, "ownership_tags": TAGS},
+            "status": "unavailable",
+            "error": "AWS returned an invalid inventory response shape",
+        }
+
+
+def _inventory(args):
     """Read-only inventory of one lab name and any independently discoverable remnants."""
 
     def ownership_tags_match(tags, expected):
@@ -188,6 +199,8 @@ def inventory(args):
                             if group.get("GroupId")
                         }),
                     })
+            if args.instance_id and any(instance["id"] != args.instance_id for instance in instances):
+                instances_result = {"status": "unavailable", "error": "EC2 returned an unexpected instance identity"}
             if instances_result["status"] == "available":
                 instances_result = {"status": "available", "resources": instances}
     elif instances_result["status"] == "not_found":
@@ -213,9 +226,7 @@ def inventory(args):
         volumes_result = query("volumes", volume_command, ("InvalidVolume.NotFound",))
         volumes_result, volumes = list_response(volumes_result, "Volumes", "EC2 volumes")
         if volumes_result["status"] == "available":
-            volumes_result = {
-                "status": "available",
-                "resources": [{
+            volume_resources = [{
                     "id": volume.get("VolumeId"),
                     "state": volume.get("State"),
                     "attachments": volume.get("Attachments", []),
@@ -223,8 +234,14 @@ def inventory(args):
                     "ownership_tags_match": ownership_tags_match(
                         volume.get("Tags", []), {**TAGS, "NodeId": name},
                     ),
-                } for volume in volumes],
-            }
+                } for volume in volumes]
+            if args.volume_id and any(volume["id"] != args.volume_id for volume in volume_resources):
+                volumes_result = {"status": "unavailable", "error": "EC2 returned an unexpected volume identity"}
+            else:
+                volumes_result = {
+                "status": "available",
+                "resources": volume_resources,
+                }
         elif volumes_result["status"] == "not_found":
             volumes_result = {"status": "available", "resources": []}
 
@@ -245,17 +262,18 @@ def inventory(args):
             groups_result = query("security groups", group_command, ("InvalidGroup.NotFound",))
             groups_result, groups = list_response(groups_result, "SecurityGroups", "EC2 security groups")
             if groups_result["status"] == "available":
-                groups_result = {
-                    "status": "available",
-                    "resources": [{
+                group_resources = [{
                         "id": group.get("GroupId"),
                         "name": group.get("GroupName"),
                         "description": group.get("Description"),
                         "tags": group.get("Tags", []),
                         "ownership_tags_match": ownership_tags_match(group.get("Tags", []), TAGS),
                         "node_name_in_group_name": name in (group.get("GroupName") or ""),
-                    } for group in groups],
-                }
+                    } for group in groups]
+                if args.security_group_id and any(group["id"] != args.security_group_id for group in group_resources):
+                    groups_result = {"status": "unavailable", "error": "EC2 returned an unexpected security group identity"}
+                else:
+                    groups_result = {"status": "available", "resources": group_resources}
 
             if groups_result["status"] == "unavailable":
                 interfaces_result = not_checked("security group query failed; interface correlation was not attempted")
@@ -299,7 +317,7 @@ def inventory(args):
                 if interface_command is not None:
                     missing_interface_markers = (
                         ("InvalidNetworkInterfaceID.NotFound",)
-                        if args.network_interface_id else ("InvalidGroup.NotFound",)
+                        if args.network_interface_id else ()
                     )
                     interfaces_result = query(
                         "network interfaces", interface_command, missing_interface_markers,
@@ -308,9 +326,7 @@ def inventory(args):
                         interfaces_result, "NetworkInterfaces", "EC2 network interfaces",
                     )
                     if interfaces_result["status"] == "available":
-                        interfaces_result = {
-                            "status": "available",
-                            "resources": [{
+                        interface_resources = [{
                                 "id": interface.get("NetworkInterfaceId"),
                                 "status": interface.get("Status"),
                                 "attachment": interface.get("Attachment"),
@@ -319,8 +335,15 @@ def inventory(args):
                                     if group.get("GroupId")
                                 }),
                                 "tags": interface.get("TagSet", []),
-                            } for interface in interfaces],
-                        }
+                                "ownership_tags_match": ownership_tags_match(
+                                    interface.get("TagSet", []), {**TAGS, "NodeId": name},
+                                ),
+                                "correlated_by_security_group": bool(security_group_ids),
+                            } for interface in interfaces]
+                        if args.network_interface_id and any(interface["id"] != args.network_interface_id for interface in interface_resources):
+                            interfaces_result = {"status": "unavailable", "error": "EC2 returned an unexpected network interface identity"}
+                        else:
+                            interfaces_result = {"status": "available", "resources": interface_resources}
                     elif interfaces_result["status"] == "not_found":
                         interfaces_result = {"status": "available", "resources": []}
 
@@ -337,7 +360,11 @@ def inventory(args):
         else:
             schedule_result = {
                 "status": "found",
-                "resource": {"name": schedule.get("Name"), "state": schedule.get("State")},
+                "resource": {
+                    "name": schedule.get("Name"),
+                    "state": schedule.get("State"),
+                    "ownership_scope": "name_match_only",
+                },
             }
     elif schedule_result["status"] == "not_found":
         schedule_result = {"status": "not_found", "resources": []}
@@ -358,7 +385,12 @@ def inventory(args):
         stack_resources_result = not_checked("stack identity could not be verified")
 
     return {
-        "scope": {"name": name, "region": args.region, "ownership_tags": TAGS},
+        "scope": {
+            "name": name,
+            "region": args.region,
+            "ownership_tags": TAGS,
+            "discovery_limit": "Fallback EC2 queries require expected lab tags; untagged or drift-tagged resources may not be discovered. Supply exact historical resource IDs where available.",
+        },
         "stack": stack_result,
         "stack_resources": stack_resources_result,
         "instances": instances_result,

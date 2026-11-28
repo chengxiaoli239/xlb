@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from node_lab import TAGS, aws, check_delete_scope, check_member_ingress_cidr, check_name, create_request, inventory
+from node_lab import TAGS, aws, check_delete_scope, check_member_ingress_cidr, check_name, check_resource_id, create_request, inventory
 
 
 class NodeLabSafetyTest(unittest.TestCase):
@@ -38,6 +38,13 @@ class NodeLabSafetyTest(unittest.TestCase):
         self.assertEqual(command[command.index("--cli-read-timeout") + 1], "15")
         self.assertEqual(run.call_args.kwargs["timeout"], 45)
         self.assertEqual(run.call_args.kwargs["env"]["AWS_MAX_ATTEMPTS"], "1")
+
+    def test_resource_id_validation_accepts_legacy_and_current_ec2_ids(self):
+        self.assertEqual(check_resource_id("i-1234abcd", "i"), "i-1234abcd")
+        self.assertEqual(check_resource_id("i-0123456789abcdef0", "i"), "i-0123456789abcdef0")
+        for resource_id in ("i-1234", "i-0123456789abcdef", "i-0123456789abcdefg"):
+            with self.subTest(resource_id=resource_id), self.assertRaises(ValueError):
+                check_resource_id(resource_id, "i")
 
     def test_inventory_finds_tagged_residual_resources_when_the_stack_is_gone(self):
         args = argparse.Namespace(
@@ -77,7 +84,52 @@ class NodeLabSafetyTest(unittest.TestCase):
         self.assertEqual(result["security_groups"]["resources"][0]["id"], args.security_group_id)
         self.assertTrue(result["security_groups"]["resources"][0]["ownership_tags_match"])
         self.assertEqual(result["scheduler"]["resource"]["state"], "ENABLED")
+        self.assertEqual(result["scheduler"]["resource"]["ownership_scope"], "name_match_only")
         self.assertEqual(len(calls), 6)
+
+    def test_inventory_rejects_explicit_id_response_mismatch(self):
+        args = argparse.Namespace(
+            profile="xlb-ops", region="us-west-2", name="xlb-lab-us-test",
+            instance_id="i-0123456789abcdef0", security_group_id=None,
+            volume_id=None, network_interface_id=None,
+        )
+
+        def fake_aws(_args, *command, **_options):
+            if command[:2] == ("cloudformation", "describe-stacks"):
+                raise RuntimeError("ValidationError: Stack with id xlb-lab-us-test does not exist")
+            if command[:2] == ("ec2", "describe-instances"):
+                return {"Reservations": [{"Instances": [{"InstanceId": "i-11111111111111111", "State": {"Name": "terminated"}}]}]}
+            if command[:2] == ("scheduler", "get-schedule"):
+                raise RuntimeError("ResourceNotFoundException")
+            self.fail(f"Unexpected dependent query after identity mismatch: {command}")
+
+        with patch("node_lab.aws", side_effect=fake_aws):
+            result = inventory(args)
+
+        self.assertEqual(result["instances"]["status"], "unavailable")
+        self.assertEqual(result["volumes"]["status"], "not_checked")
+        self.assertEqual(result["security_groups"]["status"], "not_checked")
+
+    def test_inventory_classifies_malformed_nested_responses_as_unavailable(self):
+        args = argparse.Namespace(
+            profile="xlb-ops", region="us-west-2", name="xlb-lab-us-test",
+            instance_id=None, security_group_id=None, volume_id=None, network_interface_id=None,
+        )
+
+        def fake_aws(_args, *command, **_options):
+            if command[:2] == ("cloudformation", "describe-stacks"):
+                return {"Stacks": [None]}
+            if command[:2] == ("ec2", "describe-instances"):
+                return {"Reservations": [None]}
+            if command[:2] == ("scheduler", "get-schedule"):
+                return {"Name": args.name+"-expiry", "State": "ENABLED"}
+            self.fail(f"Malformed response should stop dependent checks: {command}")
+
+        with patch("node_lab.aws", side_effect=fake_aws):
+            result = inventory(args)
+
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["error"], "AWS returned an invalid inventory response shape")
 
     def test_inventory_reports_unavailable_checks_without_claiming_empty_resources(self):
         args = argparse.Namespace(
@@ -124,7 +176,7 @@ class NodeLabSafetyTest(unittest.TestCase):
                 raise RuntimeError("InvalidGroup.NotFound")
             if command[:2] == ("ec2", "describe-network-interfaces"):
                 self.assertIn("Name=group-id,Values="+args.security_group_id, command)
-                raise RuntimeError("InvalidGroup.NotFound")
+                return {"NetworkInterfaces": []}
             if command[:2] == ("scheduler", "get-schedule"):
                 raise RuntimeError("ResourceNotFoundException")
             self.fail(f"Unexpected non-inventory AWS command: {command}")

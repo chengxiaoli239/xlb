@@ -72,6 +72,8 @@ python3 -B ops/node_lab.py --profile xlb-ops --region us-west-2 inventory \
 # 已知卷/网卡 ID 时也可分别传 --volume-id / --network-interface-id。
 # 输出按 stack/EC2/volume/ENI/security-group/Scheduler 分项显示 found、available、not_found、unavailable 或 not_checked；
 # 任一项不可查询或关联 ID 不足时退出码为 2，只能表示盘点未完成，不能报告“无残留/已回收”。该命令只读。
+# fallback 只查预期 lab tags，标签缺失或漂移的孤儿资源可能无法发现；精确 ID 查询更可靠。
+# 按 SG 关联发现的 ENI 只标作 related；Scheduler 是名称匹配，均不证明所有权或授权删除。
 ```
 
 创建保护：固定 `xlb-lab-*` 命名和专属标签；测试时长限 15/30/60 分钟；CloudFormation 失败执行回收，不在失败时保留整套新资源。云端 Scheduler 在指定 UTC 时间终止实例，主机启动时还有 shutdown→terminate 兜底。到期时间在实际执行前即时生成，不能复用旧计划。冷启动慢于测试窗口时应删除栈重来。
