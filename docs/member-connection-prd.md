@@ -4,6 +4,8 @@
 
 ## 开发进度（2026-11-28）
 
+- **PHP→Node Agent provisioning 间歇连接失败可诊断性增强（2026-11-28，离线回归）**：托管 MySQL 8.4 与通用 Laravel job 反复观测到同一 mTLS provisioning fixture 的 `node_agent_connection_error`/outbox retry，但此前日志只给外层 ConnectionException，无法继续区分连接/握手包装原因。现安全日志增加 `root_cause_class`（最多沿 previous 链 8 层，仅记录异常类名），仍不记录 exception message、endpoint、证书、密钥或请求 payload；回归用含“private endpoint”字样的内层异常验证日志只带类名。定向两项 tests 2/2、全 Laravel 283 passed/2 skipped/2,524 assertions（本地合成坏 HTTPS_PROXY + 空 NO_PROXY）、Pint 通过。该改动增加下一次失败的诊断信息，**不修复也不宣称修复间歇性连接问题**；单元和本机回归通过不能推导 hosted MySQL/真实节点传输稳定。下一步以新日志证据定位根因，而不是反复对同一失败 job rerun。首发放行门仍 5/12（42%），真实 Node Agent/member data-plane gate 不变。
+
 - **M6 回收后的端点可达性复核（2026-11-28 20:08 +08）**：清理完成后 STS 仍返回获批 root principal；精确 CloudFormation 再查 `xlb-lab-us-20261128-m6bridge3` 返回 stack does not exist，确认栈未重建。当前 SSM 只读调用在 `us-east-1.signin.aws.amazon.com/v1/token` token refresh read timeout 结束，不能确认旧实例或其他实例的当前 SSM 在线状态；不会因此重建节点或重复投递 Agent 安装。前一轮成功的精确回执已确认该栈实例终止、卷/标签 ENI/SG/Scheduler 无残留。下一步需要 SSM bearer token refresh endpoint 与 us-west-2 SSM API 稳定可达，然后才使用新且短 TTL 的窗口继续 Agent 部署/Android 验收；部署命令无 CommandId时须先核查命令状态，不能盲目重发。放行门仍 5/12。
 
 - **库存阶段主线 CI 与间歇性 MySQL fixture 失败复跑（2026-11-28 20:05 +08）**：本轮独立 inventory 工具审查修正后，全 `ops` unittest 86/86 通过、Python 编译和 diff check 通过；提交 `e652bfb` 对应主线 CI `46142307937` 的 Node Agent、PostgreSQL、Android、静态构建、security/ops 和 provenance jobs 通过，但 MySQL 8.4 Laravel suite 的 PHP→Go mTLS loopback provisioning 首跑再现 `node_agent_connection_error`/outbox `retry`（期望 confirmed）。只重跑失败的 MySQL job 后通过。该重跑不证明根因修复或测试/传输稳定；此前坏代理对 loopback fixture 的本地复现与隔离已记录，但不能据此归因该托管 MySQL 偶发失败。最新 PRD 和总体计划提交仅改文档，不触发额外运行时改动。首发门保持 5/12（42%）；真实 Node Agent/会员数据面未验收。

@@ -116,7 +116,10 @@ class NodePeerProvisioningTest extends TestCase
             ->with('Processing node peer provisioning outbox item.');
         Log::shouldReceive('warning')
             ->once()
-            ->with('Node peer provisioning attempt failed.', ['exception_class' => \RuntimeException::class]);
+            ->with('Node peer provisioning attempt failed.', [
+                'exception_class' => \RuntimeException::class,
+                'root_cause_class' => \RuntimeException::class,
+            ]);
         Log::shouldReceive('withoutContext')
             ->once()
             ->with(['node_operation_id', 'node_peer_id', 'request_id']);
@@ -138,7 +141,24 @@ class NodePeerProvisioningTest extends TestCase
         $this->mock(NodePeerProvisioningDriver::class)
             ->shouldReceive('provision')
             ->once()
-            ->andThrow(new ConnectionException('connection failed'));
+            ->andThrow(new ConnectionException('sensitive wrapper detail', 0, new \RuntimeException('private endpoint')));
+
+        Log::shouldReceive('shareContext')
+            ->once()
+            ->with(Mockery::on(static fn (array $context): bool => ($context['node_operation_id'] ?? null) === $job->id
+                && ($context['node_peer_id'] ?? null) === $peerId));
+        Log::shouldReceive('info')
+            ->once()
+            ->with('Processing node peer provisioning outbox item.');
+        Log::shouldReceive('warning')
+            ->once()
+            ->with('Node peer provisioning attempt failed.', [
+                'exception_class' => ConnectionException::class,
+                'root_cause_class' => \RuntimeException::class,
+            ]);
+        Log::shouldReceive('withoutContext')
+            ->once()
+            ->with(['node_operation_id', 'node_peer_id']);
 
         $this->assertSame(1, app(NodePeerProvisioningProcessor::class)->processDue());
         $this->assertDatabaseHas('node_access_provisioning_outbox', [
