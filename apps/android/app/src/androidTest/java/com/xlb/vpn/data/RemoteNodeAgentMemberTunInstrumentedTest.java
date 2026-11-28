@@ -29,7 +29,6 @@ import com.xlb.vpn.tunnel.MemberTunnelGrantStore;
 import com.xlb.vpn.tunnel.XlbVpnService;
 
 import org.json.JSONObject;
-import org.json.JSONArray;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -39,8 +38,6 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.Inet4Address;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URL;
@@ -105,7 +102,7 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
         long generation = 1;
         long bindingGeneration = 1;
         String expiresAt = Instant.now().plus(30, ChronoUnit.MINUTES).toString();
-        String egressProbeIPv4 = resolveEgressProbeIPv4(context);
+        String egressProbeIPv4 = requiredArgument(arguments, "egress_probe_ip");
         AtomicInteger connectedStates = new AtomicInteger();
         AtomicReference<String> tunnelFailure = new AtomicReference<>();
         BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -399,29 +396,6 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
         String line;
         while ((line = response.readLine()) != null) body.append(line);
         return body.toString().trim();
-    }
-
-    private static String resolveEgressProbeIPv4(Context context) throws Exception {
-        ConnectivityManager manager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        Network network = manager == null ? null : manager.getActiveNetwork();
-        if (network == null) throw new java.io.IOException("egress probe network is unavailable before VPN start");
-        java.net.URLConnection connection = network.openConnection(
-                new URL("https://cloudflare-dns.com/dns-query?name=checkip.amazonaws.com&type=A"));
-        connection.setConnectTimeout(8_000);
-        connection.setReadTimeout(8_000);
-        connection.setRequestProperty("Accept", "application/dns-json");
-        String response;
-        try (InputStream input = connection.getInputStream()) {
-            response = new String(input.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        JSONArray answers = new JSONObject(response).getJSONArray("Answer");
-        for (int index = 0; index < answers.length(); index++) {
-            JSONObject answer = answers.getJSONObject(index);
-            if (answer.optInt("type") != 1) continue;
-            InetAddress address = InetAddress.getByName(answer.getString("data"));
-            if (address instanceof Inet4Address) return address.getHostAddress();
-        }
-        throw new java.io.IOException("egress probe did not resolve to IPv4 before VPN start");
     }
 
     private static String fetchEgressIp(Network network, String probeIPv4) throws Exception {
