@@ -1,6 +1,6 @@
 # 上线工程总体规划：批量部署 / 快速上下线 / 压测负载均衡 / 四端研发 / 多云长期演进
 
-日期：2026-11-27（滚动执行状态复核）
+日期：2026-11-28（滚动执行状态复核）
 状态：**滚动执行计划**。路线与验收门在本文维护；具体阶段证据以 `docs/member-connection-prd.md` 顶部和链接验收记录为准。本文不改任何线上资源，不代表生产已上线或可发布。
 
 ## 0. 这份文档解决什么
@@ -16,7 +16,9 @@
 
 > 结论先行：目前已从单纯本地业务原型推进到隔离节点协议证据、支付沙箱账本、Android Debug 客户端和 M9 多端账号状态；**离上线仍有技术放行、合规与运营门槛**。CI、Docker 构建文件、k6 场景和 smoke 脚本已入库，但没有实测压测报告、staging、生产部署/回滚演练、生产监控告警或批量节点编排。下方 §0.1 是当前执行快照；旧章节中的全仓"无脚本/无工作流/客户端未实现"等基线文字应以该快照和源码复核为准。
 
-### 0.1 当前完成度与工作队列（2026-11-27）
+### 0.1 当前完成度与工作队列（2026-11-28）
+
+**2026-11-28 M6 真实 egress 故障分层诊断准备（本机 AVD）**：上一隔离窗口证明 KMS-backed Node Agent 启动、管理 mTLS、会员 peer provisioning receipt、Android Keystore proof、profile 校验及 system TUN route 建立；但 Android→Agent→公网 egress 没有获得有效响应，撤权主回执与最终流量断言未执行。新增 instrumentation 在 TUN 启动前用同一 Keystore signer 对真实隔离 Node Agent 执行 SOCKS→TLS 预检，以区分 proof bridge/Agent 数据面与 Mihomo/TUN egress 故障。JDK 21 下 Android Debug/AndroidTest/JVM/lint 通过，专用 AVD 的 Keystore→Go TLS 1.3 mTLS signer 1/1、TUN→本地 fixture Agent echo/revoke 1/1 通过。新增预检尚未连接真实节点，不能视为 egress 已修复或 M6 通过。总门保持 5/12；模块仍 Android 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。下一步需在获批单节点 TTL 窗口中先观察预检，再按结果只排查相应一段。
 
 **2026-11-27 M6 隔离 Node Agent 证书 EKU 与 quota mTLS 要求对齐**：`node-lab-certificates` 生成的 KMS 对应 Node Agent leaf 现同时包含 TLS ServerAuth 与 quota-authority TLS ClientAuth EKU，满足 production-shaped `NewRuntimeDataPlane` 对反向 HTTPS/mTLS client identity 的本地构造校验；回归还把该 leaf 和匹配 signer 传入 `NewHTTPQuotaAuthority` 的证书校验器，确认客户端用途被接受而不发起网络请求；admin certificate 仍限定 ClientAuth。证书定向 race 测试、Node Agent 全量 race 217 项、vet/build 通过，主线提交 `9e26660` 的 CI `45896618347` 全绿。本修改只消除隔离证书夹具与 runtime 合同矛盾，不调用 KMS、不生成证书、不新增 AWS 资源，也不证明 live runtime/M6；门数保持 5/12。
 

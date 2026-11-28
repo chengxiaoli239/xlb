@@ -1,6 +1,7 @@
 package com.xlb.vpn.data;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -64,7 +65,11 @@ import java.util.regex.Pattern;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManagerFactory;
 
 @RunWith(AndroidJUnit4.class)
@@ -181,6 +186,8 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
                     profile, profileDigest, artifact.getString("renderer_id"), artifact.getString("renderer_version"),
                     artifact.getString("bridge_protocol"), artifact.getBoolean("connectable"));
             assertNotNull("validated member grant rejected the live Node Agent profile", grant);
+            assertEquals("Keystore-authenticated proof bridge egress failed before TUN startup",
+                    expectedEgressIp, fetchEgressIpThroughProofBridge(proof, grant));
 
             handoffId = MemberTunnelGrantStore.publish(grant);
             requestVpnPermission(context);
@@ -292,6 +299,106 @@ public final class RemoteNodeAgentMemberTunInstrumentedTest {
         connection.disconnect();
         assertEquals("Node Agent request failed: " + response, 200, status);
         return new JSONObject(response);
+    }
+
+    private static String fetchEgressIpThroughProofBridge(MemberDeviceProof proof, MemberTunnelGrant grant)
+            throws Exception {
+        try (DeviceProofCertificate certificate = DeviceProofCertificate.create(proof)) {
+            DeviceProofCertificate.BridgeCredentials credentials = certificate.startProofBridge(
+                    grant.bridgeEndpoint(), grant.trustedServerCaPem());
+            try (Socket socks = new Socket()) {
+                socks.connect(new java.net.InetSocketAddress("127.0.0.1", 17890), 10_000);
+                socks.setSoTimeout(15_000);
+                InputStream input = socks.getInputStream();
+                OutputStream output = socks.getOutputStream();
+                output.write(new byte[]{5, 1, 2});
+                output.flush();
+                assertArrayEquals("proof bridge did not select username/password authentication",
+                        new byte[]{5, 2}, readBytes(input, 2));
+
+                byte[] username = credentials.usernameForProfile().getBytes(StandardCharsets.UTF_8);
+                byte[] password = credentials.passwordForProfile().getBytes(StandardCharsets.UTF_8);
+                assertTrue(username.length > 0 && username.length <= 255);
+                assertTrue(password.length > 0 && password.length <= 255);
+                output.write(new byte[]{1, (byte) username.length});
+                output.write(username);
+                output.write((byte) password.length);
+                output.write(password);
+                output.flush();
+                assertArrayEquals("proof bridge rejected its generated local credentials",
+                        new byte[]{1, 0}, readBytes(input, 2));
+
+                String host = "checkip.amazonaws.com";
+                byte[] hostBytes = host.getBytes(StandardCharsets.US_ASCII);
+                output.write(new byte[]{5, 1, 0, 3, (byte) hostBytes.length});
+                output.write(hostBytes);
+                output.write(new byte[]{1, (byte) 187});
+                output.flush();
+                byte[] connectReply = readBytes(input, 4);
+                assertEquals("proof bridge could not open an authenticated Agent stream",
+                        0, connectReply[1]);
+                skipSocksBoundAddress(input, connectReply[3]);
+
+                SSLSocketFactory socketFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+                try (SSLSocket tls = (SSLSocket) socketFactory.createSocket(socks, host, 443, true)) {
+                    tls.setSoTimeout(15_000);
+                    SSLParameters parameters = tls.getSSLParameters();
+                    parameters.setEndpointIdentificationAlgorithm("HTTPS");
+                    parameters.setServerNames(java.util.Collections.singletonList(new SNIHostName(host)));
+                    tls.setSSLParameters(parameters);
+                    tls.startHandshake();
+                    OutputStream request = tls.getOutputStream();
+                    request.write(("GET / HTTP/1.1\r\nHost: " + host
+                            + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                    request.flush();
+                    return readHttpStatusBody(tls.getInputStream());
+                }
+            } finally {
+                certificate.stopProofBridge();
+            }
+        }
+    }
+
+    private static byte[] readBytes(InputStream input, int length) throws Exception {
+        byte[] bytes = new byte[length];
+        int offset = 0;
+        while (offset < length) {
+            int count = input.read(bytes, offset, length - offset);
+            if (count < 0) throw new java.io.EOFException("proof bridge SOCKS response ended early");
+            offset += count;
+        }
+        return bytes;
+    }
+
+    private static void skipSocksBoundAddress(InputStream input, byte addressType) throws Exception {
+        int addressLength;
+        if (addressType == 1) {
+            addressLength = 4;
+        } else if (addressType == 4) {
+            addressLength = 16;
+        } else if (addressType == 3) {
+            addressLength = input.read();
+            if (addressLength < 0) throw new java.io.EOFException("proof bridge SOCKS address ended early");
+        } else {
+            throw new java.io.IOException("proof bridge SOCKS response used an unknown address type");
+        }
+        readBytes(input, addressLength + 2);
+    }
+
+    private static String readHttpStatusBody(InputStream input) throws Exception {
+        BufferedReader response = new BufferedReader(new InputStreamReader(input, StandardCharsets.US_ASCII));
+        String status = response.readLine();
+        assertTrue("proof bridge egress probe returned an unexpected HTTP response",
+                status != null && status.matches("HTTP/1\\.[01] 200(?: .*)?"));
+        String header;
+        while ((header = response.readLine()) != null && !header.isEmpty()) {
+            // The egress endpoint returns a single short public IPv4 body.
+        }
+        assertNotNull("proof bridge egress probe response headers were incomplete", header);
+        StringBuilder body = new StringBuilder();
+        String line;
+        while ((line = response.readLine()) != null) body.append(line);
+        return body.toString().trim();
     }
 
     private static String resolveEgressProbeIPv4(Context context) throws Exception {

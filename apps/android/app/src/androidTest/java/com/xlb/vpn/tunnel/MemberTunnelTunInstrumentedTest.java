@@ -122,8 +122,8 @@ public final class MemberTunnelTunInstrumentedTest {
             assertTrue("revoked peer did not fail the active member tunnel health monitor",
                     awaitState(XlbVpnService.STATE_ERROR, TimeUnit.SECONDS.toMillis(5)));
             JSONObject rejection = new JSONObject(DeviceProofJni.nodeAgentFixtureStatus());
-            assertEquals("revoked peer health probe did not reach the isolated Node Agent", 403,
-                    rejection.getInt("status"));
+            assertEquals("revoked peer health probe did not receive an authorization rejection: " + rejection,
+                    403, rejection.getInt("status"));
             assertTrue(rejection.getString("body").contains("unauthorized"));
             assertFalse("revoked member tunnel still owns its session", XlbVpnService.currentTunnelIsMember());
             assertTrue("revoked member tunnel retained the Android VPN network",
