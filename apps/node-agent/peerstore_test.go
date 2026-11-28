@@ -53,6 +53,27 @@ func TestEnsureIsIdempotentAndRejectsRequestIDReuse(t *testing.T) {
 	}
 }
 
+func TestPeerStoreRejectsPersistedNodeIdentityOrCapacityChanges(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		nodeID   string
+		capacity int
+	}{
+		{name: "node identity change", nodeID: "protocol-node-uuid", capacity: 3},
+		{name: "capacity change", nodeID: "stack-node-label", capacity: 4},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "peer-store.json")
+			if _, err := OpenPeerStore(path, "stack-node-label", 3); err != nil {
+				t.Fatalf("open initial peer store: %v", err)
+			}
+			if _, err := OpenPeerStore(path, test.nodeID, test.capacity); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("open peer store with changed identity/configuration error = %v; want ErrInvalid", err)
+			}
+		})
+	}
+}
+
 func TestIsolatedEnsureReceiptDoesNotIncludeAProductionProfileArtifact(t *testing.T) {
 	store := openTestStore(t, 4)
 	request, _ := testEnsureRequest(t, "peer-no-profile", "ensure-no-profile")
