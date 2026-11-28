@@ -8,6 +8,7 @@ use App\Services\NodePeerProvisioningService;
 use App\Services\NodePeerRevocationRequestService;
 use App\Services\SandboxNodePeerProvisioningDriver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -126,6 +127,24 @@ class NodePeerProvisioningTest extends TestCase
             'status' => 'retry',
             'request_correlation_id' => $requestCorrelationId,
             'last_error_code' => 'node_agent_error',
+        ]);
+    }
+
+    public function test_node_agent_connection_failures_have_a_distinct_retry_code(): void
+    {
+        $this->prepareProductionRouteAndDevice();
+        $peerId = $this->insertProvisioningPeerAndJob();
+        $job = DB::table('node_access_provisioning_outbox')->where('peer_id', $peerId)->first();
+        $this->mock(NodePeerProvisioningDriver::class)
+            ->shouldReceive('provision')
+            ->once()
+            ->andThrow(new ConnectionException('connection failed'));
+
+        $this->assertSame(1, app(NodePeerProvisioningProcessor::class)->processDue());
+        $this->assertDatabaseHas('node_access_provisioning_outbox', [
+            'id' => $job->id,
+            'status' => 'retry',
+            'last_error_code' => 'node_agent_connection_error',
         ]);
     }
 

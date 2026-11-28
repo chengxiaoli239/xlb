@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**Provisioning retry error 分类与再诊断（2026-11-28，本机验证通过）**：readiness fixture 修复合入后，run `46103366403` 的 PostgreSQL compatibility job 成功，但通用 SQLite Tests job 同一 PHP→Go mTLS provisioning test 首次及 rerun 仍失败且 outbox 为 `retry/node_agent_error`。现将 `Illuminate\Http\Client\ConnectionException` 单独分类为 `node_agent_connection_error`，其余保留 `node_agent_error`，不记录异常原文或 endpoint。分类 Feature 2/2、provisioning 集成 10/10、Laravel 全套 283 passed/2 skipped、Pint 通过；下一次 hosted CI 将判断失败实际走连接异常还是 Agent/ack 逻辑，随后按证据修复。现有 Node renderer/TUN 真实 M6 gate 未变，首发仍 5/12。
+
 **Hosted PostgreSQL provisioning test readiness-race 修复（2026-11-28，完成）**：`c520716` 的 hosted run 首次及 failed-job rerun 都只在 PostgreSQL 16 下 PHP→Go provisioning fixture 首次请求重试失败；同 run 的 MySQL/SQLite、Android、Node Agent Go、静态构建通过。本机该 Feature 连续 6/6 通过。确认 test helper 在真正启动 TLS serving 前发出 readiness JSON，导致 PHP 可能过早发 mTLS request；现改为先启动 Agent 并完成受临时 client cert/CA 验证的 TLS 1.3/mTLS `/healthz` 后才发 readiness JSON。修改仅限测试夹具；Node Agent race 218、vet/build 通过；`ad58038` 对应 hosted CI `46102060506` 全绿，包含 PostgreSQL 16 compatibility job。上线门不变。
 
 **M6 profile/TUN 失败根因修复（2026-11-28，待新隔离窗口复测）**：本次远端 Android 测试的 Agent mTLS 和 `confirmed_test` provisioning 已过，Keystore proof 创建成功，但 `MihomoCore.loadMemberProfile` 拒绝 TUN 启动。源码对照确认 Android 合约将本机 proof SOCKS 端口固定为 `127.0.0.1:17890`，本次 Node Agent renderer runtime 错配为 `127.0.0.1:10808`。现 renderer 构造器 fail closed 要求 Android bridge 端口，加入针对 10808 错配的 Go 回归并修正 fixtures；Node Agent 全套 race 218 项/6 packages、vet/build 通过。该离线修复未云端复测，因此 TUN、egress、撤权和最终流量仍未验收。单次节点窗口已完整回收：CloudFormation delete waiter success、栈不存在、实例 `terminated`、该 NodeId 的安全组与 Scheduler 为空；AVD、临时证书/私钥和本机转发均已清理。恢复 AWS API 可达后应创建下一获批窗口再验证修复，当前总门 5/12。

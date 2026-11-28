@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -50,7 +51,8 @@ class NodePeerProvisioningProcessor
                 $this->provision($job);
                 Log::info('Node peer provisioning outbox item processed.');
             } catch (Throwable $exception) {
-                $this->scheduleRetry($job);
+                $this->scheduleRetry($job, $exception instanceof ConnectionException
+                    ? 'node_agent_connection_error' : 'node_agent_error');
                 Log::warning('Node peer provisioning attempt failed.', [
                     'exception_class' => $exception::class,
                 ]);
@@ -223,7 +225,7 @@ class NodePeerProvisioningProcessor
             ]);
     }
 
-    private function scheduleRetry(object $job): void
+    private function scheduleRetry(object $job, string $errorCode): void
     {
         $attempt = (int) $job->attempts;
         $delaySeconds = min(3600, 10 * (2 ** min(max($attempt - 1, 0), 8)));
@@ -232,7 +234,7 @@ class NodePeerProvisioningProcessor
             ->where('lock_token', $job->lock_token)->update([
                 'status' => 'retry', 'next_attempt_at' => $at->copy()->addSeconds($delaySeconds)->toIso8601String(),
                 'processing_at' => null, 'lease_expires_at' => null, 'lock_token' => null,
-                'last_error_code' => 'node_agent_error', 'updated_at' => $at->toIso8601String(),
+                'last_error_code' => $errorCode, 'updated_at' => $at->toIso8601String(),
             ]);
     }
 }
