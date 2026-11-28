@@ -82,12 +82,33 @@ class WorkflowActionPinsTest(unittest.TestCase):
         self.assertIn("XLB_ANDROID_RELEASE_KEY_ALIAS", workflow)
         self.assertIn("XLB_ANDROID_RELEASE_KEY_PASSWORD", workflow)
         self.assertIn("XLB_ANDROID_RELEASE_API_BASE_URL", workflow)
+        preflight_step = re.search(
+            r"(?ms)^      - name: Preflight protected release inputs\n(?P<body>.*?)(?=^      - name: |\Z)",
+            candidate_job,
+        )
+        self.assertIsNotNone(preflight_step)
+        release_inputs = {
+            "RELEASE_KEYSTORE_BASE64": "secrets.XLB_ANDROID_RELEASE_KEYSTORE_BASE64",
+            "RELEASE_STORE_PASSWORD": "secrets.XLB_ANDROID_RELEASE_STORE_PASSWORD",
+            "RELEASE_KEY_ALIAS": "secrets.XLB_ANDROID_RELEASE_KEY_ALIAS",
+            "RELEASE_KEY_PASSWORD": "secrets.XLB_ANDROID_RELEASE_KEY_PASSWORD",
+            "RELEASE_API_BASE_URL": "vars.XLB_ANDROID_RELEASE_API_BASE_URL",
+        }
+        for environment_name, source_expression in release_inputs.items():
+            input_name = source_expression.split(".", maxsplit=1)[1]
+            self.assertIn(f"Missing protected release input: {input_name}", preflight_step.group("body"))
+            self.assertIn(f"{environment_name}: ${{{{ {source_expression} }}}}", preflight_step.group("body"))
+            self.assertIn(f'[[ -z "${environment_name}" ]]', preflight_step.group("body"))
+        self.assertIn("missing=1", preflight_step.group("body"))
+        self.assertIn('exit "$missing"', preflight_step.group("body"))
+        self.assertNotIn("echo \"$RELEASE_", preflight_step.group("body"))
         self.assertIn("push-to-registry: false", workflow)
         self.assertIn("create-storage-record: false", workflow)
         self.assertIn("retention-days: 14", workflow)
         self.assertEqual(
             [
                 "Check out source",
+                "Preflight protected release inputs",
                 "Set up Java",
                 "Set up Android SDK",
                 "Install pinned Android SDK and NDK",

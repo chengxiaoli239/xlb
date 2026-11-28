@@ -33,6 +33,38 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Preflight protected release inputs
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.XLB_ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.XLB_ANDROID_RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.XLB_ANDROID_RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.XLB_ANDROID_RELEASE_KEY_PASSWORD }}
+          RELEASE_API_BASE_URL: ${{ vars.XLB_ANDROID_RELEASE_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          missing=0
+          if [[ -z "$RELEASE_KEYSTORE_BASE64" ]]; then
+            echo '::error::Missing protected release input: XLB_ANDROID_RELEASE_KEYSTORE_BASE64'
+            missing=1
+          fi
+          if [[ -z "$RELEASE_STORE_PASSWORD" ]]; then
+            echo '::error::Missing protected release input: XLB_ANDROID_RELEASE_STORE_PASSWORD'
+            missing=1
+          fi
+          if [[ -z "$RELEASE_KEY_ALIAS" ]]; then
+            echo '::error::Missing protected release input: XLB_ANDROID_RELEASE_KEY_ALIAS'
+            missing=1
+          fi
+          if [[ -z "$RELEASE_KEY_PASSWORD" ]]; then
+            echo '::error::Missing protected release input: XLB_ANDROID_RELEASE_KEY_PASSWORD'
+            missing=1
+          fi
+          if [[ -z "$RELEASE_API_BASE_URL" ]]; then
+            echo '::error::Missing protected release input: XLB_ANDROID_RELEASE_API_BASE_URL'
+            missing=1
+          fi
+          exit "$missing"
+
       - name: Set up Java
         uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
