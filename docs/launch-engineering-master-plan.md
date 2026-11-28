@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**M6 回收后 AWS 通道复核（2026-11-28 20:08 +08）**：STS root 可用，精确 CFN 查询确认 `m6bridge3` 栈不存在。SSM 查询在 AWS `us-east-1.signin.aws.amazon.com/v1/token` token-refresh read timeout 失败，区域 SSM 在线状态暂不可查。旧窗口删除和零残留以紧邻下方具体回执为准；不要因 control-plane 认证/网络失败新建空闲计费节点或重复发送无 CommandId 的部署命令。待登录 token refresh 与 SSM API 通道可用后，先只读确认新验收资源、再用新短 TTL plan 推进。
+
 **主线 CI 复核（2026-11-28 20:05 +08）**：inventory hardening 提交 `e652bfb` 的 hosted CI `46142307937` 除 MySQL 8.4 job 首跑外均 success；失败 job 复跑通过。失败仍是已有 PHP→Go mTLS loopback provisioning fixture `node_agent_connection_error`/outbox retry，并非 inventory 路径；单次 rerun 通过不足以称为修复或稳定。全 ops 86/86、py_compile、diff check 本地通过。首发门仍 5/12。
 
 **M6 隔离窗口回收完成（2026-11-28 19:55 +08）**：新栈 `xlb-lab-us-20261128-m6bridge3` TTL 后实例已终止；由于栈本身仍留存，按精确获批栈 plan→apply 删除，CloudFormation delete waiter success。最终 AWS 只读回执确认 stack 不存在、实例 terminated、volume 无 NodeId 匹配项、安全组不存在、ENI 0、Scheduler 不存在。未碰既有 IAM/KMS/业务服务器。SSM 部署命令未取得 CommandId，Agent health 未验收；无 Android TUN/egress/撤权回执，故 M6 不通过、首发仍 5/12（42%）。是否产生及实际多少费用需后续账单证据，本轮不宣称费用归零。
