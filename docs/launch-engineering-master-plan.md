@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**M6 新窗口到期后复核（2026-11-28 19:49 +08）**：`xlb-lab-us-20261128-m6bridge3` 曾创建成功，Scheduler 设定 11:39:04 UTC 终止实例；临时 bundle 上传到实例有 hash 回执，但 SSM Agent 安装命令没有 CommandId。TTL 后 CloudFormation/EC2/SSM/Scheduler 区域 API 均 timeout，inventory 只给出 unavailable/not_checked，不能确认实例终止、栈删除或费用停止。本轮没有真实 Agent health、Android TUN/egress/revoke 回执，没有重复安装命令或发送删除请求。下一步恢复区域 API 后先精确盘点；仍有栈则按 Node Lab delete 收尾，栈不存在则核对全部可发现残留，不碰业务资源。M6/首发门不增加，5/12（42%）。
+
 **M6 inventory 审查收口（2026-11-28）**：对 stack-independent inventory 补充关键边界：tag fallback 只发现符合标签的资源，不能宣称全账号/所有孤儿资源都已扫描；已知 ID 精确查询并校验 returned identity；畸形嵌套响应 fail closed；按共享 SG 关联的 ENI 只当相关项，Scheduler 名称匹配不等于所有权。后续清理必须结合 CloudFormation 资源清单/精确历史 IDs 和标签验证。Node Lab tests 14/14、全 ops suite 86/86、py_compile 和 diff check 通过；首发门仍 5/12。
 
 **M6 新窗口结果（2026-11-28 19:20 +08）**：用户授权后，在旧 stack/实例/卷/ENI/SG/Scheduler 盘点均空且复用现有 IAM/KMS 的基础上，新建 `xlb-lab-us-20261128-m6bridge3` 单台 `t3.small` / 60 分钟，CloudFormation CREATE_COMPLETE，EC2 `i-05a6872c6227f9099` 曾为 running + checks ok、SSM Online；endpoint `16.144.59.80`，仅当前 `/32` TCP 443 ingress，Scheduler 到期 `11:39:04Z`。现有 KMS key 本轮验证 enabled，IAM 仅允许该 key 的签名/公钥读取。Linux Agent/runtime/短期 test cert bundle SHA-256 在 SSM loopback port-forward 上传并由远端校验一致；随后 SSM 安装/启动命令遇到 `CreateOAuth2Token INVALID_REQUEST`/SSM endpoint timeout，没有 CommandId/health 回执。现时无法确认该部署请求是否到达 AWS 或实例当前是否可访问；不得宣称 Agent 已安装。没有 Android AVD 真节点测试或真实 member egress/revoke evidence；首发门仍 5/12。网络恢复后首选以 AWS_MAX_ATTEMPTS=1 核验精确栈/实例/SSM command/state，确认 Agent listener 后在剩余 TTL 内跑 Android remote harness；若不能，删除精确栈并 inventory 确认回收，避免留计费。
