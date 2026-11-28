@@ -18,7 +18,7 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
-**Node Health Probe loopback fixture 代理隔离（2026-11-28 09:11 UTC）**：带不可达合成 `HTTPS_PROXY` 和空 `NO_PROXY` 的完整 Laravel 套件先复现两个 PHP→Go/TLS loopback mTLS probe fixture 失败；`ConfiguredNodeDataPlaneProbeTransportTest` 现仅在自身测试生命周期为 `127.0.0.1,localhost` 加 bypass 并恢复环境。该类 8/8、108 assertions，完整 Laravel 283 passed、2 skipped、2,520 assertions，Pint 通过。该证据限定本地测试环境，不能归因为 PostgreSQL hosted-CI 偶发失败的根因或生产节点故障；M6/首发门不变。提交 `5dd65cf` 已通过 HTTPS 方式同步 `origin/main`，工作区仍仅有原有未跟踪证书目录。AWS STS 有效但区域清理查询无回执，潜在实验资源费用仍待核。
+**Node Health Probe loopback fixture 代理隔离（2026-11-28 09:11 UTC）**：带不可达合成 `HTTPS_PROXY` 和空 `NO_PROXY` 的完整 Laravel 套件先复现两个 PHP→Go/TLS loopback mTLS probe fixture 失败；`ConfiguredNodeDataPlaneProbeTransportTest` 现仅在自身测试生命周期为 `127.0.0.1,localhost` 加 bypass 并恢复环境。该类 8/8、108 assertions，完整 Laravel 283 passed、2 skipped、2,520 assertions，Pint 通过。提交 `a97486d` 对应 hosted CI `46129431234` 的 8 个 jobs 全部成功。该证据限定本地测试环境，不能归因为 PostgreSQL hosted-CI 偶发失败的根因或生产节点故障；M6/首发门不变。两个阶段提交 `5dd65cf`、`a97486d` 均已同步 `origin/main`；工作区仍仅有原有未跟踪证书目录。AWS STS 有效但区域清理查询无回执，潜在实验资源费用仍待核。
 
 **M6 状态复核与 provisioning fixture 代理隔离（2026-11-28 08:58 UTC）**：本阶段起始基线为 `main=origin/main=6a002d0`；`xlb-ops` STS 已由项目包装器验证为账号 root；CloudFormation/EC2 精确只读请求连接超时，Scheduler 请求返回 `CreateOAuth2Token INVALID_REQUEST`，因此不能确认过期 TTL 的 `xlb-lab-us-20261128-m6bridge2` 是否已回收。最近成功快照仍显示该栈/实例/Scheduler 曾分别为 `CREATE_COMPLETE`/`running`/`ENABLED`，潜在费用待收尾。本轮没有云写入。离线在不可达合成 `HTTPS_PROXY` + 空 `NO_PROXY` 下复现 loopback PHP→Go mTLS 测试返回连接错误；集成测试现只对本地 fixture 添加 `127.0.0.1,localhost` bypass 并恢复环境，NodePeerProvisioningTest 10/10、120 assertions、Pint 通过。该结果限定测试环境，不认定先前托管 PostgreSQL 偶发失败同根因，不表示生产节点稳定或上线门通过。首发仍 5/12，模块门不变；下一步串行重试精确 AWS 只读查询，云 API 不可达时继续离线阶段。
 
