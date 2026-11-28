@@ -28,7 +28,8 @@ import (
 const certificateLifetime = 2 * time.Hour
 
 var (
-	nodeIDPattern    = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+	// Android MemberDeviceProof and the PHP member-peer API identify protocol nodes with UUIDs.
+	nodeIDPattern    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	kmsKeyARNPattern = regexp.MustCompile(`^arn:aws:kms:us-west-2:[0-9]{12}:key/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
@@ -68,7 +69,7 @@ func run(arguments []string) error {
 		return errors.New("usage: node-lab-certificates --kms-public-key-der <file> --kms-key-arn <arn> --node-id <id> --node-public-ip <ipv4>")
 	}
 	if !nodeIDPattern.MatchString(*nodeID) {
-		return errors.New("node ID contains unsupported characters")
+		return errors.New("node ID must be a UUID for member proof acceptance")
 	}
 	if !validKMSKeyARN(*keyARN) {
 		return errors.New("KMS key ARN is invalid")
