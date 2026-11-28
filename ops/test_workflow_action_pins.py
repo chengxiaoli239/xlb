@@ -52,6 +52,7 @@ class WorkflowActionPinsTest(unittest.TestCase):
         sentinel = "synthetic-non-secret-release-input"
         missing_environment = {name: sentinel for name in environment_names}
         missing_environment["RELEASE_KEY_ALIAS"] = ""
+        missing_environment["CANDIDATE_REASON"] = "issue XLB-123"
         missing = subprocess.run(
             ["bash", "-euo", "pipefail", "-c", self._release_input_preflight_script()],
             env={"PATH": os.defpath, **missing_environment},
@@ -65,13 +66,42 @@ class WorkflowActionPinsTest(unittest.TestCase):
 
         complete = subprocess.run(
             ["bash", "-euo", "pipefail", "-c", self._release_input_preflight_script()],
-            env={"PATH": os.defpath, **{name: sentinel for name in environment_names}},
+            env={"PATH": os.defpath, "CANDIDATE_REASON": "issue XLB-123", **{name: sentinel for name in environment_names}},
             check=False,
             capture_output=True,
             text=True,
         )
         self.assertEqual(complete.returncode, 0, complete.stderr)
         self.assertNotIn(sentinel, complete.stdout + complete.stderr)
+
+        boundary = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", self._release_input_preflight_script()],
+            env={
+                "PATH": os.defpath,
+                "CANDIDATE_REASON": "x" * 256,
+                **{name: sentinel for name in environment_names},
+            },
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(boundary.returncode, 0, boundary.stderr)
+
+        for invalid_reason in (" \t ", "line one\nline two", "line one\rline two", "x" * 257):
+            with self.subTest(reason_length=len(invalid_reason)):
+                invalid_reason_result = subprocess.run(
+                    ["bash", "-euo", "pipefail", "-c", self._release_input_preflight_script()],
+                    env={
+                        "PATH": os.defpath,
+                        "CANDIDATE_REASON": invalid_reason,
+                        **{name: sentinel for name in environment_names},
+                    },
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(invalid_reason_result.returncode, 1)
+
 
     def test_runtime_migration_actions_use_reviewed_commit_shas_everywhere(self) -> None:
         occurrences = {name: 0 for name in PINNED_NODE_24_ACTIONS}
@@ -148,6 +178,9 @@ class WorkflowActionPinsTest(unittest.TestCase):
             self.assertIn(f'[[ -z "${environment_name}" ]]', preflight_step.group("body"))
         self.assertIn("missing=1", preflight_step.group("body"))
         self.assertIn('exit "$missing"', preflight_step.group("body"))
+        self.assertIn("CANDIDATE_REASON: ${{ inputs.reason }}", preflight_step.group("body"))
+        self.assertIn("Candidate reason must be a single line", preflight_step.group("body"))
+        self.assertIn("Candidate reason must be at most 256 characters", preflight_step.group("body"))
         self.assertNotIn("echo \"$RELEASE_", preflight_step.group("body"))
         self.assertIn("push-to-registry: false", workflow)
         self.assertIn("create-storage-record: false", workflow)

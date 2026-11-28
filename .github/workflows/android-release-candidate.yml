@@ -40,6 +40,7 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.XLB_ANDROID_RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.XLB_ANDROID_RELEASE_KEY_PASSWORD }}
           RELEASE_API_BASE_URL: ${{ vars.XLB_ANDROID_RELEASE_API_BASE_URL }}
+          CANDIDATE_REASON: ${{ inputs.reason }}
         run: |
           set -euo pipefail
           missing=0
@@ -62,6 +63,18 @@ jobs:
           if [[ -z "$RELEASE_API_BASE_URL" ]]; then
             echo '::error::Missing protected release input: XLB_ANDROID_RELEASE_API_BASE_URL'
             missing=1
+          fi
+          if [[ -z "${CANDIDATE_REASON//[[:space:]]/}" ]]; then
+            echo '::error::Candidate reason must not be blank'
+            exit 1
+          fi
+          if [[ "${#CANDIDATE_REASON}" -gt 256 ]]; then
+            echo '::error::Candidate reason must be at most 256 characters'
+            exit 1
+          fi
+          if [[ "$CANDIDATE_REASON" == *$'\n'* || "$CANDIDATE_REASON" == *$'\r'* ]]; then
+            echo '::error::Candidate reason must be a single line'
+            exit 1
           fi
           exit "$missing"
 
