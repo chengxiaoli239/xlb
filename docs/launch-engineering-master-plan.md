@@ -337,7 +337,7 @@ gh attestation verify "$candidate_dir/$sbom_rel" \
 | 象限 | 当前事项 | 下一步、负责人和退出证据 |
 | --- | --- | --- |
 | Q1 重要且紧急 | 真实会员 profile、节点 endpoint/CA/mTLS 身份与匹配撤权/最终流量回执 | 节点/运维负责人提供获批材料和隔离窗口；AI 先只读检查目标，再按授权 plan/apply，完成两台会员身份的真实连接、复制拒绝和撤权回执验收。没有节点回执不宣称稳定、精确限设备或断流。 |
-| Q1 重要且紧急 | 受保护 Android release Environment、审批人、正式签名与 approved API origin | 仓库管理员/凭据负责人配置并证明环境保护和凭据可用；签名候选 workflow 成功产出 APK、SBOM、manifest 与 provenance。当前只读 API 查询未列出任何 Environment，因此该门尚未打开。 |
+| Q1 重要且紧急 | 正式 Android 签名与 approved API origin、签名候选审核 | 2026-11-29 `ops/verify_android_release_environment.py --repo chengxiaoli239/xlb` 预检通过，证明 `android-release-candidate` Environment 的 required reviewer/main-only protection 配置可见；只读 secrets/variables 名称查询均为空。凭据负责人仍需按受控渠道配置 keystore/password 与 approved API origin，获批 owner 再手动运行签名候选 workflow 并审查 APK/SBOM/manifest/provenance。Environment 已配置不等于正式签名候选可用或放行门通过。 |
 | Q1 重要且紧急 | 获批 staging、部署/回滚责任人与窗口 | staging 负责人给出隔离环境和维护窗口；通过候选摘要核验、登录/权益/支付沙箱 smoke 与回滚演练。不得未经批准创建云资源或产生费用。 |
 | Q1 重要且紧急 | 商户沙箱回调契约、首发市场合规书面意见 | 支付/业务负责人提供商户 sandbox、签名/重试/对账契约，合规负责人给出针对首发市场的书面意见；provider-neutral 代码和本地沙箱不能代替这些材料。 |
 | Q2 重要但不紧急 | Android + API 离线关键路径、默认关闭的安全门和失败处理 | AI 继续补最小的独立回归，优先会员授权/失败关闭、沙箱购买退款及当前已打开阶段；遇到节点材料时转入 Q1 联验。已经有高覆盖的 M10 本机 probe/route-filter 回归暂缓继续加同类细节。 |
