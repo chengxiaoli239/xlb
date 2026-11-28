@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**23:11 M6 窗口回收与 Clash Verge 路由实测**：在 macOS Clash Verge 中现场核验并操作：原 rule/JP/TUN-off/system-proxy-on，现 rule/US-auto/TUN-on；IPv4 `1/1`、`128.0/1` 路由均经 `utun1024`，AWS STS/inventory 从终端成功。m6cert1 后续精确 inventory 显示栈和实例仍在、SSM Agent active。由于旧 admin client key 已清理，新的 health curl 没有实际完成；按 TTL 仅剩约 3 分钟且 Android 曾 broken pipe，SSM stop/disable 收到 inactive 回执，整栈 delete waiter success，最终 inventory 确认 stack absent、instance terminated、volume/ENI 0、SG/Scheduler not_found。资源已回收，未核最终账单。Android 未通过 ensure/provision/TUN/egress/revoke，门数仍 5/12。下一步调查 SSM port-forward `broken pipe`，再使用单一证书目录和完整 TTL 复测。
+
 **Q1 M6 匹配 mTLS health 通过；Android 测试在 SSM 转发 EOF 处停止（2026-11-28 22:40 +08）**：`m6cert1` 栈为 CREATE_COMPLETE，EC2 running、SSM Online、Scheduler enabled。新一批证书/runtime 一致性校验通过，Agent 上传包哈希与本机相同；Node Agent systemd active，主机通过 SSM 转发的 mTLS `/healthz` 返回 status ok。Android 远端 instrumentation 到首个 `/v1/member-peers/ensure` 时收到 TLS EOF，随后 SSM tunnel 报 `broken pipe`；没有 provisioning receipt、Android TUN/egress、revoke 或流量证据。之后 CloudFormation/EC2/SSM/Scheduler 区域 API 请求超时，当前资源状态未确认，最后成功 inventory 曾确认栈/实例/调度器存在，TTL 参数为 `2026-11-28T15:11:14Z`。本机 AVD 和临时证书已停/清理，但 AWS endpoint 恢复前无法远端停止 Agent。下一步恢复终端系统级 AWS 区域访问，然后对精确栈 inventory、清理并诊断转发 EOF。总门仍 5/12。
 
 **Q1 provisioning 间歇失败本机复跑与 M6 区域 API 阻塞（2026-11-28 22:22 +08）**：现有主线上的单个 PHP→Go mTLS provisioning Feature 在本机连续 8 次运行均通过（每次 55 assertions），但没有复现 hosted 首跑 `node_agent_connection_error`，因此根因/稳定性仍未确认；提交 `826882e` 的功能 CI 已全绿。与此同时，`m6cert1` 的 CreateStack 有接受回执，后续 CloudFormation/EC2/SSM/Scheduler 区域查询及精确 inventory 都连接超时，最终状态与是否计费未知。STS 仍为 root，不能把问题误报为 session expired；下一步需要终端到 AWS us-west-2 区域 API 恢复可达后先清查这个精确栈，再决定继续或回收。没有新的上线放行门，仍 5/12（42%）。
