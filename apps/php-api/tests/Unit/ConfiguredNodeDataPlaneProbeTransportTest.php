@@ -30,8 +30,42 @@ final class ConfiguredNodeDataPlaneProbeTransportTest extends TestCase
     /** @var list<string> */
     private array $temporaryDirectories = [];
 
+    private string|false $originalProcessNoProxy;
+
+    private bool $originalServerNoProxyExists;
+
+    private mixed $originalServerNoProxy;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->originalProcessNoProxy = getenv('NO_PROXY');
+        $this->originalServerNoProxyExists = array_key_exists('NO_PROXY', $_SERVER);
+        $this->originalServerNoProxy = $_SERVER['NO_PROXY'] ?? null;
+        $currentNoProxy = is_string($this->originalServerNoProxy)
+            ? $this->originalServerNoProxy
+            : (is_string($this->originalProcessNoProxy) ? $this->originalProcessNoProxy : '');
+        $noProxyHosts = array_values(array_filter(array_map('trim', explode(',', $currentNoProxy))));
+        $noProxy = implode(',', array_values(array_unique([...$noProxyHosts, '127.0.0.1', 'localhost'])));
+
+        $_SERVER['NO_PROXY'] = $noProxy;
+        putenv('NO_PROXY='.$noProxy);
+    }
+
     protected function tearDown(): void
     {
+        if ($this->originalProcessNoProxy === false) {
+            putenv('NO_PROXY');
+        } else {
+            putenv('NO_PROXY='.$this->originalProcessNoProxy);
+        }
+        if ($this->originalServerNoProxyExists) {
+            $_SERVER['NO_PROXY'] = $this->originalServerNoProxy;
+        } else {
+            unset($_SERVER['NO_PROXY']);
+        }
+
         foreach ($this->credentialFiles as $path) {
             if (is_file($path)) {
                 unlink($path);
