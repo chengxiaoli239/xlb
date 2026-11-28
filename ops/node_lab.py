@@ -11,6 +11,9 @@ from pathlib import Path
 
 
 TAGS = {"Project": "xlb", "Environment": "test", "ManagedBy": "xlb-node-lab"}
+AWS_CONNECT_TIMEOUT_SECONDS = 20
+AWS_READ_TIMEOUT_SECONDS = 60
+AWS_SUBPROCESS_TIMEOUT_SECONDS = 150
 ALLOWED_RESOURCES = {
     "AWS::EC2::Instance",
     "AWS::EC2::SecurityGroup",
@@ -42,8 +45,9 @@ def check_member_ingress_cidr(value):
 def aws(args, *command):
     result = subprocess.run(
         [str(Path(__file__).with_name("aws-cli")), "--profile", args.profile, "--region", args.region, "--no-cli-pager",
-         "--cli-connect-timeout", "8", "--cli-read-timeout", "20", *command],
-        text=True, capture_output=True, timeout=45,
+         "--cli-connect-timeout", str(AWS_CONNECT_TIMEOUT_SECONDS),
+         "--cli-read-timeout", str(AWS_READ_TIMEOUT_SECONDS), *command],
+        text=True, capture_output=True, timeout=AWS_SUBPROCESS_TIMEOUT_SECONDS,
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip())

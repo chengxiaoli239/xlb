@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**M6 隔离节点 AWS 调用超时韧性（2026-11-28；AWS endpoint 仍不可达）**：`ops/node_lab.py` 通过现有清代理的 `ops/aws-cli` wrapper 将连接/读取/子进程上限设为 20/60/150 秒；未对 `CreateStack` 增加自动重试。ops 逐文件测试 78 项、Node Lab 定向 7 项、Python 编译与 diff 检查通过；只读审查未发现高严重度问题。这只提高对慢响应的容忍度，无法修复当前路由：包装器 STS 探测和 CloudFormation 模板校验都以 endpoint `Connect timeout` 结束。`CreateStack` 未调用，没有新资源。终端网络恢复前不重试 AWS 写入；恢复后先重新确认 STS 与精确资源清单。上线门和模块比例不变。
+
 **M6 下一隔离窗口 plan-only 前置核验（2026-11-28，未创建资源）**：AWS STS 身份仍有效，现有实验访问栈、KMS key/权限、默认公网 VPC 子网和 AL2023 AMI 只读核验通过；计划限定单台 `t3.small`、60 分钟、单一当前终端 `/32`，预算估算约 `$0.03`。`ops/node_lab.py create --apply` 在 `CloudFormation validate-template` 阶段因 `cloudformation.us-west-2.amazonaws.com` 连接超时而退出，CreateStack 未调用；精确新栈与 NodeId EC2 只读复核均不存在。当前没有新资源费用。本阶段暂停云端重试直到终端网络可达；不需要重复 AWS 登录。首发门和模块比例不变。
 
 **2026-11-28 M6 真实 egress 故障分层诊断准备（本机 AVD）**：上一隔离窗口证明 KMS-backed Node Agent 启动、管理 mTLS、会员 peer provisioning receipt、Android Keystore proof、profile 校验及 system TUN route 建立；但 Android→Agent→公网 egress 没有获得有效响应，撤权主回执与最终流量断言未执行。新增 instrumentation 在 TUN 启动前用同一 Keystore signer 对真实隔离 Node Agent 执行 SOCKS→TLS 预检，以区分 proof bridge/Agent 数据面与 Mihomo/TUN egress 故障。JDK 21 下 Android Debug/AndroidTest/JVM/lint 通过，专用 AVD 的 Keystore→Go TLS 1.3 mTLS signer 1/1、TUN→本地 fixture Agent echo/revoke 1/1 通过。新增预检尚未连接真实节点，不能视为 egress 已修复或 M6 通过。总门保持 5/12；模块仍 Android 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。下一步需在获批单节点 TTL 窗口中先观察预检，再按结果只排查相应一段。

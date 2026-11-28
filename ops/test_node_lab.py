@@ -15,7 +15,11 @@ class NodeLabSafetyTest(unittest.TestCase):
         completed = subprocess.CompletedProcess([], 0, '{"Account":"289069331089"}', "")
         with patch("node_lab.subprocess.run", return_value=completed) as run:
             self.assertEqual(aws(args, "sts", "get-caller-identity"), {"Account": "289069331089"})
-        self.assertEqual(Path(run.call_args.args[0][0]).name, "aws-cli")
+        command = run.call_args.args[0]
+        self.assertEqual(Path(command[0]).name, "aws-cli")
+        self.assertEqual(command[command.index("--cli-connect-timeout") + 1], "20")
+        self.assertEqual(command[command.index("--cli-read-timeout") + 1], "60")
+        self.assertEqual(run.call_args.kwargs["timeout"], 150)
 
     def test_non_test_and_mixed_resource_stacks_cannot_be_deleted(self):
         stack = {"StackName": "xlb-lab-us-test", "Tags": [{"Key": k, "Value": v} for k, v in TAGS.items()]}
