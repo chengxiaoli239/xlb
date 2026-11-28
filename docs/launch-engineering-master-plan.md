@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**Q1 M6 `m6cert1` CreateStack 后区域 API 连接超时（2026-11-28 22:15 +08）**：工具提交 `826882e` 的 CI 与本地 Android/Node Agent/Linux 构建已完成（此处 CI 终态尚待复核）。STS root、已有 KMS/IAM、VPC/subnet/AMI 前置均通过；创建前精确 inventory 无残留。按已授权范围提交 `xlb-lab-us-20261128-m6cert1` 单台 `t3.small`/60min/来源 `/32` TCP 443 窗口，CreateStack 有 StackId/OperationId 接受回执；此后 CloudFormation、EC2、SSM/Scheduler inventory 区域 endpoint timeout，状态为 unavailable/not_checked。不能据此说 stack CREATE_COMPLETE、实例存在、已部署或已回收；未发 Agent 命令，AVD 已关闭。TTL 参数 `15:10:20Z` 不等同清理回执。下一步区域 API 一旦恢复先精确盘点，栈已创建才继续，否则不重复 CreateStack；若资源存在但验收不可行，先按精确 Node Lab 路径清理并核对。放行门仍 5/12。
+
 **Q1 M6 隔离证书与 runtime 一致性校验器（2026-11-28 22:05 +08）**：`node-lab-certificates` 现在会用同一次生成的 CA 产出隔离 `runtime.json`，并新增 fail-closed `verify` 命令，核对 node/KMS identity、证书链/SAN/EKU、admin key 配对、有效期以及 runtime endpoint/CA 一致性。回归确认错批 admin 证书和不同 runtime CA 会被拒绝；Node Agent 全量 race 测试、`go vet ./...`、`go build ./...` 本地通过。该校验器针对上个隔离窗口暴露的材料错配，只提供离线打包证据，不能替代 Agent health、Android TUN、会员 egress 或撤权门。首发仍为 5/12。下一步先运行校验并取得匹配材料的 mTLS health 回执，再开新的有界 Android 窗口。
 
 **Q1 M6 Agent 运行回执与窗口回收（2026-11-28 21:46 +08）**：恢复 API 后精确盘点发现 `m6bridge4` 栈和 running 实例/卷/ENI/SG/Scheduler 仍在，旧删除请求无效。新 SSM 命令返回成功，Node Agent systemd 为 active；但管理端 mTLS 测试使用新生成、与 Agent 启动时加载 CA 不同的材料而失败，不能作为 health 证据。随后成功停止 Agent、精确删除栈、CloudFormation waiter success；最终 inventory 确认 stack absent、instance terminated、volume/ENI 0、SG/Scheduler not found。资源已回收，未触碰既有 IAM/KMS/业务服务器；未核最终账单。没有 Android TUN、会员 egress、撤权或流量回执，M6/总门仍 5/12。下一步先确保 Node Agent 部署包、服务端证书、管理 CA/admin cert 从同一 manifest/生成目录成组部署并做 mTLS health，再开新的短 TTL Android 验收窗口。
