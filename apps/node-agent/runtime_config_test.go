@@ -407,12 +407,12 @@ func rendererRuntimeConfigJSON(environment, status, endpoint, caPEM string) stri
 		credentialSource = RuntimeCredentialSecure
 	}
 	return `{"schema_version":"xlb-node-runtime/v1","environment":"` + environment +
-		`","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"` + credentialSource +
+		`","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:17890","device_proof_required":true,"credential_source":"` + credentialSource +
 		`"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `}}`
 }
 
 func productionRendererRuntimeConfigJSON(status, endpoint, caPEM string) string {
 	endpointJSON, _ := json.Marshal(endpoint)
 	caPEMJSON, _ := json.Marshal(caPEM)
-	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"node_tls_identity":{"source":"aws-kms","key_arn":"arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012","certificate_chain_path":"/etc/xlb/node-chain.pem","client_ca_pem_path":"/etc/xlb/client-ca.pem"},"agent_listeners":{"management_listen_address":"127.0.0.1:9443","data_plane_listen_address":"127.0.0.1:9444"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:10808","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `},"quota_authority":{"endpoint":"https://quota.example.invalid","server_ca_pem":` + string(caPEMJSON) + `,"grant_bytes":4096,"outbox_limit":100,"timeout_seconds":5}}`
+	return `{"schema_version":"xlb-node-runtime/v2","environment":"production","node":{"id":"node-a","provider":"aws","region":"us-west-2"},"node_tls_identity":{"source":"aws-kms","key_arn":"arn:aws:kms:us-west-2:123456789012:key/12345678-1234-1234-1234-123456789012","certificate_chain_path":"/etc/xlb/node-chain.pem","client_ca_pem_path":"/etc/xlb/client-ca.pem"},"agent_listeners":{"management_listen_address":"127.0.0.1:9443","data_plane_listen_address":"127.0.0.1:9444"},"proof_bridge":{"protocol":"xlb-proof-v1","listen_address":"127.0.0.1:17890","device_proof_required":true,"credential_source":"platform-secure-store"},"profile_renderer":{"status":"` + status + `","bridge_endpoint":` + string(endpointJSON) + `,"bridge_server_ca_pem":` + string(caPEMJSON) + `},"quota_authority":{"endpoint":"https://quota.example.invalid","server_ca_pem":` + string(caPEMJSON) + `,"grant_bytes":4096,"outbox_limit":100,"timeout_seconds":5}}`
 }

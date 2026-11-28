@@ -96,6 +96,12 @@ func TestMihomoRendererRequiresAnExplicitHTTPSOriginAndTrustedCACertificate(t *t
 	}
 }
 
+func TestMihomoRendererUsesAndroidProofBridgePort(t *testing.T) {
+	if _, err := NewMihomoBridgeProfileRenderer("127.0.0.1:10808", "https://node.example.invalid:9444", testBridgeCA(t)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("renderer accepted a port the Android proof bridge does not listen on, error = %v", err)
+	}
+}
+
 func TestProfileArtifactRejectsChangedNodeBridgeTrustDescriptor(t *testing.T) {
 	request := ProfileRenderRequest{
 		NodeID: "node-1", PeerID: "peer-1", EntitlementID: "entitlement-1",

@@ -75,7 +75,7 @@ func TestRuntimeConfigMustMatchModeAndAgentIdentity(t *testing.T) {
 			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
 		},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
-			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:17890",
 			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialSecure,
 		},
 		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
@@ -139,7 +139,7 @@ func TestRuntimeConfigCanSelectIsolatedMihomoRenderer(t *testing.T) {
 		Environment:   agent.RuntimeEnvironmentTest,
 		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
-			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:17890",
 			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialTestFile,
 		},
 		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
@@ -219,7 +219,7 @@ func TestProductionShapedRuntimeSelectsMihomoBridgeRendererAndConfirmedReceipt(t
 			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
 		},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
-			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:17890",
 			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialSecure,
 		},
 		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
@@ -540,7 +540,7 @@ func TestRuntimeAssemblyRejectsIsolatedWildcardListener(t *testing.T) {
 		Environment:   agent.RuntimeEnvironmentTest,
 		Node:          agent.NodeRuntimeIdentity{ID: "node-a", Provider: "aws", Region: "us-west-2"},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
-			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:17890",
 			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialTestFile,
 		},
 		ProfileRenderer: agent.ProfileRendererRuntimeConfig{Status: agent.RuntimeProfileUnavailable},
@@ -570,7 +570,7 @@ func productionNodeRuntimeConfig(t *testing.T) agent.TrustedNodeRuntimeConfig {
 			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
 		},
 		ProofBridge: agent.ProofBridgeRuntimeConfig{
-			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:17890",
 			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialSecure,
 		},
 		ProfileRenderer: agent.ProfileRendererRuntimeConfig{

@@ -114,7 +114,7 @@ func TestHTTPQuotaAuthorityAgainstLaravelCGI(t *testing.T) {
 			ManagementListenAddress: "127.0.0.1:9443", DataPlaneListenAddress: "127.0.0.1:9444",
 		},
 		ProofBridge: ProofBridgeRuntimeConfig{
-			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:10808",
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:17890",
 			DeviceProofRequired: true, CredentialSource: RuntimeCredentialSecure,
 		},
 		ProfileRenderer: ProfileRendererRuntimeConfig{

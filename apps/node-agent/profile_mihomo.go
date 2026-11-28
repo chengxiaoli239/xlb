@@ -18,6 +18,7 @@ const (
 	mihomoBridgeProxyName = "XLB proof bridge"
 	mihomoBridgeGroupName = "GLOBAL"
 	mihomoBridgeVersion   = "1.0.0"
+	mihomoBridgeAddress   = "127.0.0.1:17890"
 )
 
 type MihomoBridgeProfileRenderer struct {
@@ -58,7 +59,8 @@ func NewMihomoBridgeProfileRenderer(listenAddress, bridgeEndpoint, bridgeServerC
 	}
 	ip := net.ParseIP(host)
 	port, err := strconv.Atoi(portValue)
-	if ip == nil || !ip.IsLoopback() || err != nil || port < 1 || port > 65535 {
+	if ip == nil || !ip.IsLoopback() || err != nil || port < 1 || port > 65535 ||
+		net.JoinHostPort(ip.String(), strconv.Itoa(port)) != mihomoBridgeAddress {
 		return nil, ErrInvalid
 	}
 	if err := validateMemberBridgeDescriptor(bridgeEndpoint, bridgeServerCAPEM); err != nil {
