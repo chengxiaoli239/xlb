@@ -16,7 +16,9 @@
 
 > 结论先行：目前已从单纯本地业务原型推进到隔离节点协议证据、支付沙箱账本、Android Debug 客户端和 M9 多端账号状态；**离上线仍有技术放行、合规与运营门槛**。CI、Docker 构建文件、k6 场景和 smoke 脚本已入库，但没有实测压测报告、staging、生产部署/回滚演练、生产监控告警或批量节点编排。下方 §0.1 是当前执行快照；旧章节中的全仓"无脚本/无工作流/客户端未实现"等基线文字应以该快照和源码复核为准。
 
-### 0.1 当前完成度与工作队列（2026-11-28）
+### 0.1 当前完成度与工作队列（2026-11-29）
+
+**00:30 M6 Android Node ID 前置校验与现有窗口诊断**：复核终端路由、`xlb-ops` STS 与隔离栈后，发现现有 `m6tunnel3` 窗口资源此前遗漏在进度摘要之外；在同一已授权实例上完成 Node Agent mTLS health receipt，使用指定 JDK 21 的 Android instrumentation 首跑确实到达 provisioning receipt，但 `MemberDeviceProof` 拒绝非 UUID 的 lab label Node ID。runner 现在在触碰 ADB/本地 SSM 转发前要求 UUID Node ID，fake-adb 回归覆盖 slug 拒绝，同时保持 shell-injection 防护。窗口 TTL 曾按用户授权延长约一小时；后续 UUID Agent/runtime 重启未取得成功回执，AWS wrapper 当前变为 `ExpiredTokenException`，因此实例/Agent/到期状态目前未知，不执行云资源清理或重建。定向 runner 输入测试、bash 语法和 diff check 通过。没有 Android system TUN、预先验证的 proof-bridge egress、节点 HTTPS egress、revoke/final-byte receipt；M6、总门仍 5/12（42%）。下一步由用户本人恢复 `xlb-ops` 会话后，只读 inventory 精确栈/实例/Scheduler，再使用 UUID Node ID 和匹配 bundle 在现有窗口/后续获批窗口完成一次 Android 测试并按确认回执清理。
 
 **23:11 M6 窗口回收与 Clash Verge 路由实测**：在 macOS Clash Verge 中现场核验并操作：原 rule/JP/TUN-off/system-proxy-on，现 rule/US-auto/TUN-on；IPv4 `1/1`、`128.0/1` 路由均经 `utun1024`，AWS STS/inventory 从终端成功。m6cert1 后续精确 inventory 显示栈和实例仍在、SSM Agent active。由于旧 admin client key 已清理，新的 health curl 没有实际完成；按 TTL 仅剩约 3 分钟且 Android 曾 broken pipe，SSM stop/disable 收到 inactive 回执，整栈 delete waiter success，最终 inventory 确认 stack absent、instance terminated、volume/ENI 0、SG/Scheduler not_found。资源已回收，未核最终账单。Android 未通过 ensure/provision/TUN/egress/revoke，门数仍 5/12。下一步调查 SSM port-forward `broken pipe`，再使用单一证书目录和完整 TTL 复测。
 

@@ -56,7 +56,7 @@ expect_rejected_before_adb() {
     output="$test_dir/output.log"
 
     if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
-        emulator-5554 xlb-lab-test-node \
+        emulator-5554 821b68d2-a4a8-4375-86a4-3ab89141f3e4 \
         https://127.0.0.1:19443 https://127.0.0.1 "$expected_egress_ip" "$probe_egress_ip" \
         "$test_dir/node-ca.pem" "$test_dir/admin-cert.pem" "$test_dir/admin-key.pem" \
         >"$output" 2>&1; then
@@ -76,7 +76,7 @@ expect_rejected_before_adb 'globally routable IPv4' 54.187.217.237 192.0.2.1
 
 invalid_origin_output="$test_dir/invalid-origin.log"
 if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
-    emulator-5554 xlb-lab-test-node http://127.0.0.1:19443 https://127.0.0.1 54.187.217.237 \
+    emulator-5554 821b68d2-a4a8-4375-86a4-3ab89141f3e4 http://127.0.0.1:19443 https://127.0.0.1 54.187.217.237 \
     54.187.217.237 "$test_dir/node-ca.pem" "$test_dir/admin-cert.pem" "$test_dir/admin-key.pem" \
     >"$invalid_origin_output" 2>&1; then
     printf 'A non-HTTPS control origin was accepted.\n' >&2
@@ -93,6 +93,16 @@ if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
     exit 1
 fi
 grep -Fq 'isolated node ID contains unsupported characters' "$invalid_node_output"
+
+non_uuid_node_output="$test_dir/non-uuid-node.log"
+if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
+    emulator-5554 xlb-lab-test-node https://127.0.0.1:19443 https://54.187.217.237 54.187.217.237 \
+    54.187.217.237 "$test_dir/node-ca.pem" "$test_dir/admin-cert.pem" "$test_dir/admin-key.pem" \
+    >"$non_uuid_node_output" 2>&1; then
+    printf 'A non-UUID node ID was accepted for member proof testing.\n' >&2
+    exit 1
+fi
+grep -Fq 'node ID must be a UUID for member proof acceptance' "$non_uuid_node_output"
 
 listener_port_file="$test_dir/ssm-listener-port"
 python3 - "$listener_port_file" <<'PY' &
@@ -121,7 +131,7 @@ export FAKE_REVERSE_PORT="$control_port"
 
 reverse_conflict_output="$test_dir/reverse-conflict.log"
 if "$script_dir/test-remote-node-agent-member-tun-emulator.sh" \
-    emulator-5554 xlb-lab-test-node "https://127.0.0.1:$control_port" https://54.187.217.237 54.187.217.237 54.187.217.237 \
+    emulator-5554 821b68d2-a4a8-4375-86a4-3ab89141f3e4 "https://127.0.0.1:$control_port" https://54.187.217.237 54.187.217.237 54.187.217.237 \
     "$test_dir/node-ca.pem" "$test_dir/admin-cert.pem" "$test_dir/admin-key.pem" \
     >"$reverse_conflict_output" 2>&1; then
     printf 'An existing ADB reverse mapping was accepted and replaced.\n' >&2

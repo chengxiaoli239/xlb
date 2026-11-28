@@ -38,6 +38,7 @@ ADMIN_KEY=$9
 [[ -n "$ANDROID_ROOT" && -x "$ADB_PATH" ]] || fail 'Set ANDROID_HOME or ANDROID_SDK_ROOT to a usable Android SDK.'
 [[ "$SERIAL" =~ ^[A-Za-z0-9._:-]+$ ]] || fail 'The emulator serial contains unsupported characters.'
 [[ "$NODE_ID" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || fail 'The isolated node ID contains unsupported characters.'
+[[ "$NODE_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || fail 'The isolated node ID must be a UUID for member proof acceptance.'
 [[ "$CONTROL_ORIGIN" =~ ^https://127\.0\.0\.1:([0-9]{1,5})$ ]] || fail 'The control URL must use the local HTTPS SSM-forward origin https://127.0.0.1:<port>.'
 CONTROL_PORT=${BASH_REMATCH[1]}
 [[ "$BRIDGE_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] || fail 'The bridge URL must be an HTTPS origin.'
