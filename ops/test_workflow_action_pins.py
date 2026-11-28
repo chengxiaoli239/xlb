@@ -1,4 +1,6 @@
+import os
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -26,6 +28,51 @@ USES_PATTERN = re.compile(r"^\s*uses:\s*([^@\s]+)@([^\s#]+)", re.MULTILINE)
 
 
 class WorkflowActionPinsTest(unittest.TestCase):
+    def _release_input_preflight_script(self) -> str:
+        workflow_lines = (
+            REPOSITORY_ROOT / ".github/workflows/android-release-candidate.yml"
+        ).read_text(encoding="utf-8").splitlines()
+        step_start = workflow_lines.index("      - name: Preflight protected release inputs")
+        run_line = workflow_lines.index("        run: |", step_start)
+        script_lines = []
+        for line in workflow_lines[run_line + 1 :]:
+            if line and not line.startswith("          "):
+                break
+            script_lines.append(line[10:] if line.startswith("          ") else "")
+        return "\n".join(script_lines)
+
+    def test_release_input_preflight_rejects_missing_values_without_printing_values(self) -> None:
+        environment_names = (
+            "RELEASE_KEYSTORE_BASE64",
+            "RELEASE_STORE_PASSWORD",
+            "RELEASE_KEY_ALIAS",
+            "RELEASE_KEY_PASSWORD",
+            "RELEASE_API_BASE_URL",
+        )
+        sentinel = "synthetic-non-secret-release-input"
+        missing_environment = {name: sentinel for name in environment_names}
+        missing_environment["RELEASE_KEY_ALIAS"] = ""
+        missing = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", self._release_input_preflight_script()],
+            env={"PATH": os.defpath, **missing_environment},
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("XLB_ANDROID_RELEASE_KEY_ALIAS", missing.stdout)
+        self.assertNotIn(sentinel, missing.stdout + missing.stderr)
+
+        complete = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", self._release_input_preflight_script()],
+            env={"PATH": os.defpath, **{name: sentinel for name in environment_names}},
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(complete.returncode, 0, complete.stderr)
+        self.assertNotIn(sentinel, complete.stdout + complete.stderr)
+
     def test_runtime_migration_actions_use_reviewed_commit_shas_everywhere(self) -> None:
         occurrences = {name: 0 for name in PINNED_NODE_24_ACTIONS}
 
