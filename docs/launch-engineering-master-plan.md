@@ -18,7 +18,7 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
-**M6 下一隔离窗口外部依赖（2026-11-28）**：最新 `ops/aws-cli sts get-caller-identity --profile xlb-ops` 返回 `session expired`，需要用户本人重新登录；之前 terminal endpoint timeout 的描述已被此当前认证错误取代。最近批准的 M6 栈删除 waiter 已成功，CloudFormation 栈不存在、实例 terminated，相关 SG/Scheduler 无残留；本轮无云写入。会话恢复前只推进离线工作，不反复尝试云创建。首发 5/12，模块门 Android 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。
+**M6 下一隔离窗口外部依赖（2026-11-28，解除停滞后的复核）**：当前主线 `main=origin/main=20b5e69`，CI `46104719959` success；工作区只留既存未跟踪 `apps/node-agent/node-lab-certificates`，未读取或纳入提交。用户提供的 `DescribeStacks` 对精确历史目标 `xlb-lab-us-20261127-m6member2` 返回 `Stack ... does not exist`，因此该名称没有可复用栈；该响应不说明其他栈状态。此次经 `ops/aws-cli` 实测 STS 返回 `session expired`，尚不能重新盘点 AWS；需要用户本人运行 `aws login --profile xlb-ops --remote`，恢复后先只读清点再决定是否使用既有批准范围。遗留 `xlb-m9-recovery` 模拟器已关闭；本轮没有云读写。会话恢复前不重复无收益的离线深测，首发仍 5/12，模块门 Android 2/3、Web/API+支付 1/2、Node Agent 1/2、发布运维 1/3。
 
 **Provisioning retry error 分类与再诊断（2026-11-28，hosted CI 全绿；历史 flake 根因未确认）**：readiness fixture 修复合入后，run `46103366403` 的 PostgreSQL compatibility job 成功，但通用 SQLite Tests job 同一 PHP→Go mTLS provisioning test 两次失败，outbox 均为 `retry/node_agent_error`。现将 `Illuminate\Http\Client\ConnectionException` 单独分类为 `node_agent_connection_error`，其余保留 `node_agent_error`，不记录异常原文或 endpoint。分类 Feature 2/2、provisioning 集成 10/10、Laravel 全套 283 passed/2 skipped、Pint 通过；提交 `75eb142` 的 hosted CI `46104277284` 全部成功，SQLite general suite 与 PostgreSQL/MySQL 兼容 job 均通过，历史问题目前未复现，错误分类供未来定位。现有 Node renderer/TUN 真实 M6 gate 未变，首发仍 5/12。
 
