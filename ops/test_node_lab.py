@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from node_lab import TAGS, aws, check_delete_scope, check_member_ingress_cidr, check_name, create_request
+from node_lab import TAGS, aws, check_delete_scope, check_member_ingress_cidr, check_name, create_request, inventory
 
 
 class NodeLabSafetyTest(unittest.TestCase):
@@ -20,6 +20,125 @@ class NodeLabSafetyTest(unittest.TestCase):
         self.assertEqual(command[command.index("--cli-connect-timeout") + 1], "20")
         self.assertEqual(command[command.index("--cli-read-timeout") + 1], "60")
         self.assertEqual(run.call_args.kwargs["timeout"], 150)
+
+    def test_inventory_aws_call_has_bounded_timeout_and_no_cli_retry(self):
+        args = argparse.Namespace(profile="xlb-ops", region="us-west-2")
+        completed = subprocess.CompletedProcess([], 0, "{}", "")
+        with patch("node_lab.subprocess.run", return_value=completed) as run:
+            aws(
+                args, "ec2", "describe-instances",
+                connect_timeout_seconds=8,
+                read_timeout_seconds=15,
+                subprocess_timeout_seconds=45,
+                max_attempts=1,
+            )
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--cli-connect-timeout") + 1], "8")
+        self.assertEqual(command[command.index("--cli-read-timeout") + 1], "15")
+        self.assertEqual(run.call_args.kwargs["timeout"], 45)
+        self.assertEqual(run.call_args.kwargs["env"]["AWS_MAX_ATTEMPTS"], "1")
+
+    def test_inventory_finds_tagged_residual_resources_when_the_stack_is_gone(self):
+        args = argparse.Namespace(
+            profile="xlb-ops", region="us-west-2", name="xlb-lab-us-test",
+            instance_id="i-0123456789abcdef0", security_group_id="sg-0123456789abcdef0",
+            volume_id="vol-0123456789abcdef0", network_interface_id="eni-0123456789abcdef0",
+        )
+        calls = []
+
+        def fake_aws(_args, *command, **_options):
+            calls.append(command)
+            if command[:2] == ("cloudformation", "describe-stacks"):
+                raise RuntimeError("ValidationError: Stack with id xlb-lab-us-test does not exist")
+            if command[:2] == ("ec2", "describe-instances"):
+                return {"Reservations": [{"Instances": [{"InstanceId": args.instance_id, "State": {"Name": "terminated"}, "InstanceType": "t3.small", "Tags": [{"Key": key, "Value": value} for key, value in {**TAGS, "NodeId": args.name}.items()], "NetworkInterfaces": [{"NetworkInterfaceId": args.network_interface_id, "Groups": [{"GroupId": args.security_group_id}]}]}]}]}
+            if command[:2] == ("ec2", "describe-volumes"):
+                return {"Volumes": [{"VolumeId": args.volume_id, "State": "available", "Attachments": [], "Tags": [{"Key": key, "Value": value} for key, value in {**TAGS, "NodeId": args.name}.items()]}]}
+            if command[:2] == ("ec2", "describe-network-interfaces"):
+                return {"NetworkInterfaces": [{"NetworkInterfaceId": args.network_interface_id, "Status": "available", "Groups": [{"GroupId": args.security_group_id}]}]}
+            if command[:2] == ("ec2", "describe-security-groups"):
+                return {"SecurityGroups": [{"GroupId": args.security_group_id, "GroupName": "xlb-lab-us-test", "Tags": [{"Key": key, "Value": value} for key, value in TAGS.items()]}]}
+            if command[:2] == ("scheduler", "get-schedule"):
+                self.assertEqual(command[command.index("--name") + 1], args.name+"-expiry")
+                self.assertEqual(command[command.index("--group-name") + 1], "default")
+                return {"Name": args.name+"-expiry", "State": "ENABLED"}
+            self.fail(f"Unexpected non-inventory AWS command: {command}")
+
+        with patch("node_lab.aws", side_effect=fake_aws):
+            result = inventory(args)
+
+        self.assertEqual(result["stack"]["status"], "not_found")
+        self.assertEqual(result["instances"]["resources"][0]["state"], "terminated")
+        self.assertTrue(result["instances"]["resources"][0]["ownership_tags_match"])
+        self.assertEqual(result["volumes"]["resources"][0]["state"], "available")
+        self.assertTrue(result["volumes"]["resources"][0]["ownership_tags_match"])
+        self.assertEqual(result["network_interfaces"]["resources"][0]["id"], args.network_interface_id)
+        self.assertEqual(result["security_groups"]["resources"][0]["id"], args.security_group_id)
+        self.assertTrue(result["security_groups"]["resources"][0]["ownership_tags_match"])
+        self.assertEqual(result["scheduler"]["resource"]["state"], "ENABLED")
+        self.assertEqual(len(calls), 6)
+
+    def test_inventory_reports_unavailable_checks_without_claiming_empty_resources(self):
+        args = argparse.Namespace(
+            profile="xlb-ops", region="us-west-2", name="xlb-lab-us-test",
+            instance_id=None, security_group_id=None, volume_id=None, network_interface_id=None,
+        )
+
+        def fail_aws(_args, *command, **_options):
+            if command[:2] == ("cloudformation", "describe-stacks"):
+                raise RuntimeError("CreateOAuth2Token INVALID_REQUEST")
+            if command[:2] == ("ec2", "describe-instances"):
+                raise RuntimeError("Connect timeout on endpoint")
+            if command[:2] == ("scheduler", "get-schedule"):
+                raise RuntimeError("Connect timeout on endpoint")
+            self.fail(f"Inventory should not continue dependent EC2 queries: {command}")
+
+        with patch("node_lab.aws", side_effect=fail_aws):
+            result = inventory(args)
+
+        self.assertEqual(result["stack"]["status"], "unavailable")
+        self.assertEqual(result["instances"]["status"], "unavailable")
+        self.assertEqual(result["volumes"]["status"], "not_checked")
+        self.assertEqual(result["network_interfaces"]["status"], "not_checked")
+        self.assertEqual(result["security_groups"]["status"], "not_checked")
+        self.assertEqual(result["scheduler"]["status"], "unavailable")
+
+    def test_inventory_checks_for_interfaces_even_when_the_exact_security_group_is_gone(self):
+        args = argparse.Namespace(
+            profile="xlb-ops", region="us-west-2", name="xlb-lab-us-test",
+            instance_id="i-0123456789abcdef0", security_group_id="sg-0123456789abcdef0",
+            volume_id=None, network_interface_id=None,
+        )
+        calls = []
+
+        def fake_aws(_args, *command, **_options):
+            calls.append(command)
+            if command[:2] == ("cloudformation", "describe-stacks"):
+                raise RuntimeError("ValidationError: Stack with id xlb-lab-us-test does not exist")
+            if command[:3] == ("ec2", "describe-instances", "--instance-ids"):
+                raise RuntimeError("InvalidInstanceID.NotFound")
+            if command[:2] == ("ec2", "describe-volumes"):
+                return {"Volumes": []}
+            if command[:3] == ("ec2", "describe-security-groups", "--group-ids"):
+                raise RuntimeError("InvalidGroup.NotFound")
+            if command[:2] == ("ec2", "describe-network-interfaces"):
+                self.assertIn("Name=group-id,Values="+args.security_group_id, command)
+                raise RuntimeError("InvalidGroup.NotFound")
+            if command[:2] == ("scheduler", "get-schedule"):
+                raise RuntimeError("ResourceNotFoundException")
+            self.fail(f"Unexpected non-inventory AWS command: {command}")
+
+        with patch("node_lab.aws", side_effect=fake_aws):
+            result = inventory(args)
+
+        self.assertEqual(result["stack"]["status"], "not_found")
+        self.assertEqual(result["instances"]["resources"], [])
+        self.assertEqual(result["security_groups"]["status"], "not_found")
+        self.assertEqual(result["network_interfaces"]["status"], "available")
+        self.assertEqual(result["network_interfaces"]["resources"], [])
+        self.assertEqual(result["scheduler"]["status"], "not_found")
+        self.assertEqual(len(calls), 6)
 
     def test_non_test_and_mixed_resource_stacks_cannot_be_deleted(self):
         stack = {"StackName": "xlb-lab-us-test", "Tags": [{"Key": k, "Value": v} for k, v in TAGS.items()]}
