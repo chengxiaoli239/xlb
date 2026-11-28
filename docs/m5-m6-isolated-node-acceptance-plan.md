@@ -150,6 +150,8 @@ rm -rf "$PUBLIC_KEY_DIR"
 
 **证书一致性不变量**：一次节点窗口只生成一次证书目录，并将这个目录作为本次验收唯一来源。节点部署包的 `node-server-chain.pem`、`ca.pem` 和 runtime 中 `bridge_server_ca_pem` 必须从该目录生成；管理 health 与 Android runner 的 `ca.pem`、`admin-client.pem`、`admin-client-key.pem` 也必须来自同一目录。生成包后若需重建证书，必须同步重建 runtime/节点包并重启 Agent，不能只替换本机的 CA/admin 文件；每次 health 握手都要使用当前 Agent 实际加载的 CA 和 admin identity。将完整 bundle 的 SHA-256 与 `node-lab-certificates` manifest/node ID 对照后再部署。证书来源或 fingerprint 不一致时停止健康/Android 验收，不能用关闭证书校验绕过。
 
+**Node ID 与 peer-store 状态不变量**：CloudFormation `NodeId` 是 `xlb-lab-...` 资源标签/栈名，用来 inventory 与回收；Android `MemberDeviceProof` 要求协议 `node_id` 为 UUID。证书 manifest、`runtime.json` 的 `node.id`、`NODE_AGENT_NODE_ID`、Android runner 的 node ID 及所有 ensure/revoke 请求必须逐字相同的 UUID；不得将 stack label 填入协议字段。Node Agent peer-store 文件也绑定 node ID 和 capacity，沿用旧 stack-label peer-store 路径会在打开时 fail closed（`invalid node peer request`），不会自动迁移。首次部署应按协议 UUID 使用专属空 peer-store 路径；只有明确核实该 UUID 的隔离状态可丢弃后，才可初始化空状态文件。修改 node ID 时不要覆盖、删除或复用旧状态；先保留旧状态供核查，为新 UUID 选择不同状态路径，再通过 Node Agent 启动回执和 mTLS `/healthz` 验证加载值。没有健康回执前不要启动 Android instrumentation。此隔离测试身份规则不得改成接受非 UUID 或放宽生产设备证明。
+
 运行 Android remote-node instrumentation 前保持该 SSM session 活动，并将启动器的 control origin 设为 `https://127.0.0.1:19443`。Android runner 会在专用 AVD 上建立 `adb reverse tcp:19443 tcp:19443`，结束后清理自己创建的映射；若该 AVD 已有本地端口映射则拒绝覆盖。节点 TLS leaf 需同时包含数据面公网 endpoint 与 `127.0.0.1` SAN，Android 才能在 SSM 转发的管理连接上验证同一 CA 下的节点身份。之后通过 `apps/android/scripts/test-remote-node-agent-member-tun-emulator.sh` 提供 serial、node ID、control origin、bridge endpoint、节点公网 egress IPv4，以及 CA/管理 client cert/key 文件路径。测试材料只在临时主机目录和专用 AVD app cache 短暂存在，runner 退出时清理。
 
 ### D. M5/M6 实测门
