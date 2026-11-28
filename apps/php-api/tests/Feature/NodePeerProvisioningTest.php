@@ -191,8 +191,22 @@ class NodePeerProvisioningTest extends TestCase
         fclose($serverPipes[0]);
         stream_set_timeout($serverPipes[1], 10);
         $startup = json_decode((string) fgets($serverPipes[1]), true);
+        $originalNoProxy = getenv('NO_PROXY');
+        $serverNoProxyExists = array_key_exists('NO_PROXY', $_SERVER);
+        $originalServerNoProxy = $_SERVER['NO_PROXY'] ?? null;
 
         try {
+            $noProxyHosts = array_values(array_filter(array_map(
+                'trim',
+                explode(',', is_string($originalServerNoProxy)
+                    ? $originalServerNoProxy
+                    : (is_string($originalNoProxy) ? $originalNoProxy : '')),
+            )));
+            $noProxyHosts = array_values(array_unique([...$noProxyHosts, '127.0.0.1', 'localhost']));
+            $noProxy = implode(',', $noProxyHosts);
+            $_SERVER['NO_PROXY'] = $noProxy;
+            putenv('NO_PROXY='.$noProxy);
+
             $this->assertIsArray($startup);
             $this->assertMatchesRegularExpression('/^https:\/\/127\.0\.0\.1:\d+$/', $startup['endpoint'] ?? '');
             $this->assertFileExists($startup['ca_certificate'] ?? '');
@@ -315,6 +329,16 @@ class NodePeerProvisioningTest extends TestCase
             fclose($serverPipes[1]);
             fclose($serverPipes[2]);
             proc_close($server);
+            if ($originalNoProxy === false) {
+                putenv('NO_PROXY');
+            } else {
+                putenv('NO_PROXY='.$originalNoProxy);
+            }
+            if ($serverNoProxyExists) {
+                $_SERVER['NO_PROXY'] = $originalServerNoProxy;
+            } else {
+                unset($_SERVER['NO_PROXY']);
+            }
             foreach (glob($directory.'/*') ?: [] as $path) {
                 if (is_file($path)) {
                     unlink($path);
