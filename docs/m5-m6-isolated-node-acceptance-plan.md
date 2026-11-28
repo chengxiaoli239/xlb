@@ -135,7 +135,18 @@ ops/aws-cli --profile xlb-ops --region us-west-2 kms get-public-key \
 rm -rf "$PUBLIC_KEY_DIR"
 ```
 
-工具生成 owner-only 临时目录，Node Agent leaf 的公钥与 KMS 公钥相同，SAN 同时覆盖节点公网 IPv4 与 `127.0.0.1`，EKU 同时包含 ServerAuth 与 ClientAuth，以便同一 KMS identity 可用于 Agent inbound TLS 和 production-shaped quota-authority outbound mTLS，证书有效期 2 小时；临时 CA 私钥不落盘，admin client key 为 mode `0600`。manifest 记录 KMS ARN、node ID、SAN 与文件名。证书及 CA 仍标记为隔离测试用途，测试结束后删除生成目录；不得把测试证书复制到生产配置或提交仓库。
+工具生成 owner-only 临时目录、manifest 和与 CA 同源的 `runtime.json`；Node Agent leaf 的公钥与 KMS 公钥相同，SAN 同时覆盖节点公网 IPv4 与 `127.0.0.1`，EKU 同时包含 ServerAuth 与 ClientAuth，以便同一 KMS identity 可用于 Agent inbound TLS 和 production-shaped quota-authority outbound mTLS，证书有效期 2 小时；临时 CA 私钥不落盘，admin client key 为 mode `0600`。manifest 记录 KMS ARN、node ID、SAN 与文件名。证书及 CA 仍标记为隔离测试用途，测试结束后删除生成目录；不得把测试证书复制到生产配置或提交仓库。
+
+完成生成后、制作部署包前必须用同一目录运行内置校验器；只有退出码为 0 才能继续：
+
+```bash
+(cd apps/node-agent && go run ./cmd/node-lab-certificates verify \
+  --directory "$CERT_DIR" \
+  --kms-public-key-der "$PUBLIC_KEY_DIR/node-kms-public-key.der" \
+  --kms-key-arn "$KMS_KEY_ARN" --node-id "$NODE_ID" --node-public-ip "$NODE_PUBLIC_IPV4")
+```
+
+校验会比较当前 KMS 公钥、manifest/node identity、服务端证书签发链及 SAN/EKU、admin client cert/key 配对，以及 runtime 中 endpoint/CA 与本目录的一致性。部署 tar 包从此目录原样选取 runtime/server chain/CA；health 和 Android runner 的 admin cert/key/CA 也必须继续引用此目录。记录部署 tar 的 SHA-256，并与节点侧上传后的独立 hash 回执对照，同时核对 manifest 的 node ID；不要再次运行生成器并只替换部分文件。
 
 **证书一致性不变量**：一次节点窗口只生成一次证书目录，并将这个目录作为本次验收唯一来源。节点部署包的 `node-server-chain.pem`、`ca.pem` 和 runtime 中 `bridge_server_ca_pem` 必须从该目录生成；管理 health 与 Android runner 的 `ca.pem`、`admin-client.pem`、`admin-client-key.pem` 也必须来自同一目录。生成包后若需重建证书，必须同步重建 runtime/节点包并重启 Agent，不能只替换本机的 CA/admin 文件；每次 health 握手都要使用当前 Agent 实际加载的 CA 和 admin identity。将完整 bundle 的 SHA-256 与 `node-lab-certificates` manifest/node ID 对照后再部署。证书来源或 fingerprint 不一致时停止健康/Android 验收，不能用关闭证书校验绕过。
 

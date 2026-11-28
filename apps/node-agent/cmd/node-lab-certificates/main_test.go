@@ -109,7 +109,7 @@ func TestWriteCertificateBundleMatchesKMSPublicKeyAndSANDomains(t *testing.T) {
 		t.Fatal("admin private key does not match its client certificate")
 	}
 
-	for _, fileName := range []string{"ca.pem", "node-server-chain.pem", "admin-client.pem", "admin-client-key.pem", "kms-public-key.der", "manifest.json"} {
+	for _, fileName := range []string{"ca.pem", "node-server-chain.pem", "admin-client.pem", "admin-client-key.pem", "kms-public-key.der", "manifest.json", "runtime.json"} {
 		if _, err := os.Stat(filepath.Join(outputDirectory, fileName)); err != nil {
 			t.Errorf("certificate bundle is missing %s: %v", fileName, err)
 		}
@@ -181,6 +181,117 @@ func TestCertificateBundleRejectsUnsafeInputs(t *testing.T) {
 	if err := writeCertificateBundle(outputDirectory, "xlb-lab-test", testKMSKeyARN, validIP, publicDER, &otherCurveKey.PublicKey); err == nil {
 		t.Fatal("mismatched KMS public key curve was accepted")
 	}
+}
+
+func TestValidateCertificateBundleAcceptsMatchingRuntimeAndClientIdentity(t *testing.T) {
+	outputDirectory := writeTestCertificateBundle(t, "xlb-lab-us-verify", "54.187.217.237")
+	if err := validateCertificateBundle(outputDirectory, "xlb-lab-us-verify", "54.187.217.237", testKMSKeyARN,
+		readBundlePublicKey(t, outputDirectory)); err != nil {
+		t.Fatalf("validateCertificateBundle error = %v", err)
+	}
+	if err := run([]string{
+		"verify", "--directory", outputDirectory,
+		"--kms-public-key-der", filepath.Join(outputDirectory, "kms-public-key.der"),
+		"--kms-key-arn", testKMSKeyARN, "--node-id", "xlb-lab-us-verify",
+		"--node-public-ip", "54.187.217.237",
+	}); err != nil {
+		t.Fatalf("node-lab-certificates verify error = %v", err)
+	}
+}
+
+func TestValidateCertificateBundleRejectsMixedCertificateAndRuntimeSources(t *testing.T) {
+	firstDirectory := writeTestCertificateBundle(t, "xlb-lab-us-verify", "54.187.217.237")
+	secondDirectory := writeTestCertificateBundle(t, "xlb-lab-us-verify", "54.187.217.237")
+	for _, fileName := range []string{"admin-client.pem", "admin-client-key.pem"} {
+		contents, err := os.ReadFile(filepath.Join(secondDirectory, fileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(firstDirectory, fileName), contents, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := validateCertificateBundle(firstDirectory, "xlb-lab-us-verify", "54.187.217.237", testKMSKeyARN,
+		readBundlePublicKey(t, firstDirectory)); err == nil {
+		t.Fatal("admin identity from a second certificate issuance was accepted")
+	}
+}
+
+func TestValidateCertificateBundleRejectsRuntimeWithDifferentCA(t *testing.T) {
+	outputDirectory := writeTestCertificateBundle(t, "xlb-lab-us-verify", "54.187.217.237")
+	otherDirectory := writeTestCertificateBundle(t, "xlb-lab-us-verify", "54.187.217.237")
+	otherCA, err := os.ReadFile(filepath.Join(otherDirectory, "ca.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimePath := filepath.Join(outputDirectory, "runtime.json")
+	runtimeBytes, err := os.ReadFile(runtimePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runtimeConfig map[string]any
+	if err := json.Unmarshal(runtimeBytes, &runtimeConfig); err != nil {
+		t.Fatal(err)
+	}
+	renderer := runtimeConfig["profile_renderer"].(map[string]any)
+	renderer["bridge_server_ca_pem"] = string(otherCA)
+	tamperedRuntime, err := json.Marshal(runtimeConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(runtimePath, tamperedRuntime, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCertificateBundle(outputDirectory, "xlb-lab-us-verify", "54.187.217.237", testKMSKeyARN,
+		readBundlePublicKey(t, outputDirectory)); err == nil {
+		t.Fatal("runtime embedding a different CA was accepted")
+	}
+}
+
+func TestValidateCertificateBundleRejectsDifferentKMSPublicKey(t *testing.T) {
+	outputDirectory := writeTestCertificateBundle(t, "xlb-lab-us-verify", "54.187.217.237")
+	differentKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	differentPublicKeyDER, err := x509.MarshalPKIXPublicKey(&differentKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCertificateBundle(outputDirectory, "xlb-lab-us-verify", "54.187.217.237",
+		testKMSKeyARN, differentPublicKeyDER); err == nil {
+		t.Fatal("certificate signed by a different public key was accepted for this KMS key ARN")
+	}
+}
+
+func writeTestCertificateBundle(t *testing.T, nodeID, publicIP string) string {
+	t.Helper()
+	nodeKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicDER, err := x509.MarshalPKIXPublicKey(&nodeKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCertificateBundle(directory, nodeID, testKMSKeyARN,
+		net.ParseIP(publicIP).To4(), publicDER, &nodeKey.PublicKey); err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
+func readBundlePublicKey(t *testing.T, directory string) []byte {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join(directory, "kms-public-key.der"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
 }
 
 func readCertificate(t *testing.T, path string) *x509.Certificate {

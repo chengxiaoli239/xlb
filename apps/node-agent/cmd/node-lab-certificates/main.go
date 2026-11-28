@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -13,12 +14,15 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"time"
+
+	agent "xlb/node-agent"
 )
 
 const certificateLifetime = 2 * time.Hour
@@ -36,6 +40,7 @@ type bundleManifest struct {
 	NodeCertificateSANs []string `json:"node_certificate_sans"`
 	CertificateFiles    []string `json:"certificate_files"`
 	PrivateKeyFiles     []string `json:"private_key_files"`
+	RuntimeConfigFile   string   `json:"runtime_config_file"`
 	GeneratedAt         string   `json:"generated_at"`
 	ExpiresAt           string   `json:"expires_at"`
 }
@@ -48,6 +53,9 @@ func main() {
 }
 
 func run(arguments []string) error {
+	if len(arguments) > 0 && arguments[0] == "verify" {
+		return verifyCommand(arguments[1:])
+	}
 	flags := flag.NewFlagSet("node-lab-certificates", flag.ContinueOnError)
 	publicKeyPath := flags.String("kms-public-key-der", "", "DER-encoded KMS public key exported through ops/aws-cli")
 	keyARN := flags.String("kms-key-arn", "", "the exact KMS key ARN that matches the public-key file")
@@ -101,8 +109,218 @@ func run(arguments []string) error {
 	fmt.Printf("Client CA: %s\n", filepath.Join(outputDirectory, "ca.pem"))
 	fmt.Printf("Admin client certificate: %s\n", filepath.Join(outputDirectory, "admin-client.pem"))
 	fmt.Printf("Admin client private key: %s\n", filepath.Join(outputDirectory, "admin-client-key.pem"))
+	fmt.Printf("Matching isolated runtime config: %s\n", filepath.Join(outputDirectory, "runtime.json"))
 	fmt.Println("Remove this temporary directory after the isolated test. It is not a production credential bundle.")
 	return nil
+}
+
+func verifyCommand(arguments []string) error {
+	flags := flag.NewFlagSet("node-lab-certificates verify", flag.ContinueOnError)
+	directory := flags.String("directory", "", "the exact output directory from one certificate-generation run")
+	publicKeyPath := flags.String("kms-public-key-der", "", "the DER public key exported from the same KMS key")
+	keyARN := flags.String("kms-key-arn", "", "the expected node KMS key ARN")
+	nodeID := flags.String("node-id", "", "the expected isolated node identity")
+	nodePublicIP := flags.String("node-public-ip", "", "the expected isolated node public IPv4")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *directory == "" || *publicKeyPath == "" || *keyARN == "" || *nodeID == "" || *nodePublicIP == "" {
+		return errors.New("usage: node-lab-certificates verify --directory <generation-dir> --kms-public-key-der <file> --kms-key-arn <arn> --node-id <id> --node-public-ip <ipv4>")
+	}
+	publicKeyDER, err := readRegularFile(*publicKeyPath)
+	if err != nil {
+		return err
+	}
+	if err := validateCertificateBundle(*directory, *nodeID, *nodePublicIP, *keyARN, publicKeyDER); err != nil {
+		return err
+	}
+	fmt.Printf("Verified isolated Node Agent certificate/runtime bundle for %s (%s).\n", *nodeID, *nodePublicIP)
+	return nil
+}
+
+func validateCertificateBundle(directory, expectedNodeID, expectedPublicIP, expectedKeyARN string,
+	expectedPublicKeyDER []byte,
+) error {
+	if !nodeIDPattern.MatchString(expectedNodeID) || !validKMSKeyARN(expectedKeyARN) {
+		return errors.New("expected isolated node identity or KMS key ARN is invalid")
+	}
+	publicIP := net.ParseIP(expectedPublicIP)
+	if publicIP == nil || publicIP.To4() == nil || !isPublicIPv4(publicIP) {
+		return errors.New("expected node public endpoint must be a globally routable IPv4 address")
+	}
+	directoryInfo, err := os.Lstat(directory)
+	if err != nil || !directoryInfo.IsDir() || directoryInfo.Mode()&os.ModeSymlink != 0 || directoryInfo.Mode().Perm()&0o077 != 0 {
+		return errors.New("certificate generation directory must be a protected, non-symlink directory")
+	}
+	readFile := func(name string, maximumSize int64, requiredMode os.FileMode) ([]byte, error) {
+		path := filepath.Join(directory, name)
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 ||
+			info.Size() < 1 || info.Size() > maximumSize ||
+			(requiredMode != 0 && info.Mode().Perm() != requiredMode) {
+			return nil, fmt.Errorf("bundle file %s is missing or violates file safety requirements", name)
+		}
+		return os.ReadFile(path)
+	}
+	manifestBytes, err := readFile("manifest.json", 16*1024, 0o600)
+	if err != nil {
+		return err
+	}
+	var manifest bundleManifest
+	decoder := json.NewDecoder(bytes.NewReader(manifestBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&manifest); err != nil {
+		return errors.New("certificate bundle manifest is invalid")
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return errors.New("certificate bundle manifest has trailing data")
+	}
+	if manifest.Purpose != "isolated-test-only" || manifest.NodeID != expectedNodeID ||
+		manifest.KMSKeyARN != expectedKeyARN || manifest.NodePublicIPv4 != publicIP.String() ||
+		!sameFileList(manifest.NodeCertificateSANs, []string{publicIP.String(), "127.0.0.1"}) ||
+		manifest.RuntimeConfigFile != "runtime.json" ||
+		!sameFileList(manifest.CertificateFiles, []string{"ca.pem", "node-server-chain.pem", "admin-client.pem"}) ||
+		!sameFileList(manifest.PrivateKeyFiles, []string{"admin-client-key.pem"}) {
+		return errors.New("certificate bundle manifest identity or file set does not match the requested node")
+	}
+	generatedAt, generatedErr := time.Parse(time.RFC3339, manifest.GeneratedAt)
+	expiresAt, expiresErr := time.Parse(time.RFC3339, manifest.ExpiresAt)
+	now := time.Now()
+	if generatedErr != nil || expiresErr != nil || generatedAt.After(now.Add(time.Minute)) ||
+		!expiresAt.After(now) || expiresAt.Sub(generatedAt) > certificateLifetime ||
+		now.Sub(generatedAt) > certificateLifetime+time.Minute {
+		return errors.New("certificate bundle manifest is expired or outside its allowed lifetime")
+	}
+	caPEM, err := readFile("ca.pem", 64*1024, 0)
+	if err != nil {
+		return err
+	}
+	caCertificates, err := parseCertificatePEM(caPEM)
+	if err != nil || len(caCertificates) != 1 {
+		return errors.New("certificate bundle CA file must contain exactly one certificate")
+	}
+	ca := caCertificates[0]
+	if !ca.IsCA || ca.KeyUsage&x509.KeyUsageCertSign == 0 || ca.CheckSignatureFrom(ca) != nil ||
+		now.Before(ca.NotBefore) || !now.Before(ca.NotAfter) {
+		return errors.New("certificate bundle CA is invalid, expired, or not self-signed")
+	}
+	serverPEM, err := readFile("node-server-chain.pem", 128*1024, 0)
+	if err != nil {
+		return err
+	}
+	serverChain, err := parseCertificatePEM(serverPEM)
+	if err != nil || len(serverChain) != 2 || !bytes.Equal(serverChain[1].Raw, ca.Raw) {
+		return errors.New("node server certificate chain does not terminate at the bundle CA")
+	}
+	serverCertificate := serverChain[0]
+	if serverCertificate.Subject.CommonName != expectedNodeID ||
+		serverCertificate.VerifyHostname(publicIP.String()) != nil ||
+		serverCertificate.VerifyHostname("127.0.0.1") != nil ||
+		!hasExtendedKeyUsage(serverCertificate.ExtKeyUsage, x509.ExtKeyUsageServerAuth) ||
+		!hasExtendedKeyUsage(serverCertificate.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
+		return errors.New("node server certificate identity, SAN, or EKU does not match the isolated node")
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca)
+	intermediates := x509.NewCertPool()
+	intermediates.AddCert(ca)
+	if _, err := serverCertificate.Verify(x509.VerifyOptions{
+		Roots: roots, Intermediates: intermediates, CurrentTime: now,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}); err != nil {
+		return errors.New("node server certificate does not verify against the bundle CA")
+	}
+	publicKeyValue, keyErr := x509.ParsePKIXPublicKey(expectedPublicKeyDER)
+	publicKey, keyOK := publicKeyValue.(*ecdsa.PublicKey)
+	if keyErr != nil || !keyOK || publicKey.Curve != elliptic.P256() ||
+		!bytes.Equal(serverCertificate.RawSubjectPublicKeyInfo, expectedPublicKeyDER) {
+		return errors.New("node server certificate public key does not match the expected KMS public key")
+	}
+	adminPEM, err := readFile("admin-client.pem", 64*1024, 0)
+	if err != nil {
+		return err
+	}
+	adminCertificates, err := parseCertificatePEM(adminPEM)
+	if err != nil || len(adminCertificates) != 1 {
+		return errors.New("admin client certificate file must contain exactly one certificate")
+	}
+	adminCertificate := adminCertificates[0]
+	if !hasExtendedKeyUsage(adminCertificate.ExtKeyUsage, x509.ExtKeyUsageClientAuth) {
+		return errors.New("admin client certificate does not permit client authentication")
+	}
+	if _, err := adminCertificate.Verify(x509.VerifyOptions{
+		Roots: roots, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}); err != nil {
+		return errors.New("admin client certificate does not verify against the bundle CA")
+	}
+	adminKeyPEM, err := readFile("admin-client-key.pem", 64*1024, 0o600)
+	if err != nil {
+		return err
+	}
+	adminKeyBlock, rest := pem.Decode(adminKeyPEM)
+	if adminKeyBlock == nil || adminKeyBlock.Type != "PRIVATE KEY" || len(bytes.TrimSpace(rest)) != 0 {
+		return errors.New("admin client private key is not a single PKCS#8 PEM key")
+	}
+	adminKeyValue, err := x509.ParsePKCS8PrivateKey(adminKeyBlock.Bytes)
+	if err != nil {
+		return errors.New("admin client private key is invalid")
+	}
+	adminKey, ok := adminKeyValue.(*ecdsa.PrivateKey)
+	adminPublicKey, publicKeyOK := adminCertificate.PublicKey.(*ecdsa.PublicKey)
+	if !ok || !publicKeyOK || adminKey.Curve != elliptic.P256() ||
+		adminKey.X.Cmp(adminPublicKey.X) != 0 || adminKey.Y.Cmp(adminPublicKey.Y) != 0 {
+		return errors.New("admin private key does not match the admin client certificate")
+	}
+	runtimePEM, err := readFile("runtime.json", 64*1024, 0o600)
+	if err != nil {
+		return err
+	}
+	runtimeConfig, err := agent.DecodeTrustedNodeRuntimeConfig(bytes.NewReader(runtimePEM))
+	if err != nil || runtimeConfig.Node.ID != expectedNodeID || runtimeConfig.Node.Region != "us-west-2" ||
+		runtimeConfig.ProfileRenderer.Status != agent.RuntimeProfileMihomoBridgeTest ||
+		runtimeConfig.ProfileRenderer.BridgeEndpoint != "https://"+publicIP.String()+":443" ||
+		runtimeConfig.ProfileRenderer.BridgeServerCAPEM != string(caPEM) {
+		return errors.New("runtime node identity, bridge endpoint, or CA does not match the certificate bundle")
+	}
+	return nil
+}
+
+func parseCertificatePEM(contents []byte) ([]*x509.Certificate, error) {
+	var certificates []*x509.Certificate
+	for len(bytes.TrimSpace(contents)) > 0 {
+		block, remaining := pem.Decode(contents)
+		if block == nil || block.Type != "CERTIFICATE" {
+			return nil, errors.New("certificate PEM contains malformed or unexpected data")
+		}
+		certificate, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		certificates = append(certificates, certificate)
+		contents = remaining
+	}
+	return certificates, nil
+}
+
+func sameFileList(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for index := range expected {
+		if actual[index] != expected[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func hasExtendedKeyUsage(usages []x509.ExtKeyUsage, expected x509.ExtKeyUsage) bool {
+	for _, usage := range usages {
+		if usage == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func writeCertificateBundle(outputDirectory, nodeID, keyARN string, publicIP net.IP,
@@ -209,6 +427,7 @@ func writeCertificateBundle(outputDirectory, nodeID, keyARN string, publicIP net
 		NodeCertificateSANs: []string{publicIP.String(), "127.0.0.1"},
 		CertificateFiles:    []string{"ca.pem", "node-server-chain.pem", "admin-client.pem"},
 		PrivateKeyFiles:     []string{"admin-client-key.pem"},
+		RuntimeConfigFile:   "runtime.json",
 		GeneratedAt:         now.Format(time.RFC3339),
 		ExpiresAt:           now.Add(certificateLifetime).Format(time.RFC3339),
 	}
@@ -217,6 +436,32 @@ func writeCertificateBundle(outputDirectory, nodeID, keyARN string, publicIP net
 		return fmt.Errorf("encode test certificate manifest: %w", err)
 	}
 	if err := writePrivateFile(filepath.Join(outputDirectory, "manifest.json"), append(manifestBytes, '\n'), 0o600); err != nil {
+		return err
+	}
+	runtimeConfig := agent.TrustedNodeRuntimeConfig{
+		SchemaVersion: agent.TrustedNodeRuntimeSchemaV1,
+		Environment:   agent.RuntimeEnvironmentTest,
+		Node: agent.NodeRuntimeIdentity{
+			ID: nodeID, Provider: "aws", Region: "us-west-2",
+		},
+		ProofBridge: agent.ProofBridgeRuntimeConfig{
+			Protocol: "xlb-proof-v1", ListenAddress: "127.0.0.1:17890",
+			DeviceProofRequired: true, CredentialSource: agent.RuntimeCredentialTestFile,
+		},
+		ProfileRenderer: agent.ProfileRendererRuntimeConfig{
+			Status:            agent.RuntimeProfileMihomoBridgeTest,
+			BridgeEndpoint:    "https://" + publicIP.String() + ":443",
+			BridgeServerCAPEM: string(caPEM),
+		},
+	}
+	if err := runtimeConfig.Validate(); err != nil {
+		return errors.New("generated isolated runtime configuration is invalid")
+	}
+	runtimeBytes, err := json.MarshalIndent(runtimeConfig, "", "  ")
+	if err != nil {
+		return errors.New("encode isolated runtime configuration")
+	}
+	if err := writePrivateFile(filepath.Join(outputDirectory, "runtime.json"), append(runtimeBytes, '\n'), 0o600); err != nil {
 		return err
 	}
 	return nil

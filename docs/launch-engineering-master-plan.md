@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**Q1 M6 隔离证书与 runtime 一致性校验器（2026-11-28 22:05 +08）**：`node-lab-certificates` 现在会用同一次生成的 CA 产出隔离 `runtime.json`，并新增 fail-closed `verify` 命令，核对 node/KMS identity、证书链/SAN/EKU、admin key 配对、有效期以及 runtime endpoint/CA 一致性。回归确认错批 admin 证书和不同 runtime CA 会被拒绝；Node Agent 全量 race 测试、`go vet ./...`、`go build ./...` 本地通过。该校验器针对上个隔离窗口暴露的材料错配，只提供离线打包证据，不能替代 Agent health、Android TUN、会员 egress 或撤权门。首发仍为 5/12。下一步先运行校验并取得匹配材料的 mTLS health 回执，再开新的有界 Android 窗口。
+
 **Q1 M6 Agent 运行回执与窗口回收（2026-11-28 21:46 +08）**：恢复 API 后精确盘点发现 `m6bridge4` 栈和 running 实例/卷/ENI/SG/Scheduler 仍在，旧删除请求无效。新 SSM 命令返回成功，Node Agent systemd 为 active；但管理端 mTLS 测试使用新生成、与 Agent 启动时加载 CA 不同的材料而失败，不能作为 health 证据。随后成功停止 Agent、精确删除栈、CloudFormation waiter success；最终 inventory 确认 stack absent、instance terminated、volume/ENI 0、SG/Scheduler not found。资源已回收，未触碰既有 IAM/KMS/业务服务器；未核最终账单。没有 Android TUN、会员 egress、撤权或流量回执，M6/总门仍 5/12。下一步先确保 Node Agent 部署包、服务端证书、管理 CA/admin cert 从同一 manifest/生成目录成组部署并做 mTLS health，再开新的短 TTL Android 验收窗口。
 
 **Q1 M6 探针策略修正与新隔离窗口状态（2026-11-28 21:17 +08；21:28 再核）**：定位到前次 Android TUN 出口探针使用 TCP 80，与 Node Lab 仅 TCP 443 egress 规则冲突；已将探针改为固定 IP 上验证 SNI/证书的 HTTPS 443，Android Debug/AndroidTest/JVM/lint 本地构建通过。新窗口 `xlb-lab-us-20261128-m6bridge4` 创建成功，节点直接 HTTPS 出口探测有 CommandId + Success 回执且返回其自身公网 IP；这不等于 Android 隧道验收。SSM 端口转发上传超时，随后 SSM/CloudFormation API Connect timeout，Node Agent 未部署，Android instrumentation 未运行。精确 `node_lab.py delete --apply` 无回执，不能宣称已回收；21:28 一次有界 inventory 的 CloudFormation、EC2、Scheduler 为 unavailable，卷/ENI/SG 为 not_checked，全部因区域 API Connect timeout，不能当作空清单。最近确认 TTL 仅终止实例，不删除栈/SG/Scheduler。下一步先在区域 API 恢复后对精确栈只读 inventory 并回收、核对残留，再用固定 IP HTTPS/443 探针跑 M6 Android 单次验收。门数仍 5/12（42%）。
