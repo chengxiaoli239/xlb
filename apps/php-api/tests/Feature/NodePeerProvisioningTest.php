@@ -118,7 +118,7 @@ class NodePeerProvisioningTest extends TestCase
             ->once()
             ->with('Node peer provisioning attempt failed.', [
                 'exception_class' => \RuntimeException::class,
-                'root_cause_class' => \RuntimeException::class,
+                'deepest_exception_class' => \RuntimeException::class,
             ]);
         Log::shouldReceive('withoutContext')
             ->once()
@@ -154,7 +154,7 @@ class NodePeerProvisioningTest extends TestCase
             ->once()
             ->with('Node peer provisioning attempt failed.', [
                 'exception_class' => ConnectionException::class,
-                'root_cause_class' => \RuntimeException::class,
+                'deepest_exception_class' => \RuntimeException::class,
             ]);
         Log::shouldReceive('withoutContext')
             ->once()

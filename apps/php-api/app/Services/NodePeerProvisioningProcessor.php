@@ -55,7 +55,7 @@ class NodePeerProvisioningProcessor
                     ? 'node_agent_connection_error' : 'node_agent_error');
                 Log::warning('Node peer provisioning attempt failed.', [
                     'exception_class' => $exception::class,
-                    'root_cause_class' => $this->rootCauseClass($exception),
+                    'deepest_exception_class' => $this->deepestExceptionClass($exception),
                 ]);
             } finally {
                 Log::withoutContext(array_keys($logContext));
@@ -98,7 +98,7 @@ class NodePeerProvisioningProcessor
         }, 3);
     }
 
-    private function rootCauseClass(Throwable $exception): string
+    private function deepestExceptionClass(Throwable $exception): string
     {
         $root = $exception;
         for ($depth = 0; $depth < 8 && $root->getPrevious() !== null && $root->getPrevious() !== $root; $depth++) {
