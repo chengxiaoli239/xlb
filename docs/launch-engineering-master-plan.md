@@ -18,6 +18,8 @@
 
 ### 0.1 当前完成度与工作队列（2026-11-28）
 
+**M6 Node Agent→Android profile/TUN 再联验（2026-11-28，TUN 未通过）**：在现有已批准的单台 `xlb-lab-us-20261128-m6bridge1`（`t3.small`、60 分钟、来源 `/32`）上，Agent KMS-backed mTLS 管理 `/healthz` 成功；Android AVD remote instrumentation 收到 `confirmed_test` receipt 并创建 Keystore proof capability，但 Mihomo profile 装载返回失败，因此未建立 VPN route，也未取得 egress/撤权/最终流量证据。发现并修正了两处离线启动错误：远端 instrumentation 仅由显式 runner 调用，应标记 `LargeTest` 以排除常规本地 recovery 集合；CloudFormation Node ID 应按安全 token 字符集/长度验证，而非 UUID 专属。输入守卫已通过，Android 本地 recovery harness 退出码 0。曾尝试将隔离 runtime loopback bridge 地址改为 Android 本地 SOCKS 合同端口，但 SSM/STS endpoint 再次超时，不能声称 runtime 更新已送达或解决 profile 问题。节点应于 03:00 UTC 自动终止；恢复 AWS API 后先只读确认精确栈/Agent/runtime，再决定是否重跑，随后删除栈和验收残留。门数保持 5/12。
+
 **M6 隔离节点 AWS 调用超时韧性（2026-11-28；AWS endpoint 仍不可达）**：`ops/node_lab.py` 通过现有清代理的 `ops/aws-cli` wrapper 将连接/读取/子进程上限设为 20/60/150 秒；未对 `CreateStack` 增加自动重试。ops 逐文件测试 78 项、Node Lab 定向 7 项、Python 编译与 diff 检查通过；只读审查未发现高严重度问题。这只提高对慢响应的容忍度，无法修复当前路由：包装器 STS 探测和 CloudFormation 模板校验都以 endpoint `Connect timeout` 结束。`CreateStack` 未调用，没有新资源。终端网络恢复前不重试 AWS 写入；恢复后先重新确认 STS 与精确资源清单。上线门和模块比例不变。
 
 **M6 下一隔离窗口 plan-only 前置核验（2026-11-28，未创建资源）**：AWS STS 身份仍有效，现有实验访问栈、KMS key/权限、默认公网 VPC 子网和 AL2023 AMI 只读核验通过；计划限定单台 `t3.small`、60 分钟、单一当前终端 `/32`，预算估算约 `$0.03`。`ops/node_lab.py create --apply` 在 `CloudFormation validate-template` 阶段因 `cloudformation.us-west-2.amazonaws.com` 连接超时而退出，CreateStack 未调用；精确新栈与 NodeId EC2 只读复核均不存在。当前没有新资源费用。本阶段暂停云端重试直到终端网络可达；不需要重复 AWS 登录。首发门和模块比例不变。

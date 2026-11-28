@@ -37,7 +37,7 @@ ADMIN_KEY=$9
 
 [[ -n "$ANDROID_ROOT" && -x "$ADB_PATH" ]] || fail 'Set ANDROID_HOME or ANDROID_SDK_ROOT to a usable Android SDK.'
 [[ "$SERIAL" =~ ^[A-Za-z0-9._:-]+$ ]] || fail 'The emulator serial contains unsupported characters.'
-[[ "$NODE_ID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || fail 'The isolated node ID must be a UUID.'
+[[ "$NODE_ID" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || fail 'The isolated node ID contains unsupported characters.'
 [[ "$CONTROL_ORIGIN" =~ ^https://127\.0\.0\.1:([0-9]{1,5})$ ]] || fail 'The control URL must use the local HTTPS SSM-forward origin https://127.0.0.1:<port>.'
 CONTROL_PORT=${BASH_REMATCH[1]}
 [[ "$BRIDGE_ORIGIN" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] || fail 'The bridge URL must be an HTTPS origin.'
@@ -133,10 +133,10 @@ if ! "$ADB_PATH" -s "$SERIAL" shell am instrument -w -r \
     -e control_url "$CONTROL_ORIGIN" \
     -e bridge_endpoint "$BRIDGE_ORIGIN" \
     -e expected_egress_ip "$EXPECTED_EGRESS_IP" \
-	    -e egress_probe_ip "$EGRESS_PROBE_IP" \
-	    -e node_ca_file "$app_stage_path/node-ca.pem" \
-	    -e admin_cert_file "$app_stage_path/admin-cert.pem" \
-	    -e admin_key_file "$app_stage_path/admin-key.pem" \
+    -e egress_probe_ip "$EGRESS_PROBE_IP" \
+    -e node_ca_file "$app_stage_path/node-ca.pem" \
+    -e admin_cert_file "$app_stage_path/admin-cert.pem" \
+    -e admin_key_file "$app_stage_path/admin-key.pem" \
     -e class "$TEST_CLASS" \
     "$TEST_RUNNER" >"$host_stage/instrumentation.log" 2>&1; then
     cat "$host_stage/instrumentation.log" >&2
